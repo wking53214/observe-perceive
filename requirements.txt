@@ -1,0 +1,4 @@
+# The OBSERVE/PERCEIVE library itself is pure standard library (no runtime deps).
+# Tests use hypothesis for property-based testing:
+hypothesis
+pytest
