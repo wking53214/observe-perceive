@@ -5,12 +5,21 @@ Converts Sentinel artifacts to PERCEIVE governance requests.
 Preserves artifact identity, provenance, authority, epistemic state.
 """
 
-from sentinel_os.conservation.types import (
-    SentinelArtifact, ArtifactMetadata, EpistemicStatus, AuthorityStatus
-)
 from governance_contracts import GovernanceRequest, GovernanceRequestType
 from datetime import datetime, timezone
 import hashlib
+import sys
+import os
+
+# Lazy import to handle cross-repo dependencies
+def _import_sentinel_types():
+    sentinel_path = os.path.join(os.path.dirname(__file__), '..', 'sentinel_os')
+    if sentinel_path not in sys.path:
+        sys.path.insert(0, sentinel_path)
+    from sentinel_os.conservation.types import (
+        SentinelArtifact, ArtifactMetadata, EpistemicStatus, AuthorityStatus
+    )
+    return SentinelArtifact, ArtifactMetadata, EpistemicStatus, AuthorityStatus
 
 
 class SentinelPerceiveAdapter:
@@ -18,7 +27,7 @@ class SentinelPerceiveAdapter:
 
     @staticmethod
     def sentinel_artifact_to_governance_request(
-        artifact: SentinelArtifact,
+        artifact,  # SentinelArtifact (typing removed to avoid import)
         operation_type: str,
         context: dict = None
     ) -> GovernanceRequest:

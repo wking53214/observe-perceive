@@ -10,17 +10,12 @@ Central orchestrator that routes requests through:
 6. Complete audit chain linking
 """
 
-from sentinel_perceive_adapter import SentinelPerceiveAdapter
-from perceive_conservation_adapter import PerceiveConservationAdapter
-from conservation_gsa815_adapter import ConservationGSA815Adapter
-from gsa815_observe_adapter import GSA815ObserveAdapter
 from governance_contracts import GovernanceApproval
-from perceive_consolidated import PERCEIVE
-from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
-from conservation_kernel import ConservationKernel
 from datetime import datetime, timezone
 import hashlib
 import logging
+import sys
+import os
 
 logger = logging.getLogger("GovernanceOrchestrator")
 
@@ -28,26 +23,27 @@ logger = logging.getLogger("GovernanceOrchestrator")
 class GovernanceOrchestrator:
     """Central orchestrator for unified governance flow."""
 
-    def __init__(
-        self,
-        perceive: PERCEIVE,
-        conservation_kernel: ConservationKernel,
-        observe_engine: ObserveClinicalEngine
-    ):
+    def __init__(self, perceive=None, conservation_kernel=None, observe_engine=None):
         """
         Initialize orchestrator with all governance systems.
 
         Args:
-            perceive: PERCEIVE governance kernel
-            conservation_kernel: Conservation Kernel for verification
-            observe_engine: OBSERVE clinical AI system
+            perceive: PERCEIVE governance kernel (optional for testing)
+            conservation_kernel: Conservation Kernel for verification (optional)
+            observe_engine: OBSERVE clinical AI system (optional)
         """
         self.perceive = perceive
         self.conservation_kernel = conservation_kernel
         self.observe_engine = observe_engine
 
+        # Lazy imports for adapters
+        from sentinel_perceive_adapter import SentinelPerceiveAdapter
+        from perceive_conservation_adapter import PerceiveConservationAdapter
+        from conservation_gsa815_adapter import ConservationGSA815Adapter
+        from gsa815_observe_adapter import GSA815ObserveAdapter
+
         self.sentinel_adapter = SentinelPerceiveAdapter()
-        self.perceive_adapter = PerceiveConservationAdapter(conservation_kernel)
+        self.perceive_adapter = PerceiveConservationAdapter(conservation_kernel) if conservation_kernel else None
         self.conservation_adapter = ConservationGSA815Adapter()
         self.gsa815_adapter = GSA815ObserveAdapter()
 
@@ -56,7 +52,7 @@ class GovernanceOrchestrator:
         sentinel_artifact,
         operation_type: str,
         gsa815_operation_func,
-        vitals_snapshot: VitalsSnapshot = None,
+        vitals_snapshot=None,  # VitalsSnapshot (type annotation removed to avoid import)
         context: dict = None
     ) -> dict:
         """
