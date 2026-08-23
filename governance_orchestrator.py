@@ -1,0 +1,190 @@
+"""
+Governance Orchestrator
+
+Central orchestrator that routes requests through:
+1. Sentinel artifact creation
+2. PERCEIVE governance evaluation (6 gates, unanimous consensus)
+3. Conservation Kernel verification
+4. GSA-815 execution (with approval)
+5. OBSERVE monitoring
+6. Complete audit chain linking
+"""
+
+from sentinel_perceive_adapter import SentinelPerceiveAdapter
+from perceive_conservation_adapter import PerceiveConservationAdapter
+from conservation_gsa815_adapter import ConservationGSA815Adapter
+from gsa815_observe_adapter import GSA815ObserveAdapter
+from governance_contracts import GovernanceApproval
+from perceive_consolidated import PERCEIVE
+from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
+from conservation_kernel import ConservationKernel
+from datetime import datetime, timezone
+import hashlib
+import logging
+
+logger = logging.getLogger("GovernanceOrchestrator")
+
+
+class GovernanceOrchestrator:
+    """Central orchestrator for unified governance flow."""
+
+    def __init__(
+        self,
+        perceive: PERCEIVE,
+        conservation_kernel: ConservationKernel,
+        observe_engine: ObserveClinicalEngine
+    ):
+        """
+        Initialize orchestrator with all governance systems.
+
+        Args:
+            perceive: PERCEIVE governance kernel
+            conservation_kernel: Conservation Kernel for verification
+            observe_engine: OBSERVE clinical AI system
+        """
+        self.perceive = perceive
+        self.conservation_kernel = conservation_kernel
+        self.observe_engine = observe_engine
+
+        self.sentinel_adapter = SentinelPerceiveAdapter()
+        self.perceive_adapter = PerceiveConservationAdapter(conservation_kernel)
+        self.conservation_adapter = ConservationGSA815Adapter()
+        self.gsa815_adapter = GSA815ObserveAdapter()
+
+    def orchestrate_request(
+        self,
+        sentinel_artifact,
+        operation_type: str,
+        gsa815_operation_func,
+        vitals_snapshot: VitalsSnapshot = None,
+        context: dict = None
+    ) -> dict:
+        """
+        Orchestrate complete governance flow.
+
+        Flow:
+        1. Sentinel artifact → GovernanceRequest
+        2. PERCEIVE evaluation (6 gates, unanimous)
+        3. Conservation Kernel verification
+        4. GSA-815 execution approval
+        5. Execute GSA-815 operation
+        6. OBSERVE monitoring
+        7. Link all audit chains
+
+        Args:
+            sentinel_artifact: The artifact to govern
+            operation_type: "escalate", "modify", "export", "override"
+            gsa815_operation_func: Function to execute if approved
+            vitals_snapshot: Optional vitals for OBSERVE monitoring
+            context: Additional context
+
+        Returns:
+            Complete governance decision with audit chain
+        """
+        logger.info(f"[Orchestrator] Starting governance flow for {sentinel_artifact.artifact_id}")
+
+        # PHASE 1: Convert Sentinel artifact to PERCEIVE request
+        logger.info("[Orchestrator] Phase 1: Converting Sentinel artifact to governance request")
+        if context is None:
+            context = {}
+        governance_request = self.sentinel_adapter.sentinel_artifact_to_governance_request(
+            sentinel_artifact,
+            operation_type,
+            context
+        )
+        logger.info(f"[Orchestrator] Request ID: {governance_request.request_id}")
+
+        # PHASE 2: PERCEIVE evaluation
+        logger.info("[Orchestrator] Phase 2: PERCEIVE evaluation (6 gates, unanimous consensus)")
+        perceive_decision = self.perceive.evaluate(governance_request)
+        logger.info(f"[Orchestrator] PERCEIVE decision: {perceive_decision.approved}")
+        logger.info(f"[Orchestrator] Applied gates: {perceive_decision.applied_gates}")
+        logger.info(f"[Orchestrator] Unanimous: {perceive_decision.consensus_result}")
+
+        # PHASE 3: Conservation Kernel verification
+        logger.info("[Orchestrator] Phase 3: Conservation Kernel verification")
+        try:
+            conservation_decision = self.perceive_adapter.verify_perceive_decision(
+                perceive_decision,
+                governance_request.artifact_id,
+                governance_request.artifact_content,
+                governance_request.artifact_hash
+            )
+            logger.info(f"[Orchestrator] Conservation verified: {conservation_decision.verified}")
+        except Exception as e:
+            logger.error(f"[Orchestrator] Conservation Kernel rejected: {e}")
+            return {
+                "status": "REJECTED",
+                "reason": f"Conservation Kernel rejected decision: {e}",
+                "governance_decision": perceive_decision,
+                "audit_chain": None,
+            }
+
+        # PHASE 4: GSA-815 execution approval
+        logger.info("[Orchestrator] Phase 4: GSA-815 execution approval")
+        try:
+            execution_approval = self.conservation_adapter.approve_execution(
+                conservation_decision,
+                governance_request.artifact_id,
+                governance_request.artifact_hash,
+                sentinel_artifact.metadata.origin_status.value if hasattr(sentinel_artifact.metadata.origin_status, 'value') else "Sentinel",
+                governance_request.lineage
+            )
+            execution_context = self.conservation_adapter.create_execution_context(
+                execution_approval,
+                governance_request.artifact_id,
+                governance_request.artifact_hash,
+                "GSA-815",
+                governance_request.lineage
+            )
+            logger.info("[Orchestrator] GSA-815 execution approved")
+        except Exception as e:
+            logger.error(f"[Orchestrator] Execution rejected: {e}")
+            return {
+                "status": "REJECTED",
+                "reason": str(e),
+                "governance_decision": perceive_decision,
+                "audit_chain": None,
+            }
+
+        # PHASE 5: Execute GSA-815 operation
+        logger.info("[Orchestrator] Phase 5: GSA-815 execution")
+        gsa815_result = gsa815_operation_func(execution_context)
+        logger.info(f"[Orchestrator] GSA-815 result: {gsa815_result}")
+
+        # PHASE 6: OBSERVE monitoring
+        logger.info("[Orchestrator] Phase 6: OBSERVE clinical monitoring")
+        observe_verdict = None
+        if vitals_snapshot:
+            observe_verdict = self.observe_engine.evaluate(vitals_snapshot)
+            logger.info(f"[Orchestrator] OBSERVE verdict: regime={observe_verdict.regime.value}")
+        else:
+            logger.warning("[Orchestrator] No vitals provided, skipping OBSERVE evaluation")
+
+        # PHASE 7: Link audit chains
+        logger.info("[Orchestrator] Phase 7: Linking audit chains")
+        if observe_verdict:
+            outcome_context = self.gsa815_adapter.create_outcome_context(
+                execution_context,
+                gsa815_result,
+                observe_verdict
+            )
+            forensic_proof = self.gsa815_adapter.create_forensic_proof(outcome_context)
+        else:
+            outcome_context = None
+            forensic_proof = None
+
+        # Return complete result
+        logger.info("[Orchestrator] Governance flow complete")
+        return {
+            "status": "APPROVED_AND_EXECUTED",
+            "governance_decision": perceive_decision,
+            "conservation_decision": conservation_decision,
+            "execution_approval": execution_approval,
+            "execution_context": execution_context,
+            "gsa815_result": gsa815_result,
+            "observe_verdict": observe_verdict,
+            "outcome_context": outcome_context,
+            "forensic_proof": forensic_proof,
+            "audit_chain_valid": forensic_proof.get("chain_valid", False) if forensic_proof else False,
+        }
