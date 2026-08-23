@@ -5,19 +5,25 @@ Submits PERCEIVE decisions to Conservation Kernel for verification.
 Ensures all governance decisions pass through conservation boundary.
 """
 
-from perceive_consolidated import PolicyVerdict, PolicyOutput
 from governance_contracts import GovernanceDecision, ConservationDecision, GovernanceApproval
 from datetime import datetime, timezone
 import hashlib
-from conservation_kernel import (
-    ConservationKernel, Artifact, TransformationRecord, Actor, ActorKind
-)
+
+# Lazy import to handle optional conservation_kernel dependency
+def _import_conservation():
+    try:
+        from conservation_kernel import (
+            ConservationKernel, Artifact, TransformationRecord, Actor, ActorKind
+        )
+        return ConservationKernel, Artifact, TransformationRecord, Actor, ActorKind
+    except ModuleNotFoundError:
+        return None, None, None, None, None
 
 
 class PerceiveConservationAdapter:
     """Submits PERCEIVE verdicts to Conservation Kernel."""
 
-    def __init__(self, kernel: ConservationKernel):
+    def __init__(self, kernel=None):  # ConservationKernel (optional for testing)
         """Initialize with Conservation Kernel instance."""
         self.kernel = kernel
 
