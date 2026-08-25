@@ -1,287 +1,645 @@
-# OBSERVE + PERCEIVE — Consolidated Clinical Governance System
+# OBSERVE / PERCEIVE
 
-A pediatric physiological early-warning system (**OBSERVE**) wired to an
-AI-governance kernel (**PERCEIVE**), consolidated from a 19-file modular layout
-into a small set of self-contained files with no third-party dependencies
-(Python 3.8+ stdlib only).
+## Governed Observation and Interpretation System
 
-```
-vitals
-  → OBSERVE        7-engine fused risk assessment + per-patient escalation policy
-  → escalation?    clinical-safety bypass for hard rules & dangerous syndromes
-       → PERCEIVE  6-gate unanimous governance + optional multi-node consensus
-  → ClinicalDecision  (links OBSERVE audit hash ⇄ PERCEIVE audit hash)
-```
+OBSERVE/PERCEIVE is a governed observation-and-interpretation architecture that separates the detection and assessment of system state from the policy-governed interpretation and authorization of responses to that state.
 
----
+The architecture is designed to establish a clear distinction between:
 
-## The files
+    WHAT IS HAPPENING
 
-| # | File | Role |
-|---|------|------|
-| 1 | `observe_consolidated.py` | Clinical engine: 7 risk adapters, calibrated fusion, per-patient policy, immutable audit, async scheduler |
-| 2 | `perceive_consolidated.py` | Governance kernel: 6 policy gates + 3 wired policy gates, unanimous consensus, DGK multi-node, immutable audit |
-| 3 | `clinical_governance_system.py` | **Integration surface** — the single object a hospital wires against |
-| 4 | `compliance_exporters.py` | HIPAA / FDA 510(k) / SOX / GDPR exporters |
-| 5 | `capacity_planning.py` | **Optional, strictly observational** — Erlang-C capacity forecaster + accuracy monitor (zero decision impact; frozen artifacts) |
-| 6 | `reserve_control.py` | **Optional control (PERCEIVE-adjacent)** — reserve-modulated escalation; safe-direction-only, routed through PERCEIVE + audit |
-| 7 | `kalman_trajectory.py` | **Optional, opt-in** — Kalman (state-space) trajectory engine; enable via `ObserveClinicalEngine(enable_kalman=True)` |
-| — | `test_*.py` | OBSERVE / PERCEIVE / integration / clinical-governance / compliance / capacity / reserve-control / kalman tests |
+and:
 
-**249 tests, all passing.** Run them with: `python3 -m pytest`
+    WHAT THAT OBSERVATION MEANS
+    WITHIN A GOVERNING FRAMEWORK
 
----
+At the architectural level:
 
-## Quick start
+    ENVIRONMENT / SYSTEM
+            │
+            ▼
+        ┌─────────┐
+        │ OBSERVE │
+        └────┬────┘
+             │
+             ▼
+      OBSERVED / ASSESSED STATE
+             │
+             ▼
+       ┌───────────┐
+       │ PERCEIVE  │
+       └─────┬─────┘
+             │
+             ▼
+      GOVERNED INTERPRETATION
+             │
+             ▼
+       AUTHORIZED ACTION
 
-```python
-from datetime import datetime, timezone
-from observe_consolidated import VitalsSnapshot
-from clinical_governance_system import build_single_hospital_system
+The current implementation applies this architecture to **pediatric sepsis monitoring**.
 
-system = build_single_hospital_system()
-
-decision = system.process_vitals(VitalsSnapshot(
-    patient_id="P001",
-    timestamp=datetime.now(timezone.utc),
-    heart_rate=168, oxygen_saturation=83.0,
-    respiratory_rate=46, temperature=39.5,
-    context={"age_months": 12},
-))
-
-print(decision.regime)              # "critical"
-print(decision.action)              # "escalate_approved"
-print(decision.observe_audit_hash)  # links to clinical assessment
-print(decision.perceive_audit_hash) # links to governance decision
-```
-
-Multi-hospital deployment (emergency overrides require cross-site quorum):
-
-```python
-from clinical_governance_system import build_multi_hospital_system
-system = build_multi_hospital_system(["nch", "partner-a", "partner-b"])
-```
+The pediatric sepsis implementation is the current representative application of the architecture. It should not be interpreted as the architectural limitation or intended industry boundary of OBSERVE/PERCEIVE.
 
 ---
 
-## OBSERVE — the 7 risk engines
+# Architectural Definition
 
-| Engine | What it assesses | Data needed |
-|--------|------------------|-------------|
-| `heuristic` | Age-adjusted PEWS thresholds (O2, HR, RR, temp) | Vitals only |
-| `bayesian` | Age-banded z-score deviation, continuous likelihood | Vitals + age |
-| `trajectory` | Per-minute momentum of vitals | Prior readings |
-| `drift` | Baseline shift vs rolling history | History window |
-| `behavioral` | Named syndromes (septic / respiratory / hypovolemic shock) | Vitals |
-| `adversarial` | Sensor-fault detection (streaks, implausible rates) | Recent readings |
-| `physiological_reserve` | 6-axis systems physiology (topology/capacity/resource/integrity/phase/instability) | Rich telemetry (gated) |
+The underlying system can be understood as two deliberately separated functions.
 
-**The adapter contract (plug-and-play):** every engine returns a `RiskOutput`
-with a `risk_score`, then pipes through the shared `regime_distribution()`
-calibration. Engines swap; calibration is centralized. This is what lets you
-drop in a new industry adapter without touching fusion.
+## OBSERVE
 
-### Key safety properties (each test-locked)
+OBSERVE establishes an evidence-bearing representation of observed system state.
 
-1. **Per-patient state isolation** — escalation cooldowns are keyed by `patient_id`.
-   One patient's lock can never suppress another's critical alert.
-2. **Clinical-safety bypass** — a `CRITICAL_O2` reading or a confirmed shock
-   syndrome escalates *immediately*, skipping dwell/hysteresis confirmation.
-3. **Abstention exclusion** — an engine with no data to assess is excluded from
-   fusion entirely, so a chorus of "no data" can't dilute a real detection.
-4. **Syndrome floor** — a confirmed dangerous pattern floors the fused risk at
-   its detected severity; it cannot be averaged below it.
-5. **Bounded memory** — per-patient state is LRU-capped (default 10k patients).
+It is concerned with:
+
+- receiving signals;
+- validating observations;
+- assessing state;
+- identifying changes;
+- detecting abnormalities;
+- evaluating temporal behavior;
+- combining independent assessments;
+- representing uncertainty;
+- and preserving evidence.
+
+Its fundamental question is:
+
+> **What is happening?**
 
 ---
 
-## PERCEIVE — the 6 governance gates
+## PERCEIVE
 
-`boundary_gate` · `citadel` (intent) · `fortress` (content safety) ·
-`invariant_validator` · `sentinel` (anomaly) · `micropatch` (emergency override)
+PERCEIVE takes an observed and assessed state and evaluates it within a governing context.
 
-- **Unanimous consensus:** every selected gate must approve.
-- **Gate selection is deterministic** by request type.
-- **DGK multi-node consensus** adds cross-site quorum (default 2/3) for
-  `emergency_override` and critical rule changes in multi-hospital deployments.
+It is concerned with:
 
----
+- contextual interpretation;
+- policy evaluation;
+- governance constraints;
+- invariant validation;
+- authorization;
+- consensus;
+- and governed response.
 
-## Audit & compliance
+Its fundamental question is:
 
-Both OBSERVE and PERCEIVE keep **independent SHA256-chained audit ledgers**.
-Any post-hoc tampering breaks the chain and is caught by `verify_integrity()`.
-
-`compliance_exporters.py` renders the ledgers into:
-- **HIPAA** — de-identified event log (pseudonymized IDs, hour-coarsened timestamps)
-- **FDA 510(k)** — validation report with determinism attestation + engine utilization
-- **SOX** — governance decision log (who/what/when/result)
-- **GDPR** — Article 30-style data-processing record
+> **Given what is happening, what does it mean here, and what may be done about it?**
 
 ---
 
-## Determinism
+# The Fundamental Separation
 
-Every risk engine is a pure function of recorded telemetry + context. Given
-identical recorded inputs, the system produces identical decision **outputs**
-(risk, regime, escalation) and an identical reproducible **`decision_fingerprint`**
-(a SHA256 of the wall-clock-free decision payload). No randomness in the decision
-path — a prerequisite for FDA validation and forensic replay.
+The system deliberately separates observation from interpretation.
 
-Note the two distinct hashes:
+    OBSERVE
+       │
+       │
+       │ "This condition exists."
+       │
+       ▼
+    OBSERVED STATE
+       │
+       │
+       │ "What does this condition
+       │  mean under the applicable
+       │  rules and context?"
+       ▼
+    PERCEIVE
+       │
+       ▼
+    GOVERNED DECISION
 
-- **`decision_fingerprint`** — reproducible across runs/processes for identical
-  inputs. Use it for decision replay verification.
-- **`immutable_hash`** (the chained ledger hash) — additionally binds insertion
-  timestamp and chain position for tamper-evidence, and is therefore *intentionally
-  not* reproducible across runs. Use it for tamper detection (`verify_integrity()`).
-
----
-
-## Hardening & operational controls
-
-**Input validation.** Non-finite (NaN/Inf) or physically impossible vitals are
-treated as a data-integrity fault, never scored as "stable." A fault routes to an
-immediate WARNING escalation (so a human checks the patient/sensor) and is recorded
-in the audit ledger. Severity is the safe default for an early-warning system; a
-quieter sensor-fault channel is advisable in production.
-
-**Context sanitization.** The `context` dict (previous readings, baselines,
-age, history lists) is also an input boundary. A second red-team pass (see
-`RED_TEAM_REPORT.md`) closed the gap where a non-numeric context value crashed
-scoring and a physically impossible one silently skewed it. `sanitize_context()`
-runs at the same boundary as vitals validation and drops any context value that
-is non-numeric, non-finite, or outside its physical range, treating it as absent
-(which the engines already handle) rather than trusting garbage.
-
-**Wired governance (opt-in, advisory by default).** `EscalationPolicy`,
-`DataExportPolicy`, and `RuleModificationPolicy` are wired as real PERCEIVE gates
-(`escalation_rate_policy`, `data_export_policy`, `rule_modification_policy`). They
-run in **advisory** mode by default — each evaluates and logs what it *would* decide
-but approves, so baseline behavior is unchanged. Enable enforcement per policy via
-`PolicyEnforcementConfig`:
-
-```python
-from perceive_consolidated import PolicyEnforcementConfig
-from clinical_governance_system import ClinicalGovernanceSystem
-
-system = ClinicalGovernanceSystem(enforcement=PolicyEnforcementConfig(
-    enforce_export_controls=True,       # safe to enable in production
-    enforce_rule_modification=True,     # safe to enable in production
-    enforce_escalation_limits=False,    # patient-safety sensitive: needs clinical sign-off
-))
-```
-
-Critical / `emergency_override` escalations are **never** rate-limited (life-safety).
-
-**De-identification salt.** `pseudonymize_patient_id` / `HIPAAExporter.export_csv`
-require a runtime salt, supplied via the `salt=` argument or the `OBSERVE_DEID_SALT`
-environment variable. They fail loudly if neither is present — a guessable default
-would make pseudonyms reversible.
-
-**Concurrency contract.** `ObserveClinicalEngine.evaluate` is safe under a single
-asyncio event loop (no `await` inside it). Per-patient structural state is now
-guarded by a lock so it is also safe under a thread pool. Two readings for the
-**same** patient in flight concurrently should still be serialized by the caller.
+This prevents the system that detects a condition from automatically becoming the system that determines the permitted response.
 
 ---
 
-## Clinical Validation Tools
+# OBSERVE
 
-### Real-data validation results (honest baseline)
+OBSERVE is the observation and state-assessment layer.
 
-On a retrospective set of **500 real patients from PhysioNet**, the most
-defensible three-channel configuration scored approximately **73% sensitivity
-and 10% specificity**. In plain terms: it caught roughly three of every four
-deteriorating patients, but raised a high rate of false alarms. That false-alarm
-burden is real and is not hidden here.
+It transforms available signals and evidence into structured representations of system condition.
 
-This is much lower than the synthetic-data performance (pediatric synthetic
-validation showed ~100% sensitivity / ~85% specificity), and the gap is the
-point: synthetic data flatters a detector, real physiology does not. The
-thresholds in this system are provisional and require clinician-guided tuning
-against the deploying site's own population before any real use. This is a
-research prototype with an honestly-reported real-data baseline, not an approved
-or clinically-validated medical device.
+Conceptually:
 
-Before deployment, two test harnesses support pre-flight sign-off:
+    SIGNALS
+       │
+       ▼
+    VALIDATION
+       │
+       ▼
+    OBSERVATION
+       │
+       ▼
+    ASSESSMENT
+       │
+       ▼
+    FUSION
+       │
+       ▼
+    OBSERVED STATE
 
-### Deterioration Simulator (`deterioration_simulator.py`)
-
-Synthetic clinical scenarios with ground-truth escalation timings. Validates that
-OBSERVE detects realistic pediatric deterioration curves (sepsis spirals, hypoxia,
-fever + tachypnea, reactive airway, etc.) within expected windows. Use this to:
-
-- **Before pilot:** Verify thresholds against pediatrician expectations
-- **After pilot:** Benchmark sensitivity on real cases, retrain if drift detected
-
-Run: `python3 deterioration_simulator.py` for a clinical validation report.
-Expected result before deployment: ≥80% of scenarios detected within tolerance.
-
-### Adversarial Sensor-Fault Test Suite (`adversarial_sensor_faults.py`)
-
-Robustness stress-tests: non-finite inputs, stuck sensors, drift, transient spikes,
-and coordinated corruption. Verifies the system **fails safely** (escalates or logs
-gracefully) rather than producing silent nonsense. Use this to:
-
-- **Before production:** Ensure sensor faults don't blind the system
-- **During ops:** Reference when investigating unexpected alert patterns
-
-Run: `python3 adversarial_sensor_faults.py` for a robustness report.
-Expected result before production: ≤1 "risky" cases (failures to escalate on faults).
+The resulting state becomes an input to PERCEIVE.
 
 ---
 
-### Strictly observational telemetry (`capacity_planning.py`)
+# Signal Validation
 
-Two opt-in components with **zero decision impact** — they read, compute, and report
-but never influence control flow. Their outputs are immutable (frozen), so a telemetry
-result cannot be fed back as a control signal:
+OBSERVE validates incoming observations before incorporating them into assessment.
 
-- **`ErlangCapacityForecaster`** — predicted high-risk volume → required clinicians,
-  staffing headroom, and a SAFE/HIGH/CRITICAL alert.
-- **`AccuracyMonitor`** — prediction-vs-outcome tracking with sensitivity / specificity
-  / PPV / NPV / F1 and drift detection. Abstains (`status="insufficient_data"`) rather
-  than reporting metrics from too few samples.
+This creates an important distinction between:
 
-### Reserve-modulated escalation control (`reserve_control.py`, PERCEIVE-adjacent)
+    VALID OBSERVATION
 
-`ReserveModulator` is a **control** component (it can change an escalation decision), so
-it lives next to the PERCEIVE kernel rather than in the telemetry module. Capacity-aware
-escalation sensitivity, safety-constrained: critical/syndrome cases are exempt; by
-default it can only *add* proactive escalations (the safe direction) and never suppress
-one. Load-shedding (deferring non-critical escalations under saturation) is behind an
-explicit flag (off by default) and needs governance sign-off. Any modulation that changes
-the outcome is routed through PERCEIVE and audited like a baseline escalation.
+and:
 
-Abstention-based fusion is **not** part of these modules — it already exists in OBSERVE
-(`BayesianFusion` excludes abstaining engines), and is not duplicated.
+    INVALID / INSUFFICIENT OBSERVATION
 
-### Optional Kalman trajectory engine (`kalman_trajectory.py`)
-
-A constant-velocity Kalman filter per vital, enabled via
-`ObserveClinicalEngine(enable_kalman=True)` (default OFF). When on, a stateful,
-per-patient `trajectory_kalman` adapter joins fusion, contributing a smoothed
-velocity signal plus an innovation ("surprise") signal that flags when a reading
-diverges from its predicted trajectory. It is deterministic (identical reading
-*sequences* → identical output) and abstains during warm-up so a cold tracker never
-dilutes fusion. Velocity thresholds are provisional and need pediatrician sign-off;
-the innovation signal is unit-agnostic.
-
-### Fail-open governance
-
-If the PERCEIVE layer raises during an escalation, the pipeline **fails open** — the
-escalation proceeds and is flagged `escalate_approved_fallback` with zero confidence
-and a `GOVERNANCE_FAILURE_FALLBACK` note. The failure mode of an escalation request is
-an extra clinician alert, not a missed block, so failing open is the safe direction;
-the explicit flag keeps it from being mistaken for a clean approval.
+The system should not silently convert missing or invalid information into evidence of normal operation.
 
 ---
 
-## Notes
+# Independent Assessment
 
-- `legacy/` holds the pre-consolidation 19-file modular implementation, archived
-  for reference. It is excluded from test collection via `pytest.ini`.
-- Clinical thresholds are evidence-informed defaults and require pediatrician
-  validation before any clinical deployment. The widened behavioral-engine gating
-  (RR / temperature triggers) is provisional and likewise needs sign-off.
+The observation layer can use multiple independent assessment mechanisms.
+
+The current implementation demonstrates this through multiple risk-assessment engines.
+
+The architectural pattern is:
+
+    OBSERVED INPUT
+          │
+          ├──────────────┐
+          │              │
+          ▼              ▼
+      ASSESSOR 1     ASSESSOR 2
+          │              │
+          ├──────┬───────┤
+                 │
+                 ▼
+              FUSION
+                 │
+                 ▼
+          ASSESSED STATE
+
+Independent assessment allows different analytical mechanisms to contribute to a common representation of state.
+
+---
+
+# Abstention
+
+OBSERVE recognizes that insufficient information is different from evidence of normality.
+
+An assessment mechanism may abstain when it lacks the information required to make a valid assessment.
+
+Conceptually:
+
+    INSUFFICIENT EVIDENCE
+            ≠
+       NORMAL CONDITION
+
+This prevents missing information from silently suppressing an abnormal observation.
+
+---
+
+# Fusion
+
+Where multiple assessment mechanisms produce usable results, OBSERVE can combine them into a fused assessment.
+
+Fusion can incorporate:
+
+- assessment results;
+- confidence;
+- uncertainty;
+- active assessment mechanisms;
+- triggered conditions;
+- and temporal information.
+
+The result is a structured representation of the observed state rather than an isolated sensor value.
+
+---
+
+# Temporal State
+
+OBSERVE treats state as temporal.
+
+A single observation represents a point in time.
+
+A sequence of observations can reveal:
+
+- persistence;
+- trajectory;
+- drift;
+- emerging conditions;
+- regime changes;
+- and deviations from historical behavior.
+
+Conceptually:
+
+    t1 ──► t2 ──► t3 ──► t4 ──► t5
+                           │
+                           ▼
+                      CURRENT STATE
+
+The historical sequence can therefore contribute to interpretation of the present state.
+
+---
+
+# Evidence
+
+OBSERVE treats important observations and assessments as evidence-bearing representations.
+
+The architecture can preserve information such as:
+
+- source observations;
+- assessment results;
+- timestamps;
+- state classifications;
+- confidence;
+- fingerprints;
+- and audit information.
+
+This produces a chain such as:
+
+    SIGNAL
+      │
+      ▼
+    OBSERVATION
+      │
+      ▼
+    ASSESSMENT
+      │
+      ▼
+    EVIDENCE
+      │
+      ▼
+    GOVERNANCE INPUT
+
+---
+
+# PERCEIVE
+
+PERCEIVE operates on the observed and assessed state.
+
+Its purpose is not to independently recreate the observation.
+
+Its purpose is to interpret that state within the governing context.
+
+Conceptually:
+
+    OBSERVED STATE
+          │
+          ▼
+      CONTEXT
+          │
+          ▼
+       POLICY
+          │
+          ▼
+      GOVERNANCE
+          │
+          ▼
+    PERMITTED RESPONSE
+
+PERCEIVE therefore provides the bridge between:
+
+    OBSERVED REALITY
+
+and:
+
+    GOVERNED ACTION
+
+---
+
+# Governance Gates
+
+The current PERCEIVE implementation contains multiple governance gates.
+
+These include mechanisms associated with:
+
+- boundary enforcement;
+- linguistic enforcement;
+- invariant validation;
+- security constraints;
+- sentinel validation;
+- and controlled remediation.
+
+The architecture requires the applicable governance controls to be satisfied before a governed decision can proceed.
+
+---
+
+# Consensus
+
+PERCEIVE can incorporate multiple governance evaluations rather than relying on a single uncontrolled decision point.
+
+Conceptually:
+
+    GOVERNANCE GATE 1 ──┐
+    GOVERNANCE GATE 2 ──┤
+    GOVERNANCE GATE 3 ──┼──► GOVERNANCE RESULT
+    GOVERNANCE GATE 4 ──┤
+                        ┘
+
+This permits the system to represent governance as an explicit evaluation process rather than an implicit property of the application.
+
+---
+
+# OBSERVE → PERCEIVE Boundary
+
+The boundary between the two systems is one of the most important architectural features.
+
+OBSERVE produces:
+
+    EVIDENCE-BEARING OBSERVED STATE
+
+PERCEIVE consumes:
+
+    EVIDENCE-BEARING OBSERVED STATE
+
+and produces:
+
+    GOVERNED INTERPRETATION / DECISION
+
+The distinction can therefore be summarized as:
+
+    OBSERVE
+       =
+    DETECT
+    MEASURE
+    ASSESS
+    FUSE
+    CLASSIFY
+
+    PERCEIVE
+       =
+    CONTEXTUALIZE
+    INTERPRET
+    EVALUATE
+    GOVERN
+    AUTHORIZE
+
+---
+
+# Current Implementation:
+# Pediatric Sepsis Monitoring
+
+The current implementation demonstrates the architecture through pediatric sepsis monitoring.
+
+The representative pipeline is:
+
+    PHYSIOLOGICAL SIGNALS
+             │
+             ▼
+       SIGNAL VALIDATION
+             │
+             ▼
+      MULTIPLE RISK ENGINES
+             │
+             ▼
+            FUSION
+             │
+             ▼
+       CLINICAL STATE
+             │
+             ▼
+        ESCALATION
+             │
+             ▼
+          PERCEIVE
+             │
+             ▼
+       GOVERNANCE GATES
+             │
+             ▼
+      GOVERNED DECISION
+
+The clinical implementation includes concepts such as:
+
+- physiological observations;
+- risk assessment;
+- trajectory;
+- drift;
+- behavioral signals;
+- adversarial sensor-fault detection;
+- physiological reserve;
+- fused risk;
+- operational regimes;
+- and escalation.
+
+These are domain-specific implementations of the broader observation architecture.
+
+---
+
+# The Pediatric Implementation Is a Representative Example
+
+The presence of pediatric sepsis monitoring in the current implementation should not be interpreted as meaning that OBSERVE/PERCEIVE is inherently a healthcare system.
+
+The underlying architecture is industry-agnostic.
+
+The same separation can conceptually be applied to other environments in which a system must:
+
+1. observe its environment or internal state;
+2. validate and assess evidence;
+3. establish a representation of what is happening;
+4. interpret that state within context;
+5. apply governing constraints;
+6. and determine what action is permitted.
+
+The current pediatric implementation is therefore the **representative production-oriented example through which the architecture is presently implemented**.
+
+---
+
+# Industry-Agnostic Model
+
+The domain-independent representation is:
+
+    ENVIRONMENT
+         │
+         ▼
+      SIGNALS
+         │
+         ▼
+      OBSERVE
+         │
+         ▼
+   OBSERVED STATE
+         │
+         ▼
+     PERCEIVE
+         │
+         ├── CONTEXT
+         ├── POLICY
+         ├── GOVERNANCE
+         └── AUTHORITY
+         │
+         ▼
+   GOVERNED DECISION
+         │
+         ▼
+      EXECUTION
+         │
+         ▼
+       OUTCOME
+         │
+         └──────────────► OBSERVE
+
+The domain-specific meaning of "signal," "state," "risk," "decision," and "action" can change.
+
+The architecture remains the same.
+
+---
+
+# Post-Execution Observation
+
+The system does not have to stop observing after a decision.
+
+The outcome of execution can become a new observation.
+
+    DECISION
+       │
+       ▼
+    EXECUTION
+       │
+       ▼
+     OUTCOME
+       │
+       ▼
+     OBSERVE
+       │
+       ▼
+    NEW EVIDENCE
+       │
+       ▼
+    FUTURE PERCEIVE
+
+This creates a continuous observation-governance cycle.
+
+---
+
+# Why the Separation Matters
+
+A system that combines observation and governance into a single component can make it difficult to distinguish:
+
+- what actually happened;
+- what the system inferred;
+- what policy concluded;
+- and what action was authorized.
+
+OBSERVE/PERCEIVE deliberately separates those functions.
+
+The architecture therefore establishes a conceptual chain:
+
+    OBSERVATION
+         ↓
+    ASSESSMENT
+         ↓
+    EVIDENCE
+         ↓
+    INTERPRETATION
+         ↓
+    GOVERNANCE
+         ↓
+    AUTHORIZATION
+         ↓
+    ACTION
+         ↓
+    OUTCOME
+         ↓
+    OBSERVATION
+
+This creates a closed-loop architecture while preserving distinctions between the stages.
+
+---
+
+# Design Principles
+
+## Observation Before Interpretation
+
+The system should establish an evidence-bearing observed state before governance interprets it.
+
+## Evidence Before Authority
+
+The existence of a condition and the authority to act upon that condition are separate concepts.
+
+## No Silent Normalization
+
+Missing or insufficient evidence should not automatically become evidence of normality.
+
+## Independent Assessment
+
+Multiple assessment mechanisms may evaluate the same observed state independently.
+
+## Explicit Fusion
+
+Combining observations should be an identifiable operation.
+
+## Temporal Continuity
+
+Current state should remain distinguishable from historical behavior and change.
+
+## Governance at the Boundary
+
+The transition from observed state to authorized action should occur through explicit governance controls.
+
+## Separation of Concerns
+
+OBSERVE should not silently become PERCEIVE.
+
+PERCEIVE should not silently invent OBSERVE's evidence.
+
+## Application Independence
+
+A representative implementation should demonstrate the architecture without defining its limits.
+
+---
+
+# What OBSERVE/PERCEIVE Is Not
+
+The architecture is not inherently:
+
+- a pediatric monitoring system;
+- a sepsis detection system;
+- a medical decision system;
+- a telemetry collector;
+- a conventional logging framework;
+- or a single-domain governance application.
+
+Those describe the current implementation context rather than the underlying architecture.
+
+---
+
+# Current Status
+
+OBSERVE/PERCEIVE is implemented as a concrete observation-and-governance system using pediatric sepsis monitoring as its current representative application.
+
+The implementation demonstrates:
+
+    SIGNAL OBSERVATION
+          │
+          ▼
+    VALIDATION
+          │
+          ▼
+    MULTI-MODEL ASSESSMENT
+          │
+          ▼
+    FUSION
+          │
+          ▼
+    OBSERVED STATE
+          │
+          ▼
+    GOVERNED INTERPRETATION
+          │
+          ▼
+    AUTHORIZED RESPONSE
+
+The architecture itself is industry-agnostic.
+
+The pediatric sepsis implementation is the current representative example through which the architecture is exercised.
+
+---
+
+# Central Proposition
+
+> **OBSERVE establishes what can be established about the state of a system. PERCEIVE interprets that state within context and governance. The separation creates an explicit boundary between observation, meaning, authority, and action.**
