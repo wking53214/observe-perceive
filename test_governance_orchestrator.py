@@ -12,7 +12,7 @@ import pytest
 from datetime import datetime, timezone
 from governance_orchestrator import GovernanceOrchestrator
 from governance_contracts import GovernanceApproval
-from perceive_consolidated import PERCEIVE, PolicyManifest
+from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
 from conservation_kernel import ConservationKernel
 
@@ -25,7 +25,7 @@ def perceive():
         created_at=datetime.now(timezone.utc),
         policies={}
     )
-    p = PERCEIVE()
+    p = PerceiveGovernanceKernel()
     p.register_manifest(manifest)
     return p
 
