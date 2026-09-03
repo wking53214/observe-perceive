@@ -7,7 +7,7 @@ Ensures no execution without unanimous PERCEIVE consensus + Conservation verific
 
 from governance_contracts import (
     ConservationDecision, ExecutionApproval, ExecutionContext,
-    GovernanceApproval
+    GovernanceApproval, compute_state_commitment
 )
 from datetime import datetime, timezone
 import hashlib
@@ -56,7 +56,7 @@ class ConservationGSA815Adapter:
         if not execution_id:
             execution_id = str(uuid.uuid4())[:8]
 
-        return ExecutionApproval(
+        approval = ExecutionApproval(
             request_id=execution_id,
             approval=GovernanceApproval.APPROVED,
             conservation_decision_id=conservation_decision.governance_decision_id,
@@ -65,6 +65,18 @@ class ConservationGSA815Adapter:
             conservation_audit_hash=conservation_decision.conservation_audit_hash,
             timestamp=datetime.now(timezone.utc)
         )
+        approval.state_commitment = compute_state_commitment(
+            parent_commitment=conservation_decision.conservation_audit_hash,
+            state={
+                "request_id": approval.request_id,
+                "artifact_id": artifact_id,
+                "artifact_hash": artifact_hash,
+                "producer": producer,
+                "lineage": lineage,
+                "approval": approval.approval.value,
+            },
+        )
+        return approval
 
     @staticmethod
     def create_execution_context(
@@ -87,7 +99,7 @@ class ConservationGSA815Adapter:
         Returns:
             ExecutionContext for GSA-815 operation
         """
-        return ExecutionContext(
+        context = ExecutionContext(
             request_id=execution_approval.request_id,
             approval=execution_approval,
             artifact_id=artifact_id,
@@ -97,6 +109,17 @@ class ConservationGSA815Adapter:
             execution_id=execution_approval.request_id,
             timestamp=datetime.now(timezone.utc)
         )
+        context.state_commitment = compute_state_commitment(
+            parent_commitment=execution_approval.state_commitment,
+            state={
+                "request_id": context.request_id,
+                "artifact_id": context.artifact_id,
+                "artifact_hash": context.artifact_hash,
+                "lineage": context.lineage,
+                "producer": context.producer,
+            },
+        )
+        return context
 
     @staticmethod
     def reject_execution(reason: str) -> ExecutionApproval:

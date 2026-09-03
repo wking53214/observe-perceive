@@ -5,7 +5,7 @@ Passes governance context to OBSERVE monitoring.
 Links decision audit hash ↔ outcome audit hash for complete forensic replay.
 """
 
-from governance_contracts import ExecutionContext, OutcomeContext
+from governance_contracts import ExecutionContext, OutcomeContext, compute_state_commitment
 from observe_consolidated import FusedVerdict
 from datetime import datetime, timezone
 import hashlib
@@ -42,6 +42,25 @@ class GSA815ObserveAdapter:
         if execution_context.artifact_id not in complete_lineage:
             complete_lineage.append(execution_context.artifact_id)
 
+        outcome = {
+            "gsa815_result": gsa815_result,
+            "observe_regime": observe_verdict.regime.value,
+            "observe_risk_score": observe_verdict.risk_score,
+            "observe_confidence": observe_verdict.confidence,
+            "observe_audit_hash": observe_verdict.audit_hash,
+            "escalation_required": observe_verdict.escalation_required,
+        }
+        state_commitment = compute_state_commitment(
+            parent_commitment=execution_context.state_commitment or execution_context.approval.state_commitment,
+            state={
+                "execution_id": execution_context.execution_id,
+                "artifact_id": execution_context.artifact_id,
+                "artifact_hash": execution_context.artifact_hash,
+                "lineage": complete_lineage,
+                "outcome": outcome,
+            },
+        )
+
         return OutcomeContext(
             execution_id=execution_context.execution_id,
             governance_decision_id=execution_context.approval.request_id,
@@ -52,14 +71,8 @@ class GSA815ObserveAdapter:
             result_artifact_hash=result_artifact_hash,
             producer="OBSERVE",
             lineage=complete_lineage,
-            outcome={
-                "gsa815_result": gsa815_result,
-                "observe_regime": observe_verdict.regime.value,
-                "observe_risk_score": observe_verdict.risk_score,
-                "observe_confidence": observe_verdict.confidence,
-                "observe_audit_hash": observe_verdict.audit_hash,
-                "escalation_required": observe_verdict.escalation_required,
-            },
+            outcome=outcome,
+            state_commitment=state_commitment,
             timestamp=datetime.now(timezone.utc)
         )
 
@@ -105,6 +118,7 @@ class GSA815ObserveAdapter:
             "conservation_audit_hash": outcome_context.conservation_audit_hash,
             "result_artifact_id": outcome_context.result_artifact_id,
             "result_artifact_hash": outcome_context.result_artifact_hash,
+            "state_commitment": outcome_context.state_commitment,
             "lineage": outcome_context.lineage,
             "outcome": outcome_context.outcome,
             "timestamp": outcome_context.timestamp.isoformat(),

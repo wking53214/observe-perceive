@@ -5,7 +5,7 @@ Converts Sentinel artifacts to PERCEIVE governance requests.
 Preserves artifact identity, provenance, authority, epistemic state.
 """
 
-from governance_contracts import GovernanceRequest, GovernanceRequestType
+from governance_contracts import GovernanceRequest, GovernanceRequestType, compute_state_commitment
 from datetime import datetime, timezone
 import hashlib
 import sys
@@ -54,7 +54,7 @@ class SentinelPerceiveAdapter:
         }
         request_type = request_type_map.get(operation_type, GovernanceRequestType.APPROVE_DECISION)
 
-        return GovernanceRequest(
+        request = GovernanceRequest(
             request_id=artifact.artifact_id,
             request_type=request_type,
             artifact_id=artifact.artifact_id,
@@ -68,6 +68,22 @@ class SentinelPerceiveAdapter:
             context=context,
             timestamp=datetime.now(timezone.utc)
         )
+        request.state_commitment = compute_state_commitment(
+            parent_commitment=None,
+            state={
+                "request_id": request.request_id,
+                "request_type": request.request_type.value if hasattr(request.request_type, "value") else str(request.request_type),
+                "artifact_id": request.artifact_id,
+                "artifact_hash": request.artifact_hash,
+                "producer": request.producer,
+                "origin": request.origin,
+                "authority": request.authority,
+                "epistemic_status": request.epistemic_status,
+                "lineage": request.lineage,
+                "context": request.context,
+            },
+        )
+        return request
 
     @staticmethod
     def _compute_hash(content: str) -> str:
