@@ -57,6 +57,27 @@ def test_governance_contracts():
     assert GovernanceApproval.PENDING.value == "pending"
 
 
+def test_state_commitment_is_deterministic():
+    """State commitments are canonical and stable for equivalent inputs."""
+    from governance_contracts import compute_state_commitment
+
+    state = {"artifact_id": "A-1", "lineage": ["P-1"], "context": {"severity": "high"}}
+    first = compute_state_commitment(None, state)
+    second = compute_state_commitment(None, {"lineage": ["P-1"], "artifact_id": "A-1", "context": {"severity": "high"}})
+    assert first == second
+    assert len(first) == 64
+
+
+def test_state_commitment_changes_when_parent_or_payload_changes():
+    """A different parent or payload should yield a different durable commitment."""
+    from governance_contracts import compute_state_commitment
+
+    state_a = {"artifact_id": "A-1", "lineage": ["P-1"], "context": {"severity": "high"}}
+    state_b = {"artifact_id": "A-1", "lineage": ["P-2"], "context": {"severity": "high"}}
+    assert compute_state_commitment(None, state_a) != compute_state_commitment(None, state_b)
+    assert compute_state_commitment("p1", state_a) != compute_state_commitment("p2", state_a)
+
+
 def test_sentinel_adapter_imports():
     """Test Sentinel adapter can be imported (lazy loads path)."""
     from sentinel_perceive_adapter import SentinelPerceiveAdapter

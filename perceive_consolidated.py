@@ -26,6 +26,8 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Any
 
+from governance_contracts import compute_state_commitment
+
 logger = logging.getLogger("PERCEIVE")
 logger.setLevel(logging.INFO)
 if not logger.handlers:
@@ -69,6 +71,7 @@ class PolicyRequest:
     # rate-limit windows. The clinical pipeline passes vitals.timestamp, making the derived
     # escalation counts a pure function of recorded inputs (deterministic). Falls back to
     # wall-clock only when a caller omits it (e.g. ad-hoc admin requests).
+    state_commitment: str = ""
 
 
 @dataclass
@@ -92,6 +95,7 @@ class PolicyVerdict:
     policy_version: str
     provenance: Provenance
     audit_hash: str
+    state_commitment: str = ""
     consensus_result: Optional[Dict[str, Any]] = None  # populated if DGK multi-node consensus ran
 
 
@@ -1017,6 +1021,19 @@ class PerceiveGovernanceKernel:
             "gate_count": len(gates_to_evaluate),
             "dgk_consensus": consensus_result,
         }
+        decision_state_commitment = compute_state_commitment(
+            parent_commitment=request.state_commitment,
+            state={
+                "request": asdict(request),
+                "decision": final_verdict_dict,
+                "provenance": {
+                    "actor_id": provenance.actor_id,
+                    "policy_id": provenance.policy_id,
+                    "justification": provenance.justification,
+                },
+            },
+        )
+        final_verdict_dict["state_commitment"] = decision_state_commitment
 
         audit_entry = self.audit_ledger.append_decision(
             request_snapshot=asdict(request),
@@ -1039,6 +1056,7 @@ class PerceiveGovernanceKernel:
             violations=violations, applied_gates=gates_to_evaluate,
             policy_version=manifest.version, provenance=provenance,
             audit_hash=audit_entry.immutable_hash, consensus_result=consensus_result,
+            state_commitment=decision_state_commitment,
         )
 
         logger.info(f"Verdict: approved={approved}, confidence={confidence:.2f}, audit_hash={audit_entry.immutable_hash[:16]}")
