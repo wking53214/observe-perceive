@@ -353,7 +353,9 @@ class PolicyGates:
             # reviewer attached is not a human approval -- it is an automated
             # pass wearing one's clothes, and that is exactly the substitution
             # this gate should refuse.
-            (request_type == "approve_decision" and "reviewer" in context)
+            (request_type == "approve_decision"
+             and isinstance(context.get("reviewer"), str)
+             and bool(context.get("reviewer", "").strip()))
         )
         if not has_matching_context and request_type != "unknown":
             violations.append(f"Request type '{request_type}' missing required context")
