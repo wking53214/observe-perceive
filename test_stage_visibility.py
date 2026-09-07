@@ -212,6 +212,22 @@ def test_a_kernel_refusal_is_recorded_as_a_refusal():
     assert "UNDECLARED_CHANGE" in result["reason"]
 
 
+def test_a_replay_is_recorded_as_a_kernel_refusal():
+    """Running the same artifact through the chain twice is a replay, and the
+    kernel's ledger refuses it -- by raising LedgerError, not by returning a
+    verdict. That used to surface as a stage crash; it is a refusal."""
+    orchestrator = _orchestrator()
+    first, _ = _run(orchestrator, "replay-001")
+    assert first["status"] == "APPROVED_AND_EXECUTED", first.get("reason")
+    second, ran = _run(orchestrator, "replay-001")
+    assert second["status"] == "REJECTED"
+    assert second["stage_refused"] is True
+    assert second["refused_by"] == "conservation"
+    assert second["conservation_enforced"] is True
+    assert "duplicate" in second["reason"]
+    assert ran == []
+
+
 def test_a_perceive_refusal_is_attributed_to_perceive():
     """PERCEIVE refuses (no manifest registered), the chain carries the
     rejected decision on to Conservation, and the approval gate is what
