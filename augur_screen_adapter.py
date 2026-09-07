@@ -1,20 +1,26 @@
 """
-FORTRESS (behavioural simulation) → chain Adapter
+AUGUR (behavioural simulation) → chain Adapter
 
 Runs a closed-loop simulation of what a governed quantity would do if a
 proposed action were taken, and reports the result to the chain as a
 simulation -- never as a measurement.
 
-Not the same FORTRESS as the containment layer
------------------------------------------------
-Two unrelated codebases share the name. `fortress-kernel`
-(`fortress_perceive_adapter.py`) is the three-controller containment stage
-already sitting between PERCEIVE and Conservation, judging a request that
-exists. This one (`~/FORTRESS`, `fortress.Fortress.run_cycle`) is a
+AUGUR, not fortress-kernel
+--------------------------
+These two were both called FORTRESS until 2026-09-07, which was a real
+comprehension hazard once both ended up at different positions in the same
+pipeline. `fortress-kernel` (`fortress_perceive_adapter.py`) is the
+three-controller containment stage between PERCEIVE and Conservation, judging
+a request that exists. AUGUR (`~/AUGUR`, `augur.Augur.run_cycle`) is a
 closed-loop behavioural simulator: it steers a KPI toward a target over N
 steps under a mandate layer that clamps how fast it may move, and reports
 where it ended up, how much distortion accumulated, and what regime it
 settled into. Different git lineages, different questions.
+
+The new name states the constraint. A Roman augur read the omens before an
+undertaking and could declare the auspices unfavourable, halting an action,
+but could never compel one -- exactly the may_block / may-never-approve
+asymmetry below.
 
 Position: the screen, immediately after the door
 -------------------------------------------------
@@ -35,7 +41,7 @@ has established is real.
 So the questions run cheapest-and-most-structural first:
 
     Gateway    is this a valid, untampered artifact?   (structural)
-    FORTRESS   if acted on, does it stay in control?   (predictive, veto-only)
+    AUGUR      if acted on, does it stay in control?   (predictive, veto-only)
     PERCEIVE   is this permitted?                      (normative)
     fortress-kernel  does the actual act stay contained?  (measured)
     Conservation     was the transformation conservative? (verification)
@@ -88,19 +94,19 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 
-def _import_fortress():
-    """Resolve the behavioural-simulation FORTRESS: sibling checkout first."""
-    path = os.path.join(os.path.dirname(__file__), "..", "FORTRESS")
+def _import_augur():
+    """Resolve the AUGUR simulator: sibling checkout first."""
+    path = os.path.join(os.path.dirname(__file__), "..", "AUGUR")
     if os.path.isdir(path) and path not in sys.path:
         sys.path.insert(0, path)
     try:
-        from fortress import Fortress, SimulationConfig
+        from augur import Augur, SimulationConfig
     except ModuleNotFoundError:
         return None, None
-    return Fortress, SimulationConfig
+    return Augur, SimulationConfig
 
 
-Fortress, SimulationConfig = _import_fortress()
+Augur, SimulationConfig = _import_augur()
 
 # Regimes the simulator reports that represent a predicted loss of control.
 # Named rather than inferred from a score so the blocking condition is
@@ -110,14 +116,14 @@ UNSTABLE_REGIMES = frozenset({"UNSTABLE", "CRITICAL", "DIVERGENT", "CHAOTIC"})
 
 # Distortion above this is treated as predicted loss of control even when the
 # regime label looks benign. Matches the containment threshold used by the
-# fortress-kernel stage, so the two FORTRESS layers do not disagree about what
+# fortress-kernel stage, so AUGUR and fortress-kernel do not disagree about what
 # "too distorted" means.
 DISTORTION_CEILING = 0.8
 
 
 @dataclass(frozen=True)
 class SimulationOutcome:
-    """What a FORTRESS run says, and what it is allowed to be used for."""
+    """What an AUGUR run says, and what it is allowed to be used for."""
 
     converged: bool
     final_state: float
@@ -155,14 +161,14 @@ class SimulationOutcome:
         return False
 
 
-class FortressSimulationAdapter:
+class AugurScreenAdapter:
     """Runs a pre-decision behavioural simulation for the chain."""
 
     def __init__(self, seed: int = 42):
-        if Fortress is None:
+        if Augur is None:
             raise ImportError(
-                "FORTRESS (behavioural simulation) not found. Clone it beside "
-                "this repo (../FORTRESS)."
+                "AUGUR not found. Clone it beside "
+                "this repo (../AUGUR)."
             )
         self.seed = seed
 
@@ -191,7 +197,7 @@ class FortressSimulationAdapter:
             total_steps=steps,
             seed=self.seed,
         )
-        result = Fortress(operational_seed=self.seed).run_cycle(
+        result = Augur(operational_seed=self.seed).run_cycle(
             noise_scale_coefficient=noise, config=config, record_history=False
         )
 

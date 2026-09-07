@@ -16,9 +16,9 @@ import pytest
 
 fortress_available = True
 try:
-    from fortress_simulation_adapter import (
+    from augur_screen_adapter import (
         DISTORTION_CEILING,
-        FortressSimulationAdapter,
+        AugurScreenAdapter,
         SimulationOutcome,
         UNSTABLE_REGIMES,
     )
@@ -41,7 +41,7 @@ def _outcome(**overrides) -> "SimulationOutcome":
 
 @pytest.fixture
 def adapter():
-    return FortressSimulationAdapter(seed=42)
+    return AugurScreenAdapter(seed=42)
 
 
 # ---------------------------------------------------------------------------
@@ -125,8 +125,8 @@ def test_assumptions_and_limitations_travel_with_the_outcome(adapter):
 def test_the_same_seed_reproduces_the_same_run():
     """A simulation nobody can re-run is an assertion. The point of recording
     one is that a reviewer can reproduce it and disagree."""
-    first = FortressSimulationAdapter(seed=7).simulate(60.0, 100.0, steps=30)
-    second = FortressSimulationAdapter(seed=7).simulate(60.0, 100.0, steps=30)
+    first = AugurScreenAdapter(seed=7).simulate(60.0, 100.0, steps=30)
+    second = AugurScreenAdapter(seed=7).simulate(60.0, 100.0, steps=30)
 
     assert first.final_state == second.final_state
     assert first.regime == second.regime
@@ -268,7 +268,7 @@ def test_a_screen_refusal_halts_before_perceive_evaluates():
     real = orch.sentinel_adapter.evaluate_through_perceive
     orch.sentinel_adapter.evaluate_through_perceive = lambda *a, **k: (perceive_ran.append(1), real(*a, **k))[1]
 
-    from fortress_simulation_adapter import ScreenResult
+    from augur_screen_adapter import ScreenResult
     orch.simulation_screen.screen_request = lambda ctx: ScreenResult(
         proceed=False, abstained=False, reason="simulation predicts loss of control"
     )
