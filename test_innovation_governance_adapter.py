@@ -258,6 +258,33 @@ def test_an_approval_with_a_rubber_stamp_rationale_is_refused(orchestrator):
     assert any("justification" in v.lower() for v in result["governance_decision"].violations)
 
 
+@pytest.mark.parametrize("reviewer", ["", "   ", None])
+def test_an_unnamed_reviewer_is_not_reported_as_human_review(reviewer):
+    """innovation_os accepts an approval with reviewer="" (measured against
+    its ApprovalEngine). This adapter used to stamp it HUMAN / human_reviewed
+    regardless, and the whole chain approved and executed it."""
+    approval = _approval(reviewer=reviewer)
+    artifact = InnovationGovernanceAdapter.approval_to_artifact(approval)
+    assert artifact.metadata.authority_status.value == "UNATTRIBUTED"
+    assert artifact.metadata.epistemic_status.value == "UNVERIFIED"
+    context = InnovationGovernanceAdapter.approval_context(approval)
+    assert context["human_reviewed"] is False
+    assert context["requires_human_oversight"] is True
+    assert "reviewer" not in context, "an empty reviewer key is what cleared citadel"
+
+
+@pytest.mark.parametrize("reviewer", ["", "   ", None])
+def test_an_unnamed_reviewer_is_refused_by_the_chain(orchestrator, reviewer):
+    ran = []
+    result = InnovationGovernanceAdapter.govern_approval(
+        orchestrator, _approval(approval_id=f"appr-unnamed-{len(reviewer or '')}", reviewer=reviewer),
+        operation_func=lambda ctx: ran.append(True),
+    )
+    assert result["status"] == "REJECTED", result
+    assert result["governance_decision"].violations
+    assert ran == [], "an approval nobody made was executed"
+
+
 def test_an_approval_with_no_named_reviewer_is_refused():
     """An approval decision with nobody attached is an automated pass wearing
     a human approval's clothes. citadel's matching-context check refuses it."""
