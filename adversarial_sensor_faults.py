@@ -24,12 +24,11 @@ Use before production to verify the system degrades gracefully.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Tuple
 
-from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot, OperationalRegime
+from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
 
 
 @dataclass

@@ -27,7 +27,6 @@ from perceive_consolidated import (
     DataExportPolicy,
     EmergencyOverridePolicy,
     Signer,
-    Proposal,
     GovernanceNode,
     ConsensusDecider,
     DGKGateway,

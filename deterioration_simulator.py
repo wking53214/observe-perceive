@@ -22,12 +22,11 @@ Use before deployment to validate thresholds against pediatrician expectations.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Tuple
 
-from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot, OperationalRegime
+from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
 
 
 @dataclass

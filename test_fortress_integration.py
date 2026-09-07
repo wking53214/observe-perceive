@@ -7,7 +7,6 @@ between PERCEIVE and downstream verification.
 """
 
 import pytest
-from datetime import datetime, timezone
 
 from fortress_perceive_adapter import FortressPerceiveAdapter, FortressProcessingResult
 
@@ -178,7 +177,6 @@ class TestFortressSAGEMode:
             artifact_metadata={"origin": "sentinel", "signature": "valid"}
         )
 
-        # Medium error: may be UNSTABLE
         result_med = adapter.process_governance_request(
             request_id="req-sage-med",
             perceive_decision={"error_signal": 15.0, "live_signal": 100.0},
@@ -186,8 +184,22 @@ class TestFortressSAGEMode:
             artifact_metadata={"origin": "sentinel", "signature": "valid"}
         )
 
-        # Low error should indicate stability (case-insensitive)
+        result_high = adapter.process_governance_request(
+            request_id="req-sage-high",
+            perceive_decision={"error_signal": 60.0, "live_signal": 100.0},
+            artifact_content="High error",
+            artifact_metadata={"origin": "sentinel", "signature": "valid"}
+        )
+
+        # The medium case was computed here and never asserted on: the test
+        # claimed to cover "across error levels" while checking exactly one,
+        # and its comment hedged ("may be UNSTABLE") about behaviour that is
+        # deterministic. Measured: 2.0 -> stable, 15.0 -> unstable,
+        # 60.0 -> critical. A test that runs a path without checking it
+        # reports the same green whether that path works or not.
         assert result_low.regime.upper() in ["STABLE", "NOMINAL"]
+        assert result_med.regime.upper() == "UNSTABLE"
+        assert result_high.regime.upper() == "CRITICAL"
 
 
 class TestMultiControllerComparison:

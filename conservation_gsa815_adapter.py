@@ -10,7 +10,6 @@ from governance_contracts import (
     GovernanceApproval, compute_state_commitment
 )
 from datetime import datetime, timezone
-import hashlib
 import uuid
 
 

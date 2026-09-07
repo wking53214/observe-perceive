@@ -11,7 +11,7 @@ So these tests are mostly about what survives the seam.
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 import pytest
 

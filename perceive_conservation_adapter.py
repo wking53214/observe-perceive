@@ -5,7 +5,7 @@ Submits PERCEIVE decisions to Conservation Kernel for verification.
 Ensures all governance decisions pass through conservation boundary.
 """
 
-from governance_contracts import GovernanceDecision, ConservationDecision, GovernanceApproval
+from governance_contracts import GovernanceDecision, ConservationDecision
 from datetime import datetime, timezone
 import hashlib
 

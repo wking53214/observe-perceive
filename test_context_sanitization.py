@@ -1,6 +1,5 @@
 """Hardening tests added after the second red-team pass on OBSERVE.
 Closes R-CTX: the context trust boundary the prior pass flagged but left open."""
-import math
 from datetime import datetime
 from observe_consolidated import (
     VitalsSnapshot, ObserveClinicalEngine, sanitize_context,

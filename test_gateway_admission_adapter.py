@@ -26,8 +26,7 @@ from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
 
 gateway_available = True
 try:
-    from governance_gateway.models import Artifact as GatewayArtifact
-    from governance_gateway.models import Authority, EpistemicStatus, Scope
+    from governance_gateway.models import EpistemicStatus, Scope
 except ModuleNotFoundError:  # pragma: no cover
     gateway_available = False
 

@@ -154,7 +154,8 @@ class TestFullPipelineDwellThenEscalation(unittest.TestCase):
             context={"age_months": 24, "force_heavy": True},
         )
 
-        v1 = self.observe.evaluate(vitals)
+        # First reading primes the dwell state; only the second is examined.
+        self.observe.evaluate(vitals)
         v2 = self.observe.evaluate(vitals)
 
         # Verify the heuristic-only score is indeed below the hard-rule bypass threshold
