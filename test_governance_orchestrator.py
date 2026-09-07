@@ -123,11 +123,24 @@ class TestGovernanceOrchestration:
             mock_operation
         )
 
-        # If approved, check that all gates were applied
-        if result["status"] == "APPROVED_AND_EXECUTED":
-            perceive_decision = result["governance_decision"]
-            # PERCEIVE should report unanimous consensus
-            assert isinstance(perceive_decision.approved, bool)
+        # This used to sit behind an `if status == APPROVED_AND_EXECUTED`
+        # guard that was never true (the chain broke earlier, at the PERCEIVE
+        # and Conservation seams), so the assertion never ran and the test
+        # passed vacuously. Asserted unconditionally now, against the
+        # GovernanceDecision contract the chain actually carries -- the old
+        # assertion was reading `.approved`, a PolicyVerdict field that never
+        # reaches this far.
+        assert result["status"] == "APPROVED_AND_EXECUTED", result.get("reason")
+        perceive_decision = result["governance_decision"]
+        assert perceive_decision.approval is GovernanceApproval.APPROVED
+        # Unanimity is the claim: PERCEIVE approves only when every applied
+        # gate approved.
+        assert perceive_decision.unanimous_consensus is True
+        assert len(perceive_decision.applied_gates) > 1, (
+            "only the always-on boundary gate ran -- gate selection did not "
+            "recognise this request type"
+        )
+        assert perceive_decision.violations == []
 
     def test_conservation_kernel_verification(self, orchestrator):
         """Test: Conservation Kernel must verify decision."""
@@ -163,11 +176,16 @@ class TestGovernanceOrchestration:
             mock_operation
         )
 
-        # If approved, conservation decision should be present and verified
-        if result["status"] == "APPROVED_AND_EXECUTED":
-            conservation_decision = result["conservation_decision"]
-            assert conservation_decision.verified
-            assert conservation_decision.approval == GovernanceApproval.APPROVED
+        # Unconditional: the guard this used to sit behind was never true, so
+        # the Conservation Kernel's verification was never actually asserted.
+        assert result["status"] == "APPROVED_AND_EXECUTED", result.get("reason")
+        conservation_decision = result["conservation_decision"]
+        assert conservation_decision.verified
+        assert conservation_decision.approval == GovernanceApproval.APPROVED
+        assert conservation_decision.conservation_receipt_id, (
+            "no receipt id -- the kernel did not return a verifiable result"
+        )
+        assert conservation_decision.conservation_audit_hash
 
     def test_audit_chain_linking(self, orchestrator):
         """Test: All audit hashes are linked."""
@@ -214,18 +232,23 @@ class TestGovernanceOrchestration:
             vitals_snapshot=vitals
         )
 
-        # If approved, check audit chain
-        if result["status"] == "APPROVED_AND_EXECUTED":
-            forensic_proof = result["forensic_proof"]
-            if forensic_proof:
-                # All audit hashes should be present
-                assert forensic_proof["governance_audit_hash"]
-                assert forensic_proof["conservation_audit_hash"]
-                assert forensic_proof["result_artifact_hash"]
-                # Lineage should be non-empty
-                assert len(forensic_proof["lineage"]) > 0
-                # Chain should be valid
-                assert forensic_proof["chain_valid"]
+        # Unconditional, and the nested `if forensic_proof:` is gone too --
+        # between the two guards this test asserted nothing at all, which is
+        # the worst place in the suite for a vacuous test: the audit chain is
+        # the whole forensic claim the chain exists to make.
+        assert result["status"] == "APPROVED_AND_EXECUTED", result.get("reason")
+        forensic_proof = result["forensic_proof"]
+        assert forensic_proof is not None, (
+            "no forensic proof was produced -- vitals were supplied, so "
+            "OBSERVE ran and the chain should have been linked"
+        )
+        # Every stage's hash has to be present for the chain to be traceable
+        # end to end.
+        assert forensic_proof["governance_audit_hash"]
+        assert forensic_proof["conservation_audit_hash"]
+        assert forensic_proof["result_artifact_hash"]
+        assert len(forensic_proof["lineage"]) > 0
+        assert forensic_proof["chain_valid"]
 
 
 if __name__ == "__main__":
