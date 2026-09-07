@@ -20,7 +20,8 @@ class GovernanceOrchestrator:
 
     def __init__(self, perceive=None, conservation_kernel=None, observe_engine=None,
                  fortress_controller: str = None,
-                 simulation_screen: bool = False, simulation_seed: int = 42):
+                 simulation_screen: bool = False, simulation_seed: int = 42,
+                 require_declared_scope: bool = False):
         """
         Initialize orchestrator with all governance systems.
 
@@ -39,7 +40,22 @@ class GovernanceOrchestrator:
                 renamed. Off by default.
             simulation_seed: seed for that screen, so its runs are
                 reproducible by a reviewer.
+            require_declared_scope: refuse to execute a request that declares
+                no gateway scope at all. Defaults False, matching the advisory
+                pattern PolicyEnforcementConfig uses in PERCEIVE: the check
+                runs and records what it WOULD decide, but does not flip an
+                existing verdict.
+
+                The default is permissive because callers predating the
+                Gateway seam pass no scope. It is not permissive *silently*:
+                an undeclared scope is logged as a warning and reported in the
+                result as `scope_enforced: False`, so the difference between
+                "checked and allowed" and "never checked" is visible to
+                anyone reading the record. Measured when this was added: 15 of
+                16 call sites declared no scope, so the check was reaching
+                almost nothing while looking like a control.
         """
+        self.require_declared_scope = require_declared_scope
         self.perceive = perceive
         self.conservation_kernel = conservation_kernel
         self.observe_engine = observe_engine
@@ -253,6 +269,33 @@ class GovernanceOrchestrator:
         # check is skipped entirely when no scope was declared: callers that
         # predate the Gateway seam pass no scope and must keep working.
         declared_scope = (context or {}).get("gateway_scope")
+
+        # An undeclared scope used to fall straight through here, silently.
+        # That is the worse half of the two ways this can be wrong: a request
+        # with a READ_ONLY scope is refused loudly, while a request with no
+        # scope at all is executed with no record that the check did nothing.
+        # From the outside those two approvals are indistinguishable.
+        if declared_scope is None:
+            if self.require_declared_scope:
+                logger.error(
+                    "[Orchestrator] Refusing execution: no gateway scope declared "
+                    "and require_declared_scope is on"
+                )
+                return {
+                    "status": "REJECTED",
+                    "reason": "no gateway scope declared; execution requires one",
+                    "governance_decision": perceive_decision,
+                    "conservation_decision": conservation_decision,
+                    "execution_approval": execution_approval,
+                    "scope_enforced": False,
+                    "audit_chain": None,
+                }
+            logger.warning(
+                "[Orchestrator] No gateway scope declared -- executing WITHOUT a "
+                "scope check. Pass context['gateway_scope'], or construct the "
+                "orchestrator with require_declared_scope=True to refuse instead."
+            )
+
         if declared_scope is not None and declared_scope != "EXECUTE":
             logger.error(
                 f"[Orchestrator] Refusing execution: artifact scope is {declared_scope}, not EXECUTE"
@@ -265,6 +308,7 @@ class GovernanceOrchestrator:
                 "governance_decision": perceive_decision,
                 "conservation_decision": conservation_decision,
                 "execution_approval": execution_approval,
+                "scope_enforced": True,
                 "audit_chain": None,
             }
 
@@ -298,6 +342,8 @@ class GovernanceOrchestrator:
         logger.info("[Orchestrator] Governance flow complete")
         return {
             "status": "APPROVED_AND_EXECUTED",
+            "scope_enforced": declared_scope is not None,
+            "declared_scope": declared_scope,
             "governance_decision": perceive_decision,
             "simulation_screen": screen_result,
             "fortress_result": fortress_result,
