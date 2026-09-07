@@ -23,7 +23,8 @@ logger = logging.getLogger("GovernanceOrchestrator")
 class GovernanceOrchestrator:
     """Central orchestrator for unified governance flow."""
 
-    def __init__(self, perceive=None, conservation_kernel=None, observe_engine=None):
+    def __init__(self, perceive=None, conservation_kernel=None, observe_engine=None,
+                 fortress_controller: str = None):
         """
         Initialize orchestrator with all governance systems.
 
@@ -31,6 +32,11 @@ class GovernanceOrchestrator:
             perceive: PERCEIVE governance kernel (optional for testing)
             conservation_kernel: Conservation Kernel for verification (optional)
             observe_engine: OBSERVE clinical AI system (optional)
+            fortress_controller: "energy", "lyapunov" or "sage" to place
+                FORTRESS in the chain between PERCEIVE and the Conservation
+                Kernel. None (the default) leaves it out entirely, so the
+                chain behaves exactly as it did before FORTRESS existed and
+                a missing fortress-kernel checkout is never a hard failure.
         """
         self.perceive = perceive
         self.conservation_kernel = conservation_kernel
@@ -46,6 +52,13 @@ class GovernanceOrchestrator:
         self.perceive_adapter = PerceiveConservationAdapter(conservation_kernel) if conservation_kernel else None
         self.conservation_adapter = ConservationGSA815Adapter()
         self.gsa815_adapter = GSA815ObserveAdapter()
+
+        # FORTRESS is opt-in. Imported only when asked for, so the rest of the
+        # chain does not acquire a hard dependency on a sibling checkout.
+        self.fortress_adapter = None
+        if fortress_controller:
+            from fortress_perceive_adapter import FortressPerceiveAdapter
+            self.fortress_adapter = FortressPerceiveAdapter(controller_mode=fortress_controller)
 
     def orchestrate_request(
         self,
@@ -106,6 +119,39 @@ class GovernanceOrchestrator:
         logger.info(f"[Orchestrator] Unanimous: {perceive_decision.unanimous_consensus}")
         if perceive_decision.violations:
             logger.info(f"[Orchestrator] Violations: {perceive_decision.violations}")
+
+        # PHASE 2b: FORTRESS safety containment (opt-in)
+        #
+        # Sits between PERCEIVE and the Conservation Kernel: PERCEIVE decides
+        # whether the request is *permitted*, FORTRESS decides whether acting
+        # on it stays inside safe operating bounds. A request can be
+        # legitimately approved and still be refused here, which is the whole
+        # reason the layer is separate.
+        fortress_result = None
+        if self.fortress_adapter:
+            logger.info(f"[Orchestrator] Phase 2b: FORTRESS containment ({self.fortress_adapter.controller_mode})")
+            fortress_result = self.fortress_adapter.process_governance_decision(
+                perceive_decision,
+                governance_request,
+            )
+            logger.info(
+                f"[Orchestrator] FORTRESS: {fortress_result.decision} "
+                f"(distortion={fortress_result.distortion:.3f}, regime={fortress_result.regime})"
+            )
+            if fortress_result.decision != "APPROVED":
+                # Fail closed. A containment refusal stops the chain here --
+                # nothing downstream gets to re-approve what FORTRESS refused.
+                logger.error("[Orchestrator] FORTRESS refused: halting before Conservation Kernel")
+                return {
+                    "status": "REJECTED",
+                    "reason": (
+                        f"FORTRESS containment refused (distortion "
+                        f"{fortress_result.distortion:.3f}, regime {fortress_result.regime})"
+                    ),
+                    "governance_decision": perceive_decision,
+                    "fortress_result": fortress_result,
+                    "audit_chain": None,
+                }
 
         # PHASE 3: Conservation Kernel verification
         logger.info("[Orchestrator] Phase 3: Conservation Kernel verification")
@@ -185,6 +231,7 @@ class GovernanceOrchestrator:
         return {
             "status": "APPROVED_AND_EXECUTED",
             "governance_decision": perceive_decision,
+            "fortress_result": fortress_result,
             "conservation_decision": conservation_decision,
             "execution_approval": execution_approval,
             "execution_context": execution_context,
