@@ -283,6 +283,16 @@ class GovernanceInvariants:
 class PolicyGates:
     """All 6 policy gate adapters, consolidated."""
 
+    # The request types admitted at the door. A class attribute rather than a
+    # literal inside boundary_gate so a test can READ it: while it lived in the
+    # function body the only way to check it against GovernanceRequestType was
+    # to copy the five strings into the test, which is not a check of the
+    # invariant but a second place for it to drift.
+    VALID_REQUEST_TYPES = frozenset({
+        "escalate_patient", "modify_rule", "export_data",
+        "emergency_override", "approve_decision",
+    })
+
     @staticmethod
     def boundary_gate(request: PolicyRequest) -> PolicyOutput:
         """Validates inbound requests are well-formed and of known type."""
@@ -301,11 +311,7 @@ class PolicyGates:
         # approval that skipped every real check. A type declared in the
         # shared contract but missing here is refused at the door, which is
         # the safer failure but still a gap.
-        valid_types = {
-            "escalate_patient", "modify_rule", "export_data",
-            "emergency_override", "approve_decision",
-        }
-        if request.request_type not in valid_types:
+        if request.request_type not in PolicyGates.VALID_REQUEST_TYPES:
             violations.append(f"Unknown request_type: {request.request_type}")
 
         approved = len(violations) == 0

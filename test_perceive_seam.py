@@ -18,6 +18,7 @@ from governance_contracts import (
 )
 from perceive_consolidated import (
     PerceiveGovernanceKernel,
+    PolicyGates,
     PolicyManifest,
     PolicyRequest,
     PolicyVerdict,
@@ -70,13 +71,15 @@ def test_request_type_values_line_up_with_perceives_gate_selection():
     """GovernanceRequestType's values are the literals PERCEIVE's
     `_select_gates` matches on. If either side is renamed independently, gate
     selection silently falls back to the boundary gate alone -- an approval
-    that skipped every real check."""
-    for request_type in (
-        GovernanceRequestType.ESCALATE_PATIENT,
-        GovernanceRequestType.MODIFY_RULE,
-        GovernanceRequestType.EXPORT_DATA,
-        GovernanceRequestType.EMERGENCY_OVERRIDE,
-    ):
+    that skipped every real check.
+
+    Iterates the enum itself. It used to iterate a hand-written tuple of four
+    members, which meant it could only ever check the types someone had
+    already thought to list: APPROVE_DECISION was added to the contract and
+    this test went on passing without it. A guard against drift that has to be
+    updated by hand when the thing it guards changes is not a guard.
+    """
+    for request_type in GovernanceRequestType:
         gates = PerceiveGovernanceKernel._select_gates(
             PolicyRequest(
                 request_id="x",
@@ -89,6 +92,53 @@ def test_request_type_values_line_up_with_perceives_gate_selection():
             f"{request_type.value} selected only {gates} -- it is not a "
             "request type PERCEIVE recognises"
         )
+
+
+def test_the_door_admits_exactly_the_types_the_shared_contract_declares():
+    """Three lists have to agree: GovernanceRequestType (the cross-system
+    contract), PolicyGates.VALID_REQUEST_TYPES (what the door admits), and the
+    branches of _select_gates (what each type is actually checked by). Until
+    now they were kept in step by a comment.
+
+    Both directions are failures, and they are not equally bad:
+
+    - A type in the contract but not admitted at the door is refused outright.
+      Safe, loud, and wrong.
+    - A type admitted at the door with no branch in _select_gates is the
+      dangerous one. It is accepted, collects the boundary gate alone, and
+      returns an approval that skipped every real check -- which is
+      indistinguishable, from outside, from an approval that passed them.
+    """
+    contract = {member.value for member in GovernanceRequestType}
+
+    assert PolicyGates.VALID_REQUEST_TYPES == contract, (
+        "the door and the shared contract disagree about which request types "
+        "exist: "
+        f"admitted-but-undeclared={sorted(PolicyGates.VALID_REQUEST_TYPES - contract)}, "
+        f"declared-but-refused={sorted(contract - PolicyGates.VALID_REQUEST_TYPES)}"
+    )
+
+
+@pytest.mark.parametrize("request_type", list(GovernanceRequestType),
+                         ids=lambda m: m.value)
+def test_every_declared_type_gets_through_the_door(request_type):
+    """A well-formed request of every declared type must pass boundary_gate.
+
+    Asserts on the absence of the specific violation rather than on
+    `approved`, because boundary_gate also checks request_id and actor_id: a
+    structural check added later could fail this test for a reason that has
+    nothing to do with type admission, and the failure would read as a drift
+    it isn't.
+    """
+    output = PolicyGates.boundary_gate(PolicyRequest(
+        request_id="req-door", request_type=request_type.value,
+        subject_id="subject", actor_id="actor",
+    ))
+    unknown = [v for v in output.violation_details if "Unknown request_type" in v]
+    assert not unknown, (
+        f"{request_type.value} is declared in GovernanceRequestType but the "
+        f"door refuses it: {unknown}"
+    )
 
 
 def test_governance_request_converts_to_a_policy_request():
