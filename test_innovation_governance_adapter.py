@@ -297,3 +297,19 @@ def test_an_approval_with_no_named_reviewer_is_refused():
     ))
     assert output.approved is False
     assert any("missing required context" in v for v in output.violation_details)
+
+
+@pytest.mark.parametrize("reviewer", ["", "   ", None, 42])
+def test_citadel_requires_a_reviewer_name_not_merely_the_key(reviewer):
+    """The check used to be `"reviewer" in context`, so a caller sending the
+    key with nothing in it cleared it. Presence of a name, not of a key."""
+    from perceive_consolidated import PolicyGates, PolicyRequest
+
+    output = PolicyGates.citadel(PolicyRequest(
+        request_id="x", request_type="approve_decision",
+        subject_id="idea-042", actor_id="unknown",
+        context={"reviewer": reviewer,
+                 "justification": "A sufficiently long and substantive rationale."},
+    ))
+    assert output.approved is False
+    assert any("missing required context" in v for v in output.violation_details)
