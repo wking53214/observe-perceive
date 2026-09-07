@@ -185,6 +185,7 @@ class SentinelPerceiveAdapter:
             # carry its value through rather than recomputing a parallel one.
             state_commitment=verdict.state_commitment,
             timestamp=datetime.now(timezone.utc),
+            advisory_violations=list(getattr(verdict, "advisory_violations", None) or []),
         )
 
     @classmethod

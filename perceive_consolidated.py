@@ -97,6 +97,9 @@ class PolicyVerdict:
     audit_hash: str
     state_commitment: str = ""
     consensus_result: Optional[Dict[str, Any]] = None  # populated if DGK multi-node consensus ran
+    # What the advisory-mode gates would have refused. The verdict is still
+    # `approved`; this is the record that a check ran and was not enforced.
+    advisory_violations: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -1020,6 +1023,25 @@ class PerceiveGovernanceKernel:
 
         approved, confidence, violations = ConsensusEngine.evaluate(policy_outputs)
 
+        # Gates in advisory mode (PolicyEnforcementConfig, the default) record
+        # what they would have refused and approve anyway. Until now that
+        # record lived only in this kernel's audit ledger: the verdict said
+        # approved with no violations, so nothing downstream could tell an
+        # export that cleared the consent check from one that was waved
+        # through. Surface it on the verdict, and say what turns it on.
+        advisory_violations = [
+            f"{o.gate_name}: {d}"
+            for o in policy_outputs if o.approved
+            for d in o.violation_details
+        ]
+        if advisory_violations:
+            logger.warning(
+                f"Request {request.request_id}: {len(advisory_violations)} advisory "
+                f"violation(s) recorded but NOT enforced -- verdict stays approved. "
+                f"Set the matching PolicyEnforcementConfig.enforce_* flag to make "
+                f"them block: {advisory_violations}"
+            )
+
         # Optional: DGK multi-node consensus for critical decisions
         consensus_result = None
         if approved and self.dgk_gateway and self.dgk_gateway.require_consensus(request.request_type):
@@ -1091,6 +1113,7 @@ class PerceiveGovernanceKernel:
             policy_version=manifest.version, provenance=provenance,
             audit_hash=audit_entry.immutable_hash, consensus_result=consensus_result,
             state_commitment=decision_state_commitment,
+            advisory_violations=advisory_violations,
         )
 
         logger.info(f"Verdict: approved={approved}, confidence={confidence:.2f}, audit_hash={audit_entry.immutable_hash[:16]}")
