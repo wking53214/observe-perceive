@@ -1,5 +1,16 @@
 name: tests
 
+# This repo is the integration point for the governance chain, so its tests
+# import the systems it integrates. Those resolve as SIBLING checkouts --
+# ../CCC, ../AUGUR, ../fortress-kernel and so on -- which is why the first
+# version of this workflow failed: a bare checkout has no siblings, and a
+# third of the suite could not even be collected.
+#
+# So the repo is checked out into a subdirectory and its siblings beside it,
+# reproducing the layout the adapters actually resolve against. That is not a
+# workaround; for an integration repo it is the only arrangement under which
+# the integration tests mean anything.
+
 on:
   push:
     branches: [main]
@@ -14,15 +25,40 @@ jobs:
         python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: observe-perceive
+
+      # The siblings the adapters look for at ../<name>.
+      - uses: actions/checkout@v4
+        with: { repository: wking53214/CCC, path: CCC }
+      - uses: actions/checkout@v4
+        with: { repository: wking53214/AUGUR, path: AUGUR }
+      - uses: actions/checkout@v4
+        with: { repository: wking53214/fortress-kernel, path: fortress-kernel }
+      - uses: actions/checkout@v4
+        with: { repository: wking53214/GEMS, path: GEMS }
+      - uses: actions/checkout@v4
+        with: { repository: wking53214/Governance_Gateway, path: Governance_Gateway }
+      - uses: actions/checkout@v4
+        with: { repository: wking53214/Conservation_Kernel, path: conservation_kernel }
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
       - name: Install
         run: |
           python -m pip install --upgrade pip
           python -m pip install pytest ruff==0.15.22
-          python -m pip install -r requirements.txt
+          python -m pip install -r observe-perceive/requirements.txt
+          # Conservation Kernel is consumed as an installed package rather
+          # than a sibling path, matching how it resolves locally.
+          python -m pip install ./conservation_kernel
+
       - name: Test
         run: python -m pytest -q
+        working-directory: observe-perceive
+
       - name: Lint (hard gate)
         run: ruff check .
+        working-directory: observe-perceive
