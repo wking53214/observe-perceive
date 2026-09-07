@@ -24,7 +24,8 @@ class GovernanceOrchestrator:
     """Central orchestrator for unified governance flow."""
 
     def __init__(self, perceive=None, conservation_kernel=None, observe_engine=None,
-                 fortress_controller: str = None):
+                 fortress_controller: str = None,
+                 simulation_screen: bool = False, simulation_seed: int = 42):
         """
         Initialize orchestrator with all governance systems.
 
@@ -37,6 +38,11 @@ class GovernanceOrchestrator:
                 Kernel. None (the default) leaves it out entirely, so the
                 chain behaves exactly as it did before FORTRESS existed and
                 a missing fortress-kernel checkout is never a hard failure.
+            simulation_screen: place the behavioural-simulation screen ahead
+                of PERCEIVE. A different FORTRESS from the one above --
+                unrelated codebases sharing a name. Off by default.
+            simulation_seed: seed for that screen, so its runs are
+                reproducible by a reviewer.
         """
         self.perceive = perceive
         self.conservation_kernel = conservation_kernel
@@ -59,6 +65,16 @@ class GovernanceOrchestrator:
         if fortress_controller:
             from fortress_perceive_adapter import FortressPerceiveAdapter
             self.fortress_adapter = FortressPerceiveAdapter(controller_mode=fortress_controller)
+
+        # The behavioural-simulation screen, also opt-in and a *different*
+        # FORTRESS from the containment adapter above (unrelated codebases
+        # sharing a name). Runs first among the judging stages: it can only
+        # refuse, never approve, which is the right shape for a screen and
+        # means it cannot smuggle an endorsement into the chain.
+        self.simulation_screen = None
+        if simulation_screen:
+            from fortress_simulation_adapter import FortressSimulationAdapter
+            self.simulation_screen = FortressSimulationAdapter(seed=simulation_seed)
 
     def orchestrate_request(
         self,
@@ -102,6 +118,34 @@ class GovernanceOrchestrator:
             context
         )
         logger.info(f"[Orchestrator] Request ID: {governance_request.request_id}")
+
+        # PHASE 1b: behavioural-simulation screen
+        #
+        # First of the judging stages, and veto-only by construction: it can
+        # refuse but can never approve, so it cannot smuggle an endorsement
+        # into the chain. Removing doomed work here costs one model run
+        # instead of the whole chain.
+        #
+        # It abstains on any request with no trajectory to simulate, which is
+        # most of them. `screened` distinguishes "looked at it and had no
+        # objection" from "could not evaluate it" -- both proceed, only one is
+        # coverage.
+        screen_result = None
+        if self.simulation_screen:
+            screen_result = self.simulation_screen.screen_request(context)
+            if screen_result.screened:
+                logger.info(f"[Orchestrator] Phase 1b: simulation screen -- {screen_result.reason}")
+            else:
+                logger.info(f"[Orchestrator] Phase 1b: simulation screen abstained -- {screen_result.reason}")
+            if not screen_result.proceed:
+                logger.error("[Orchestrator] Simulation screen refused: halting before PERCEIVE")
+                return {
+                    "status": "REJECTED",
+                    "reason": f"Simulation screen refused: {screen_result.reason}",
+                    "simulation_screen": screen_result,
+                    "governance_decision": None,
+                    "audit_chain": None,
+                }
 
         # PHASE 2: PERCEIVE evaluation
         #
@@ -258,6 +302,7 @@ class GovernanceOrchestrator:
         return {
             "status": "APPROVED_AND_EXECUTED",
             "governance_decision": perceive_decision,
+            "simulation_screen": screen_result,
             "fortress_result": fortress_result,
             "conservation_decision": conservation_decision,
             "execution_approval": execution_approval,
