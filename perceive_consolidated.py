@@ -295,7 +295,16 @@ class PolicyGates:
         if not request.actor_id:
             violations.append("Missing actor_id")
 
-        valid_types = {"escalate_patient", "modify_rule", "export_data", "emergency_override"}
+        # Must stay in step with _select_gates below and with
+        # GovernanceRequestType in governance_contracts. A type accepted here
+        # but unknown to _select_gates gets only the boundary gate -- an
+        # approval that skipped every real check. A type declared in the
+        # shared contract but missing here is refused at the door, which is
+        # the safer failure but still a gap.
+        valid_types = {
+            "escalate_patient", "modify_rule", "export_data",
+            "emergency_override", "approve_decision",
+        }
         if request.request_type not in valid_types:
             violations.append(f"Unknown request_type: {request.request_type}")
 
@@ -330,7 +339,12 @@ class PolicyGates:
             (request_type == "escalate_patient" and "severity" in context) or
             (request_type == "modify_rule" and "rule_id" in context) or
             (request_type == "export_data" and "export_type" in context) or
-            (request_type == "emergency_override" and "emergency_reason" in context)
+            (request_type == "emergency_override" and "emergency_reason" in context) or
+            # An approval must name who made it. An approval decision with no
+            # reviewer attached is not a human approval -- it is an automated
+            # pass wearing one's clothes, and that is exactly the substitution
+            # this gate should refuse.
+            (request_type == "approve_decision" and "reviewer" in context)
         )
         if not has_matching_context and request_type != "unknown":
             violations.append(f"Request type '{request_type}' missing required context")
@@ -877,6 +891,20 @@ class PerceiveGovernanceKernel:
         elif request.request_type == "emergency_override":
             # Life-safety path: NEVER rate-limited. No escalation_rate_policy here by design.
             gates.extend(["micropatch", "sentinel"])
+        elif request.request_type == "approve_decision":
+            # A named person recording a decision about an artifact (the
+            # innovation_os approval path). citadel checks the reviewer
+            # actually gave a substantive rationale rather than a rubber
+            # stamp; invariant_validator checks the governance invariants
+            # still hold; sentinel catches anomalous approval behaviour such
+            # as an implausible volume of sign-offs.
+            #
+            # Deliberately NOT here: escalation_rate_policy, because an
+            # approval is not an escalation and rate-limiting a reviewer's
+            # throughput would be a different policy decision than the one
+            # that gate implements; and micropatch, which is the emergency
+            # override path and has nothing to do with routine review.
+            gates.extend(["citadel", "invariant_validator", "sentinel"])
 
         return list(dict.fromkeys(gates))
 
