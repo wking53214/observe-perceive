@@ -208,6 +208,90 @@ def test_callers_that_declare_no_scope_are_unaffected(orchestrator):
 
 
 # ---------------------------------------------------------------------------
+# An undeclared scope is a decision, not an absence
+# ---------------------------------------------------------------------------
+
+def test_the_record_says_whether_a_scope_was_actually_checked(orchestrator):
+    """The failure this closes.
+
+    A READ_ONLY artifact is refused loudly. An artifact with no scope at all
+    was executed with nothing recording that the check had done nothing -- so
+    from outside, an approval that skipped the check and an approval that
+    passed it were the same value. Measured when this was added: 15 of 16
+    call sites declared no scope, so the check was reaching almost nothing
+    while looking like a control.
+    """
+    # Distinct artifact ids: the same artifact run twice is a replay, and
+    # the chain refuses replays -- which would mask what this is testing.
+    unscoped = orchestrator.orchestrate_request(
+        _chain_artifact("gw-unscoped"), "escalate",
+        lambda ctx: {"status": "executed"},
+        context={"patient_id": "P001"},
+    )
+    assert unscoped["status"] == "APPROVED_AND_EXECUTED"
+    assert unscoped["scope_enforced"] is False
+    assert unscoped["declared_scope"] is None
+
+    scoped = orchestrator.orchestrate_request(
+        _chain_artifact("gw-scoped"), "escalate",
+        lambda ctx: {"status": "executed"},
+        context={"patient_id": "P001", "gateway_scope": "EXECUTE"},
+    )
+    assert scoped["status"] == "APPROVED_AND_EXECUTED"
+    assert scoped["scope_enforced"] is True
+    assert scoped["declared_scope"] == "EXECUTE"
+
+
+def test_require_declared_scope_refuses_an_unscoped_request():
+    """Opt-in strict mode, for a deployment that has finished migrating its
+    callers. Off by default: turning it on globally would refuse 15 of the 16
+    existing call sites, which is a breaking change wearing a safety
+    improvement's clothes."""
+    kernel = PerceiveGovernanceKernel()
+    kernel.register_manifest(PolicyManifest(
+        manifest_id="strict-scope-manifest", version="1.0.0",
+        created_at=datetime.now(timezone.utc), policies={},
+    ))
+    strict = GovernanceOrchestrator(
+        kernel, ConservationKernel(), ObserveClinicalEngine(),
+        require_declared_scope=True,
+    )
+
+    ran = []
+    result = strict.orchestrate_request(
+        _chain_artifact(), "escalate",
+        lambda ctx: ran.append(True),
+        context={"patient_id": "P001"},
+    )
+    assert result["status"] == "REJECTED"
+    assert "no gateway scope declared" in result["reason"]
+    assert result["scope_enforced"] is False
+    assert not ran, "executed a request with no declared scope under strict mode"
+
+
+def test_strict_mode_still_allows_a_properly_scoped_request():
+    """Strict mode must refuse the undeclared case only. If it also blocked
+    correctly-scoped work it would be a denial of service, not a control."""
+    kernel = PerceiveGovernanceKernel()
+    kernel.register_manifest(PolicyManifest(
+        manifest_id="strict-scope-manifest-2", version="1.0.0",
+        created_at=datetime.now(timezone.utc), policies={},
+    ))
+    strict = GovernanceOrchestrator(
+        kernel, ConservationKernel(), ObserveClinicalEngine(),
+        require_declared_scope=True,
+    )
+
+    result = strict.orchestrate_request(
+        _chain_artifact(), "escalate",
+        lambda ctx: {"status": "executed"},
+        context={"patient_id": "P001", "gateway_scope": "EXECUTE"},
+    )
+    assert result["status"] == "APPROVED_AND_EXECUTED", result.get("reason")
+    assert result["scope_enforced"] is True
+
+
+# ---------------------------------------------------------------------------
 # Refusal is not a policy decision
 # ---------------------------------------------------------------------------
 
