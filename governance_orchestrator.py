@@ -200,6 +200,33 @@ class GovernanceOrchestrator:
             }
 
         # PHASE 5: Execute GSA-815 operation
+        #
+        # Scope check first. An artifact can be legitimately admitted, permitted
+        # and verified and still not be a thing anyone is allowed to *run* --
+        # Governance Gateway distinguishes READ_ONLY from EXECUTE scope, and
+        # until now the orchestrator executed on approval without ever asking.
+        # An artifact admitted for reading could be executed.
+        #
+        # Enforced here rather than only at the door so a caller that bypasses
+        # the admission adapter still cannot execute a read-only artifact. The
+        # check is skipped entirely when no scope was declared: callers that
+        # predate the Gateway seam pass no scope and must keep working.
+        declared_scope = (context or {}).get("gateway_scope")
+        if declared_scope is not None and declared_scope != "EXECUTE":
+            logger.error(
+                f"[Orchestrator] Refusing execution: artifact scope is {declared_scope}, not EXECUTE"
+            )
+            return {
+                "status": "REJECTED",
+                "reason": (
+                    f"artifact scope {declared_scope} does not permit execution"
+                ),
+                "governance_decision": perceive_decision,
+                "conservation_decision": conservation_decision,
+                "execution_approval": execution_approval,
+                "audit_chain": None,
+            }
+
         logger.info("[Orchestrator] Phase 5: GSA-815 execution")
         gsa815_result = gsa815_operation_func(execution_context)
         logger.info(f"[Orchestrator] GSA-815 result: {gsa815_result}")
