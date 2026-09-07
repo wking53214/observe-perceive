@@ -34,13 +34,14 @@ class GovernanceOrchestrator:
             conservation_kernel: Conservation Kernel for verification (optional)
             observe_engine: OBSERVE clinical AI system (optional)
             fortress_controller: "energy", "lyapunov" or "sage" to place
-                FORTRESS in the chain between PERCEIVE and the Conservation
-                Kernel. None (the default) leaves it out entirely, so the
-                chain behaves exactly as it did before FORTRESS existed and
-                a missing fortress-kernel checkout is never a hard failure.
-            simulation_screen: place the behavioural-simulation screen ahead
-                of PERCEIVE. A different FORTRESS from the one above --
-                unrelated codebases sharing a name. Off by default.
+                fortress-kernel in the chain between PERCEIVE and the
+                Conservation Kernel. None (the default) leaves it out
+                entirely, so the chain behaves as it did before and a missing
+                fortress-kernel checkout is never a hard failure.
+            simulation_screen: place AUGUR's behavioural-simulation screen
+                ahead of PERCEIVE. A different system from fortress-kernel
+                above; the two were both called FORTRESS until AUGUR was
+                renamed. Off by default.
             simulation_seed: seed for that screen, so its runs are
                 reproducible by a reviewer.
         """
@@ -59,22 +60,23 @@ class GovernanceOrchestrator:
         self.conservation_adapter = ConservationGSA815Adapter()
         self.gsa815_adapter = GSA815ObserveAdapter()
 
-        # FORTRESS is opt-in. Imported only when asked for, so the rest of the
+        # fortress-kernel is opt-in. Imported only when asked for, so the rest of the
         # chain does not acquire a hard dependency on a sibling checkout.
         self.fortress_adapter = None
         if fortress_controller:
             from fortress_perceive_adapter import FortressPerceiveAdapter
             self.fortress_adapter = FortressPerceiveAdapter(controller_mode=fortress_controller)
 
-        # The behavioural-simulation screen, also opt-in and a *different*
-        # FORTRESS from the containment adapter above (unrelated codebases
-        # sharing a name). Runs first among the judging stages: it can only
+        # AUGUR's behavioural-simulation screen, also opt-in. A different
+        # system from the fortress-kernel containment adapter above -- both
+        # were called FORTRESS until AUGUR took its own name. Runs first
+        # among the judging stages: it can only
         # refuse, never approve, which is the right shape for a screen and
         # means it cannot smuggle an endorsement into the chain.
         self.simulation_screen = None
         if simulation_screen:
-            from fortress_simulation_adapter import FortressSimulationAdapter
-            self.simulation_screen = FortressSimulationAdapter(seed=simulation_seed)
+            from augur_screen_adapter import AugurScreenAdapter
+            self.simulation_screen = AugurScreenAdapter(seed=simulation_seed)
 
     def orchestrate_request(
         self,
@@ -164,7 +166,7 @@ class GovernanceOrchestrator:
         if perceive_decision.violations:
             logger.info(f"[Orchestrator] Violations: {perceive_decision.violations}")
 
-        # PHASE 2b: FORTRESS safety containment (opt-in)
+        # PHASE 2b: fortress-kernel safety containment (opt-in)
         #
         # Sits between PERCEIVE and the Conservation Kernel: PERCEIVE decides
         # whether the request is *permitted*, FORTRESS decides whether acting
