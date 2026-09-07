@@ -54,6 +54,12 @@ jobs:
           # Conservation Kernel is consumed as an installed package rather
           # than a sibling path, matching how it resolves locally.
           python -m pip install ./conservation_kernel
+          # fortress-kernel declares numpy>=1.24.0. Installing it pulls that
+          # in from its own metadata rather than this repo guessing at a
+          # sibling's dependencies. Without it the import fails on numpy and
+          # the adapter reports "fortress-kernel not found" -- a missing
+          # transitive dependency wearing a missing-repo error message.
+          python -m pip install ./fortress-kernel
 
       - name: Test
         run: python -m pytest -q
