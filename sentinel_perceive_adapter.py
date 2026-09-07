@@ -1,11 +1,35 @@
 """
 Sentinel OS → PERCEIVE Adapter
 
-Converts Sentinel artifacts to PERCEIVE governance requests.
-Preserves artifact identity, provenance, authority, epistemic state.
+Converts Sentinel artifacts to PERCEIVE governance requests, drives the
+PERCEIVE kernel, and converts its verdict back into the cross-system
+GovernanceDecision contract.
+
+Two vocabularies meet at this seam and neither one gets to win:
+
+- `governance_contracts` is the *cross-system* vocabulary. Every adapter in
+  this chain speaks it, so a decision can travel Sentinel → PERCEIVE →
+  Conservation → GSA-815 → OBSERVE without any one system's internal types
+  leaking into the next.
+- `perceive_consolidated` is PERCEIVE's *internal* vocabulary
+  (`PolicyRequest` / `PolicyVerdict`). PERCEIVE is a standalone governance
+  kernel; it does not import the orchestration contracts and must not have to.
+
+Translating between them is this adapter's whole job. An earlier version of
+the orchestrator skipped the translation and called a `perceive.evaluate()`
+that never existed, handing PERCEIVE a `GovernanceRequest` it could not read
+and passing its `PolicyVerdict` to a downstream adapter expecting a
+`GovernanceDecision`. The seam is explicit now so that drift is a failing
+test rather than an AttributeError at runtime.
 """
 
-from governance_contracts import GovernanceRequest, GovernanceRequestType, compute_state_commitment
+from governance_contracts import (
+    GovernanceApproval,
+    GovernanceDecision,
+    GovernanceRequest,
+    GovernanceRequestType,
+    compute_state_commitment,
+)
 from datetime import datetime, timezone
 import hashlib
 import sys
@@ -84,6 +108,96 @@ class SentinelPerceiveAdapter:
             },
         )
         return request
+
+    @staticmethod
+    def governance_request_to_policy_request(request: GovernanceRequest):
+        """Convert a cross-system GovernanceRequest into PERCEIVE's own
+        PolicyRequest.
+
+        `request_type` carries the string value, not the enum: PERCEIVE's
+        `_select_gates` matches on literals ("escalate_patient",
+        "modify_rule", ...), and GovernanceRequestType's values were chosen
+        to line up with them exactly.
+
+        `timestamp` is passed through rather than left to default. PERCEIVE
+        uses it as the reference time for its rate-limit windows, so passing
+        the request's own timestamp keeps evaluation a pure function of
+        recorded inputs; letting it fall back to wall-clock would make the
+        same request evaluate differently on a re-run.
+        """
+        from perceive_consolidated import PolicyRequest
+
+        request_type = (
+            request.request_type.value
+            if hasattr(request.request_type, "value")
+            else str(request.request_type)
+        )
+        # PERCEIVE reasons about a subject (the patient/entity the request is
+        # about); the orchestration layer reasons about an artifact. Prefer an
+        # explicit subject from context, fall back to the artifact itself.
+        subject_id = (
+            request.context.get("patient_id")
+            or request.context.get("subject_id")
+            or request.artifact_id
+        )
+        return PolicyRequest(
+            request_id=request.request_id,
+            request_type=request_type,
+            subject_id=subject_id,
+            actor_id=request.producer,
+            context=dict(request.context),
+            timestamp=request.timestamp,
+            state_commitment=request.state_commitment,
+        )
+
+    @staticmethod
+    def policy_verdict_to_governance_decision(verdict, request: GovernanceRequest) -> GovernanceDecision:
+        """Convert PERCEIVE's PolicyVerdict into the cross-system
+        GovernanceDecision the rest of the chain consumes.
+
+        `unanimous_consensus` maps to `verdict.approved`, not to
+        `verdict.consensus_result`. These are two different things and the
+        distinction is load-bearing: PERCEIVE's ConsensusEngine approves only
+        when *every* applied gate approved, so `approved is True` IS the
+        unanimity claim. `consensus_result` is the separate, optional DGK
+        multi-node consensus that runs only for critical request types, and is
+        None on the ordinary path -- reading it as the unanimity signal would
+        report every normal unanimous approval as non-unanimous.
+
+        `decision_id` is derived from the audit hash rather than generated
+        randomly, so the same verdict always yields the same decision id and
+        the audit chain stays reproducible.
+        """
+        approval = (
+            GovernanceApproval.APPROVED if verdict.approved else GovernanceApproval.REJECTED
+        )
+        decision_id = f"perceive-{verdict.audit_hash[:16]}" if verdict.audit_hash else f"perceive-{verdict.request_id}"
+        return GovernanceDecision(
+            request_id=verdict.request_id,
+            decision_id=decision_id,
+            approval=approval,
+            applied_gates=list(verdict.applied_gates),
+            unanimous_consensus=bool(verdict.approved),
+            violations=list(verdict.violations),
+            policy_version=verdict.policy_version,
+            perceive_audit_hash=verdict.audit_hash,
+            # PERCEIVE already chained its commitment onto the request's, so
+            # carry its value through rather than recomputing a parallel one.
+            state_commitment=verdict.state_commitment,
+            timestamp=datetime.now(timezone.utc),
+        )
+
+    @classmethod
+    def evaluate_through_perceive(cls, perceive_kernel, request: GovernanceRequest) -> GovernanceDecision:
+        """Drive a full PERCEIVE evaluation for a GovernanceRequest.
+
+        The one call the orchestrator needs: cross-system request in,
+        cross-system decision out, with PERCEIVE's internal vocabulary
+        confined to this method.
+        """
+        policy_request = cls.governance_request_to_policy_request(request)
+        verdict = perceive_kernel.evaluate_request(policy_request)
+        return cls.policy_verdict_to_governance_decision(verdict, request)
 
     @staticmethod
     def _compute_hash(content: str) -> str:
