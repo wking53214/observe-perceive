@@ -22,7 +22,8 @@ class GovernanceOrchestrator:
                  fortress_controller: str = None,
                  simulation_screen: bool = False, simulation_seed: int = 42,
                  require_declared_scope: bool = False,
-                 require_vitals: bool = False):
+                 require_vitals: bool = False,
+                 raise_on_stage_error: bool = False):
         """
         Initialize orchestrator with all governance systems.
 
@@ -62,9 +63,19 @@ class GovernanceOrchestrator:
                 `observe_enforced`, so an APPROVED_AND_EXECUTED record with
                 no OBSERVE verdict can be told apart from one where OBSERVE
                 ran. Same shape as require_declared_scope.
+            raise_on_stage_error: raise instead of recording REJECTED when a
+                stage raises something other than its own refusal. Defaults
+                False: the Conservation and execution-approval stages have
+                always converted any exception into a REJECTED record, which
+                made "the kernel refused" and "there was no kernel" the same
+                record. Every such record now carries `stage_refused`,
+                `refused_by` and `stage_error`; this flag turns the crash
+                case into an exception for callers that would rather not
+                have a stage failure filed as a verdict.
         """
         self.require_declared_scope = require_declared_scope
         self.require_vitals = require_vitals
+        self.raise_on_stage_error = raise_on_stage_error
         self.perceive = perceive
         self.conservation_kernel = conservation_kernel
         self.observe_engine = observe_engine
@@ -230,11 +241,31 @@ class GovernanceOrchestrator:
             )
             logger.info(f"[Orchestrator] Conservation verified: {conservation_decision.verified}")
         except Exception as e:
+            from perceive_conservation_adapter import ConservationRefusal
+            refused = isinstance(e, ConservationRefusal)
+            if not refused:
+                # The stage did not refuse -- it was absent or it crashed. The
+                # record below still says REJECTED (unchanged), but now says
+                # which of the two happened: from the outside, "the kernel
+                # refused" and "there was no kernel" used to be identical.
+                logger.warning(
+                    "[Orchestrator] Conservation stage did not run to a verdict -- "
+                    f"it raised {type(e).__name__}: {e}. Recording REJECTED with "
+                    "stage_refused=False. Pass a working conservation_kernel, or "
+                    "construct the orchestrator with raise_on_stage_error=True to "
+                    "raise instead of filing a stage failure as a rejection."
+                )
+                if self.raise_on_stage_error:
+                    raise
             logger.error(f"[Orchestrator] Conservation Kernel rejected: {e}")
             return {
                 "status": "REJECTED",
                 "reason": f"Conservation Kernel rejected decision: {e}",
                 "governance_decision": perceive_decision,
+                "refused_by": "conservation" if refused else None,
+                "stage_refused": refused,
+                "stage_error": None if refused else f"{type(e).__name__}: {e}",
+                "conservation_enforced": refused,
                 "audit_chain": None,
             }
 
@@ -257,11 +288,41 @@ class GovernanceOrchestrator:
             )
             logger.info("[Orchestrator] GSA-815 execution approved")
         except Exception as e:
+            from conservation_gsa815_adapter import ExecutionRefusal
+            from governance_contracts import GovernanceApproval
+            refused = isinstance(e, ExecutionRefusal)
+            if refused:
+                # The approval gate refuses when the decision it was handed is
+                # not an approval -- and that decision is PERCEIVE's. A
+                # PERCEIVE refusal reaches this point with the Conservation
+                # Kernel having verified a *rejected* decision, and used to
+                # be recorded here in the approval gate's words. Name the
+                # stage that actually said no.
+                refused_by = (
+                    "perceive"
+                    if perceive_decision.approval is not GovernanceApproval.APPROVED
+                    else "execution_approval"
+                )
+            else:
+                refused_by = None
+                logger.warning(
+                    "[Orchestrator] Execution-approval stage did not run to a verdict -- "
+                    f"it raised {type(e).__name__}: {e}. Recording REJECTED with "
+                    "stage_refused=False. Construct the orchestrator with "
+                    "raise_on_stage_error=True to raise instead."
+                )
+                if self.raise_on_stage_error:
+                    raise
             logger.error(f"[Orchestrator] Execution rejected: {e}")
             return {
                 "status": "REJECTED",
                 "reason": str(e),
                 "governance_decision": perceive_decision,
+                "conservation_decision": conservation_decision,
+                "refused_by": refused_by,
+                "stage_refused": refused,
+                "stage_error": None if refused else f"{type(e).__name__}: {e}",
+                "conservation_enforced": True,
                 "audit_chain": None,
             }
 

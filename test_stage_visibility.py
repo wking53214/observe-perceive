@@ -172,3 +172,67 @@ def test_require_vitals_still_allows_a_request_that_supplies_them():
     assert ran == [True]
 
 
+# ---------------------------------------------------------------------------
+# Refused vs. absent-or-crashed
+# ---------------------------------------------------------------------------
+
+def test_a_missing_conservation_kernel_is_recorded_as_a_stage_failure_not_a_verdict():
+    """The calibration case: no kernel at all used to come back as
+    "Conservation Kernel rejected decision". Status is unchanged; the record
+    now says the stage never reached a verdict."""
+    result, ran = _run(_orchestrator(conservation=None), "stage-001")
+    assert result["status"] == "REJECTED"
+    assert result["stage_refused"] is False
+    assert result["conservation_enforced"] is False
+    assert result["refused_by"] is None
+    assert "AttributeError" in result["stage_error"]
+    assert ran == []
+
+
+class _RefusingKernel(ConservationKernel):
+    def submit(self, *args, **kwargs):
+        real = super().submit(*args, **kwargs)
+
+        class Refused:
+            accepted = False
+            violations = ["UNDECLARED_CHANGE"]
+            transformation_id = real.transformation_id
+            status = real.status
+
+        return Refused()
+
+
+def test_a_kernel_refusal_is_recorded_as_a_refusal():
+    result, _ = _run(_orchestrator(conservation=_RefusingKernel), "stage-002")
+    assert result["status"] == "REJECTED"
+    assert result["stage_refused"] is True
+    assert result["conservation_enforced"] is True
+    assert result["refused_by"] == "conservation"
+    assert result["stage_error"] is None
+    assert "UNDECLARED_CHANGE" in result["reason"]
+
+
+def test_a_perceive_refusal_is_attributed_to_perceive():
+    """PERCEIVE refuses (no manifest registered), the chain carries the
+    rejected decision on to Conservation, and the approval gate is what
+    finally stops it. The reason text is unchanged; `refused_by` names the
+    stage that actually said no."""
+    result, ran = _run(_orchestrator(perceive=_kernel(with_manifest=False)), "stage-003")
+    assert result["status"] == "REJECTED"
+    assert result["governance_decision"].approval is GovernanceApproval.REJECTED
+    assert result["stage_refused"] is True
+    assert result["refused_by"] == "perceive"
+    assert result["conservation_enforced"] is True
+    assert ran == []
+
+
+def test_raise_on_stage_error_turns_a_crash_into_an_exception():
+    orchestrator = _orchestrator(conservation=None, raise_on_stage_error=True)
+    with pytest.raises(AttributeError):
+        _run(orchestrator, "stage-004")
+
+
+def test_raise_on_stage_error_leaves_a_real_refusal_alone():
+    result, _ = _run(_orchestrator(conservation=_RefusingKernel, raise_on_stage_error=True), "stage-005")
+    assert result["status"] == "REJECTED"
+    assert result["refused_by"] == "conservation"

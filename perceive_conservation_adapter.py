@@ -35,6 +35,16 @@ def _import_conservation():
  DeclaredChange, Dimension, TransitionKind) = _import_conservation()
 
 
+class ConservationRefusal(Exception):
+    """The Conservation Kernel evaluated the transformation and refused it.
+
+    A subclass of Exception so every existing `except Exception` still
+    catches it. It exists so the orchestrator can distinguish a refusal the
+    kernel actually made from an AttributeError raised because there was no
+    kernel -- two outcomes that used to produce the same REJECTED record.
+    """
+
+
 class PerceiveConservationAdapter:
     """Submits PERCEIVE verdicts to Conservation Kernel."""
 
@@ -168,7 +178,7 @@ PERCEIVE Governance Decision:
 
         # If Kernel rejects, fail closed
         if not verification_result.accepted:
-            raise Exception(
+            raise ConservationRefusal(
                 f"Conservation Kernel rejected PERCEIVE decision: {verification_result.violations}"
             )
 
