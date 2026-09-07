@@ -126,10 +126,12 @@ class TieGovernanceAdapter:
                 ("MISSING", "missing from the source"),
             ):
                 if by_status.get(status):
-                    stated.append(
-                        f"{by_status[status]} of {len(segments)} source segments "
-                        f"{label}"
-                    )
+                    line = f"{by_status[status]} of {len(segments)} source segments {label}"
+                    # TIE now states its own coverage gaps in known_uncertainty
+                    # (TIE commit 29c2989) in exactly these words. Saying it
+                    # once is the point; saying it twice reads as two gaps.
+                    if line not in stated:
+                        stated.append(line)
         return stated
 
     @classmethod
