@@ -141,3 +141,34 @@ def test_advisory_violations_travel_into_the_governance_decision():
     assert decision.advisory_violations == verdict.advisory_violations
 
 
+# ---------------------------------------------------------------------------
+# OBSERVE skip
+# ---------------------------------------------------------------------------
+
+def test_the_record_says_whether_observe_ran():
+    without, _ = _run(_orchestrator(), "obs-001")
+    assert without["status"] == "APPROVED_AND_EXECUTED", without.get("reason")
+    assert without["observe_enforced"] is False
+    assert without["observe_verdict"] is None
+
+    with_vitals, _ = _run(_orchestrator(), "obs-002", vitals_snapshot=_vitals())
+    assert with_vitals["status"] == "APPROVED_AND_EXECUTED", with_vitals.get("reason")
+    assert with_vitals["observe_enforced"] is True
+    assert with_vitals["observe_verdict"] is not None
+
+
+def test_require_vitals_refuses_before_anything_executes():
+    result, ran = _run(_orchestrator(require_vitals=True), "obs-003")
+    assert result["status"] == "REJECTED"
+    assert "vitals" in result["reason"]
+    assert result["observe_enforced"] is False
+    assert ran == [], "strict mode executed the operation before refusing"
+
+
+def test_require_vitals_still_allows_a_request_that_supplies_them():
+    result, ran = _run(_orchestrator(require_vitals=True), "obs-004", vitals_snapshot=_vitals())
+    assert result["status"] == "APPROVED_AND_EXECUTED", result.get("reason")
+    assert result["observe_enforced"] is True
+    assert ran == [True]
+
+

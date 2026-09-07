@@ -21,7 +21,8 @@ class GovernanceOrchestrator:
     def __init__(self, perceive=None, conservation_kernel=None, observe_engine=None,
                  fortress_controller: str = None,
                  simulation_screen: bool = False, simulation_seed: int = 42,
-                 require_declared_scope: bool = False):
+                 require_declared_scope: bool = False,
+                 require_vitals: bool = False):
         """
         Initialize orchestrator with all governance systems.
 
@@ -54,8 +55,16 @@ class GovernanceOrchestrator:
                 anyone reading the record. Measured when this was added: 15 of
                 16 call sites declared no scope, so the check was reaching
                 almost nothing while looking like a control.
+            require_vitals: refuse to execute a request that supplies no
+                vitals snapshot. Defaults False: OBSERVE (Phase 6) has always
+                been skipped when there are no vitals. The skip is no longer
+                silent -- it is logged as a warning and the result carries
+                `observe_enforced`, so an APPROVED_AND_EXECUTED record with
+                no OBSERVE verdict can be told apart from one where OBSERVE
+                ran. Same shape as require_declared_scope.
         """
         self.require_declared_scope = require_declared_scope
+        self.require_vitals = require_vitals
         self.perceive = perceive
         self.conservation_kernel = conservation_kernel
         self.observe_engine = observe_engine
@@ -312,6 +321,32 @@ class GovernanceOrchestrator:
                 "audit_chain": None,
             }
 
+        # OBSERVE (Phase 6) runs only when vitals are supplied. Like the
+        # scope check above, the skip used to be a log line and nothing else:
+        # an APPROVED_AND_EXECUTED record with observe_verdict=None looked the
+        # same whether OBSERVE was skipped or never existed. Decided here,
+        # before execution, so strict mode refuses before anything runs.
+        if vitals_snapshot is None:
+            if self.require_vitals:
+                logger.error(
+                    "[Orchestrator] Refusing execution: no vitals supplied and require_vitals is on"
+                )
+                return {
+                    "status": "REJECTED",
+                    "reason": "no vitals supplied; OBSERVE monitoring requires them",
+                    "governance_decision": perceive_decision,
+                    "conservation_decision": conservation_decision,
+                    "execution_approval": execution_approval,
+                    "scope_enforced": declared_scope is not None,
+                    "observe_enforced": False,
+                    "audit_chain": None,
+                }
+            logger.warning(
+                "[Orchestrator] No vitals supplied -- OBSERVE will NOT run and no "
+                "forensic proof will be produced. Pass vitals_snapshot, or construct "
+                "the orchestrator with require_vitals=True to refuse instead."
+            )
+
         logger.info("[Orchestrator] Phase 5: GSA-815 execution")
         gsa815_result = gsa815_operation_func(execution_context)
         logger.info(f"[Orchestrator] GSA-815 result: {gsa815_result}")
@@ -323,7 +358,7 @@ class GovernanceOrchestrator:
             observe_verdict = self.observe_engine.evaluate(vitals_snapshot)
             logger.info(f"[Orchestrator] OBSERVE verdict: regime={observe_verdict.regime.value}")
         else:
-            logger.warning("[Orchestrator] No vitals provided, skipping OBSERVE evaluation")
+            logger.info("[Orchestrator] No vitals provided, OBSERVE evaluation skipped (warned above)")
 
         # PHASE 7: Link audit chains
         logger.info("[Orchestrator] Phase 7: Linking audit chains")
@@ -344,6 +379,8 @@ class GovernanceOrchestrator:
             "status": "APPROVED_AND_EXECUTED",
             "scope_enforced": declared_scope is not None,
             "declared_scope": declared_scope,
+            "observe_enforced": observe_verdict is not None,
+            "advisory_violations": list(getattr(perceive_decision, "advisory_violations", None) or []),
             "governance_decision": perceive_decision,
             "simulation_screen": screen_result,
             "fortress_result": fortress_result,
