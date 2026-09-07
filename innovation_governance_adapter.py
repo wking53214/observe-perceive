@@ -50,8 +50,11 @@ rejection, where nothing was affirmed at all.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger("InnovationGovernanceAdapter")
 
 
 @dataclass
@@ -91,6 +94,25 @@ class InnovationGovernanceAdapter:
     _AFFIRMATIVE_DECISIONS = frozenset({"approve", "approved", "accept", "accepted"})
 
     @staticmethod
+    def named_reviewer(approval) -> Optional[str]:
+        """The reviewer's name, or None when nobody is attached.
+
+        An empty, blank or missing reviewer is not a person. innovation_os's
+        ApprovalEngine accepts an approval with reviewer="" (measured), and
+        this adapter used to stamp every approval HUMAN / human_reviewed
+        regardless -- so an automated pass wearing an approval's shape
+        acquired human authority by arriving through this seam. citadel's
+        check for approve_decision looked only for the presence of the
+        `reviewer` key, which the adapter always supplied, so nothing
+        downstream caught it either. Measured: reviewer "", "   " and None
+        all came back APPROVED_AND_EXECUTED with authority HUMAN.
+        """
+        reviewer = getattr(approval, "reviewer", None)
+        if not isinstance(reviewer, str) or not reviewer.strip():
+            return None
+        return reviewer.strip()
+
+    @staticmethod
     def approval_to_artifact(approval) -> ApprovalArtifact:
         """Convert an innovation_os ApprovalRecord into the chain's artifact
         shape.
@@ -104,6 +126,14 @@ class InnovationGovernanceAdapter:
         """
         decision = (getattr(approval, "decision", "") or "").strip().lower()
         affirmative = decision in InnovationGovernanceAdapter._AFFIRMATIVE_DECISIONS
+        reviewer = InnovationGovernanceAdapter.named_reviewer(approval)
+        if reviewer is None:
+            logger.warning(
+                f"Innovation approval {getattr(approval, 'approval_id', '?')} names no "
+                "reviewer -- recorded as UNATTRIBUTED, not HUMAN, and routed as "
+                "requiring human oversight. Attach a reviewer to the ApprovalRecord "
+                "to have it governed as a person's decision."
+            )
 
         content = (
             f"Innovation approval {approval.approval_id}: "
@@ -117,12 +147,14 @@ class InnovationGovernanceAdapter:
             # where it came from and does not change with the verdict.
             origin_status=_Status("INNOVATION_OS"),
             # A named person made this call. Preserving that is the whole
-            # reason this seam is careful.
-            authority_status=_Status("HUMAN"),
-            # ATTESTED only for an affirmative decision -- a human asserted
-            # something. A rejection affirms nothing, so it stays UNVERIFIED
-            # rather than borrowing the standing of an assertion.
-            epistemic_status=_Status("ATTESTED" if affirmative else "UNVERIFIED"),
+            # reason this seam is careful -- and the reason an approval with
+            # nobody attached must not be called HUMAN.
+            authority_status=_Status("HUMAN" if reviewer else "UNATTRIBUTED"),
+            # ATTESTED only for an affirmative decision by a named person --
+            # a human asserted something. A rejection affirms nothing, and an
+            # unattributed approval was asserted by nobody, so both stay
+            # UNVERIFIED rather than borrowing the standing of an assertion.
+            epistemic_status=_Status("ATTESTED" if (affirmative and reviewer) else "UNVERIFIED"),
             # What was reviewed, and the decision it came from, are lineage --
             # traceable, but not this artifact's identity.
             parent_artifact_ids=[
@@ -143,30 +175,35 @@ class InnovationGovernanceAdapter:
     def approval_context(approval, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Context for the chain's gates.
 
-        `requires_human_oversight` is deliberately False here: a human has
+        `requires_human_oversight` is False when a named person has
         *already* reviewed this. PERCEIVE's sentinel gate raises a violation
         when a SYSTEM_ actor makes a change requiring human review, and that
         check exists to catch the absence of a person -- firing it on a record
         that is itself a person's decision would be the check misreading its
-        own subject.
+        own subject. When no person is named the absence is real, so the flag
+        is raised and the `reviewer` key is left out entirely: citadel's
+        approve_decision check looks for that key, and sending it empty was
+        how an unattributed approval cleared the gate.
 
         `lineage_hash` is passed through so a downstream verifier can tie the
         chain's own record back to innovation_os's lineage chain rather than
         having to trust that they refer to the same event.
         """
+        reviewer = InnovationGovernanceAdapter.named_reviewer(approval)
         context: Dict[str, Any] = {
             "subject_id": getattr(approval, "target_id", None),
-            "reviewer": getattr(approval, "reviewer", None),
             "innovation_decision": getattr(approval, "decision", None),
             "innovation_lineage_hash": getattr(approval, "lineage_hash", None),
-            "requires_human_oversight": False,
-            "human_reviewed": True,
+            "requires_human_oversight": reviewer is None,
+            "human_reviewed": reviewer is not None,
             # The reviewer's own rationale IS the justification PERCEIVE's
             # citadel gate looks for. Passing it under that key is what makes
             # the gate a real check on this path rather than a formality: an
             # approval recorded with a one-word rationale fails it.
             "justification": getattr(approval, "rationale", "") or "",
         }
+        if reviewer is not None:
+            context["reviewer"] = reviewer
         if extra:
             context.update(extra)
         return context
