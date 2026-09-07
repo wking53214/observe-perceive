@@ -9,7 +9,6 @@ from governance_contracts import ExecutionContext, OutcomeContext, compute_state
 from observe_consolidated import FusedVerdict
 from datetime import datetime, timezone
 import hashlib
-import uuid
 
 
 class GSA815ObserveAdapter:

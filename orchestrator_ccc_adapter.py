@@ -39,7 +39,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -119,7 +119,6 @@ class OrchestratorCCCAdapter:
 
         gates = list(getattr(decision, "applied_gates", []) or [])
         violations = list(getattr(decision, "violations", []) or [])
-        rid = request_id or getattr(decision, "request_id", None) or "unknown-request"
 
         # The conclusion is the recurrence-matching surface -- it is what CCC
         # compares against prior discoveries, and getting its specificity
@@ -138,7 +137,7 @@ class OrchestratorCCCAdapter:
         # are distinguishable, and keep the outcome vocabulary (gates,
         # violations, refusal reason) shared so they still cluster. That is
         # the difference between "this happened again" and "you told me twice".
-        subject = OrchestratorCCCAdapter._subject_of(decision, result)
+        subject = OrchestratorCCCAdapter._subject_of(decision, result, request_id)
         if status == "APPROVED_AND_EXECUTED":
             conclusion = (
                 f"Governance chain approved and executed a governed request "
@@ -263,7 +262,8 @@ class OrchestratorCCCAdapter:
         )
 
     @staticmethod
-    def _subject_of(decision, result: Dict[str, Any]) -> str:
+    def _subject_of(decision, result: Dict[str, Any],
+                    request_id: str = None) -> str:
         """What this orchestration was *about*, in a form that distinguishes
         occurrences without defeating clustering.
 
@@ -272,7 +272,7 @@ class OrchestratorCCCAdapter:
         into duplicates. It is intentionally the only high-cardinality token
         in the conclusion; hashes and timestamps stay out.
         """
-        rid = getattr(decision, "request_id", None)
+        rid = request_id or getattr(decision, "request_id", None)
         if rid:
             return f"artifact {rid}"
         proof = result.get("forensic_proof") or {}

@@ -22,7 +22,6 @@ from observe_consolidated import (
     ImmutableAuditLedger,
     ProvisionalStore,
     validate_vitals,
-    decision_fingerprint,
 )
 
 
@@ -549,8 +548,12 @@ class TestEngineIntegration(unittest.TestCase):
         v1 = engine.evaluate(v)
         v2 = engine.evaluate(v)
         v3 = engine.evaluate(v)
-        # Should remain stable across repeated low-risk readings (no thrashing)
+        # Should remain stable across repeated low-risk readings (no thrashing).
+        # All three are asserted: checking only the first and last lets the
+        # middle reading thrash unobserved, which is the exact failure this
+        # test exists to rule out.
         self.assertEqual(v1.regime, OperationalRegime.STABLE)
+        self.assertEqual(v2.regime, OperationalRegime.STABLE)
         self.assertEqual(v3.regime, OperationalRegime.STABLE)
 
 

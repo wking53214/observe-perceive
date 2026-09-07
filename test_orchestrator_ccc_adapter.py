@@ -22,7 +22,7 @@ import pytest
 
 sys.path.insert(0, "/home/wking53214/CCC")
 
-from orchestrator_ccc_adapter import OrchestrationFinding, OrchestratorCCCAdapter  # noqa: E402
+from orchestrator_ccc_adapter import OrchestratorCCCAdapter  # noqa: E402
 
 ccc_available = True
 try:

@@ -13,6 +13,13 @@ costs the thing the chain exists to prevent.
 """
 
 import pytest
+from dataclasses import dataclass as _dc
+from datetime import datetime as _dt, timezone as _tz
+from typing import List as _List
+from conservation_kernel import ConservationKernel
+from governance_orchestrator import GovernanceOrchestrator
+from observe_consolidated import ObserveClinicalEngine
+from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
 
 fortress_available = True
 try:
@@ -172,14 +179,7 @@ def test_a_screen_that_predicts_instability_says_do_not_proceed():
 # As the chain's first judging stage
 # ---------------------------------------------------------------------------
 
-from dataclasses import dataclass as _dc
-from datetime import datetime as _dt, timezone as _tz
-from typing import List as _List
 
-from conservation_kernel import ConservationKernel
-from governance_orchestrator import GovernanceOrchestrator
-from observe_consolidated import ObserveClinicalEngine
-from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
 
 
 @_dc

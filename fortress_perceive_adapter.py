@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 
@@ -305,7 +305,6 @@ class FortressPerceiveAdapter:
 # ============================================================================
 
 if __name__ == "__main__":
-    from datetime import datetime as dt
 
     # Test all three controller modes
     for mode in ["energy", "lyapunov", "sage"]:

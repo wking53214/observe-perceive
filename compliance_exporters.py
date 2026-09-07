@@ -141,7 +141,7 @@ class FDAExporter:
         lines = [
             "FDA 510(k) SOFTWARE VALIDATION REPORT",
             "=" * 50,
-            f"Software: OBSERVE Clinical AI",
+            "Software: OBSERVE Clinical AI",
             f"Version: {software_version}",
             f"Report generated: {datetime.now(timezone.utc).isoformat()}",
             "",

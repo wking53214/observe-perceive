@@ -3,9 +3,6 @@ Basic tests for Governance Orchestrator.
 Tests core orchestrator functionality without external dependencies.
 """
 
-import sys
-import os
-from datetime import datetime, timezone
 
 
 def test_imports():
