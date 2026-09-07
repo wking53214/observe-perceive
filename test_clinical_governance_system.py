@@ -80,10 +80,20 @@ class TestEscalationTypeSelection(unittest.TestCase):
         # which do NOT include micropatch.
         # Septic-shock pattern lands as critical, so to get a clean warning we need an
         # elevated-but-not-critical fused risk. We drive it via a hard-rule O2 warning.
-        d = self.system.process_vitals(vitals(hr=120, o2=86.0, rr=30, temp=37.5, age=24, force_heavy=True))
-        if d.escalation_required and d.regime == "warning":
-            self.assertNotIn("micropatch", d.applied_gates)
-            self.assertIn("boundary_gate", d.applied_gates)
+        #
+        # The previous input (hr=120, o2=86.0, rr=30, age=24, force_heavy=True)
+        # produced regime "stable" with no escalation, and the assertions sat
+        # behind `if d.escalation_required and d.regime == "warning"`, so this
+        # test had never asserted anything. Measured by deleting the guard:
+        # it failed with "regime=stable esc=False". The input below was found
+        # by scanning the engine for one that actually escalates at WARNING,
+        # and the regime is asserted first so the gate assertions cannot go
+        # dark again if the thresholds move.
+        d = self.system.process_vitals(vitals(hr=100, o2=84.0, rr=20, temp=37.5, age=6, force_heavy=False))
+        self.assertEqual(d.regime, "warning")
+        self.assertTrue(d.escalation_required)
+        self.assertNotIn("micropatch", d.applied_gates)
+        self.assertIn("boundary_gate", d.applied_gates)
 
 
 # ============================================================================
