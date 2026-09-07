@@ -91,11 +91,21 @@ class GovernanceOrchestrator:
         logger.info(f"[Orchestrator] Request ID: {governance_request.request_id}")
 
         # PHASE 2: PERCEIVE evaluation
-        logger.info("[Orchestrator] Phase 2: PERCEIVE evaluation (6 gates, unanimous consensus)")
-        perceive_decision = self.perceive.evaluate(governance_request)
-        logger.info(f"[Orchestrator] PERCEIVE decision: {perceive_decision.approved}")
+        #
+        # Goes through the adapter, not straight at the kernel: PERCEIVE
+        # speaks PolicyRequest/PolicyVerdict, everything downstream of here
+        # speaks GovernanceDecision. The adapter owns that translation (see
+        # sentinel_perceive_adapter for why the two vocabularies stay separate).
+        logger.info("[Orchestrator] Phase 2: PERCEIVE evaluation (unanimous consensus across applied gates)")
+        perceive_decision = self.sentinel_adapter.evaluate_through_perceive(
+            self.perceive,
+            governance_request
+        )
+        logger.info(f"[Orchestrator] PERCEIVE approval: {perceive_decision.approval.value}")
         logger.info(f"[Orchestrator] Applied gates: {perceive_decision.applied_gates}")
-        logger.info(f"[Orchestrator] Unanimous: {perceive_decision.consensus_result}")
+        logger.info(f"[Orchestrator] Unanimous: {perceive_decision.unanimous_consensus}")
+        if perceive_decision.violations:
+            logger.info(f"[Orchestrator] Violations: {perceive_decision.violations}")
 
         # PHASE 3: Conservation Kernel verification
         logger.info("[Orchestrator] Phase 3: Conservation Kernel verification")
