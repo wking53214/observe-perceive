@@ -117,6 +117,19 @@ def test_uninspected_segments_become_a_stated_uncertainty():
                for u in context["known_uncertainty"])
 
 
+def test_a_coverage_gap_tie_already_stated_is_not_said_twice():
+    """TIE's own build_package appends the same gap statements to
+    known_uncertainty. A handoff that arrives with one must not leave this
+    adapter with two."""
+    handoff = _handoff(known_uncertainty=(
+        "Payment 3 has no stated date in the source.",
+        "2 of 10 source segments not inspected",
+    ))
+    context = TieGovernanceAdapter.handoff_context(handoff, _coverage(8, 2))
+    assert context["known_uncertainty"].count("2 of 10 source segments not inspected") == 1
+    assert "Payment 3 has no stated date in the source." in context["known_uncertainty"]
+
+
 def test_missing_segments_are_reported_separately_from_uninspected():
     """Not looked at and not there are different facts about the source."""
     context = TieGovernanceAdapter.handoff_context(_handoff(), _coverage(6, 2, 2))

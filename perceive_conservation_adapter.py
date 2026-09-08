@@ -25,14 +25,30 @@ def _import_conservation():
             ConservationKernel, Artifact, TransformationRecord, Actor, ActorKind,
             DeclaredChange, Dimension, TransitionKind,
         )
+        from conservation_kernel.errors import LedgerError
         return (ConservationKernel, Artifact, TransformationRecord, Actor, ActorKind,
-                DeclaredChange, Dimension, TransitionKind)
+                DeclaredChange, Dimension, TransitionKind, LedgerError)
     except ModuleNotFoundError:
-        return (None,) * 8
+        # A stand-in that no exception can ever be an instance of, so the
+        # `except LedgerError` below is inert rather than a NameError when
+        # the kernel is absent.
+        class _NoLedgerError(Exception):
+            pass
+        return (None,) * 8 + (_NoLedgerError,)
 
 
 (ConservationKernel, Artifact, TransformationRecord, Actor, ActorKind,
- DeclaredChange, Dimension, TransitionKind) = _import_conservation()
+ DeclaredChange, Dimension, TransitionKind, LedgerError) = _import_conservation()
+
+
+class ConservationRefusal(Exception):
+    """The Conservation Kernel evaluated the transformation and refused it.
+
+    A subclass of Exception so every existing `except Exception` still
+    catches it. It exists so the orchestrator can distinguish a refusal the
+    kernel actually made from an AttributeError raised because there was no
+    kernel -- two outcomes that used to produce the same REJECTED record.
+    """
 
 
 class PerceiveConservationAdapter:
@@ -159,16 +175,27 @@ PERCEIVE Governance Decision:
         # root first -- the kernel will not verify a transformation whose
         # input it has never seen, which is exactly the provenance guarantee
         # it exists to make.
-        self.kernel.register_root(input_artifact)
-        verification_result = self.kernel.submit(
-            input_artifact,
-            decision_artifact,
-            transformation_record,
-        )
+        #
+        # The ledger's own refusals -- a replay (duplicate artifact id) or an
+        # input it has never seen -- are raised as LedgerError rather than
+        # returned as a verdict. They are refusals all the same: the kernel
+        # looked and said no. Re-raised as ConservationRefusal so the
+        # orchestrator records them as such, not as a stage crash.
+        try:
+            self.kernel.register_root(input_artifact)
+            verification_result = self.kernel.submit(
+                input_artifact,
+                decision_artifact,
+                transformation_record,
+            )
+        except LedgerError as e:
+            raise ConservationRefusal(
+                f"Conservation Kernel ledger refused the transformation: {e}"
+            ) from e
 
         # If Kernel rejects, fail closed
         if not verification_result.accepted:
-            raise Exception(
+            raise ConservationRefusal(
                 f"Conservation Kernel rejected PERCEIVE decision: {verification_result.violations}"
             )
 

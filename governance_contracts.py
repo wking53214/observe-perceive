@@ -93,6 +93,11 @@ class GovernanceDecision:
     perceive_audit_hash: str
     state_commitment: str = ""
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # Violations PERCEIVE recorded but did not enforce (its policy gates default
+    # to advisory mode). Empty on a clean approval. Non-empty means the verdict
+    # is APPROVED *despite* these, which downstream readers need to be able to
+    # see rather than infer from an empty `violations` list.
+    advisory_violations: List[str] = field(default_factory=list)
 
 
 @dataclass
