@@ -13,6 +13,16 @@ from datetime import datetime, timezone
 import uuid
 
 
+class ExecutionRefusal(Exception):
+    """The approval gate refused to authorise execution.
+
+    Raised only for the two deliberate refusals below (decision not approved,
+    decision not verified), never for a programming error, so a caller can
+    tell a verdict from a crash. Subclasses Exception so existing handlers
+    are unaffected.
+    """
+
+
 class ConservationGSA815Adapter:
     """Gates GSA-815 execution on conservation-verified PERCEIVE decisions."""
 
@@ -44,12 +54,12 @@ class ConservationGSA815Adapter:
         """
         # Fail closed if conservation decision not approved
         if conservation_decision.approval != GovernanceApproval.APPROVED:
-            raise Exception(
+            raise ExecutionRefusal(
                 f"Conservation decision not approved: {conservation_decision.approval.value}"
             )
 
         if not conservation_decision.verified:
-            raise Exception("Conservation decision not verified")
+            raise ExecutionRefusal("Conservation decision not verified")
 
         # Create execution ID if not provided
         if not execution_id:
