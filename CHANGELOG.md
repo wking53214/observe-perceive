@@ -1,5 +1,17 @@
 # CHANGELOG — OBSERVE / PERCEIVE hardening pass
 
+## 1.1.0 (2026-09-08)
+
+Production hygiene from the 90-day plan. `pyproject.toml` replaces
+`setup.py`: version 1.1.0, the Conservation Kernel declared as the one hard
+dependency, the optional chain stages (CCC, AUGUR, GEMS, Governance_Gateway)
+as the `chain` extra and fortress-kernel as `fortress`, and every root module
+listed so the wheel is not empty. CI checks out this repository alone and
+installs from the manifest; the six sibling checkouts are gone. Measured in
+an isolated copy with no siblings on disk: 529 passed, 5 skipped, zero
+collection errors. The verified chain itself (contract 1.0.0, verifier,
+sixteen attacks, demo) is from PR #18 and is unchanged here.
+
 Scope: WS1 red-team (see `RED_TEAM_REPORT.md`), WS2 confirmed-defect fixes, WS3
 opt-in additive upgrades, WS4 behavior-preserving cleanup. Python 3.8+, stdlib only.
 

@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "observe-perceive"
+version = "1.1.0"
+description = "The governed action gate: admission, screen, policy gates, Conservation Kernel approval, execution, observation, record, with a verifiable hash chain over all of it."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+# The orchestrator calls the Conservation Kernel unconditionally (Phase 3),
+# so it is a hard dependency, declared here rather than found as a sibling.
+dependencies = [
+  "conservation-kernel @ git+https://github.com/wking53214/conservation_kernel",
+]
+
+[project.optional-dependencies]
+# The other chain stages. Each adapter resolves a sibling checkout first and
+# the installed package second, and its tests skip when neither is present;
+# installing this extra makes the whole suite run from a single clone.
+chain = [
+  "cognitive-continuity-constitution @ git+https://github.com/wking53214/CCC",
+  "augur @ git+https://github.com/wking53214/AUGUR",
+  "gems-infrastructure @ git+https://github.com/wking53214/GEMS",
+  "governance-gateway @ git+https://github.com/wking53214/Governance_Gateway",
+]
+# Opt-in strict stage; numpy comes in through its own metadata.
+fortress = ["fortress-kernel @ git+https://github.com/wking53214/fortress-kernel"]
+test = ["pytest>=8", "hypothesis"]
+
+[tool.setuptools]
+# Flat layout: every module sits at the repository root.
+py-modules = [
+  "adversarial_sensor_faults", "augur_screen_adapter", "capacity_planning",
+  "clinical_governance_system", "compliance_exporters",
+  "conservation_gsa815_adapter", "demo_why", "deterioration_simulator",
+  "fda_510k_checklist", "fortress_perceive_adapter", "gateway_admission_adapter",
+  "gems_governance_adapter", "governance_chain", "governance_contracts",
+  "governance_orchestrator", "gsa815_observe_adapter", "herald_governance_adapter",
+  "innovation_governance_adapter", "kalman_trajectory", "observe_consolidated",
+  "orchestrator_ccc_adapter", "perceive_conservation_adapter",
+  "perceive_consolidated", "reserve_control", "sentinel_perceive_adapter",
+  "tie_governance_adapter",
+]
