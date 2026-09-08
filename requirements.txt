@@ -1,4 +1,5 @@
-# The OBSERVE/PERCEIVE library itself is pure standard library (no runtime deps).
-# Tests use hypothesis for property-based testing:
-hypothesis
-pytest
+# The manifest is pyproject.toml. This file exists so `pip install -r
+# requirements.txt` from a clean clone installs the package, its one hard
+# dependency (Conservation Kernel), the optional chain stages and the test
+# tools, which is what CI does and what a full local run needs.
+-e .[test,chain,fortress]

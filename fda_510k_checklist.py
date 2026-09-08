@@ -216,7 +216,7 @@ CHECKLIST = {
         "VI.1": {
             "requirement": "Software version control & configuration management",
             "status": "⏳",
-            "evidence": "Git repo with CI on every push; setup.py version 1.0.0; CHANGELOG.md. No release tags exist and pytest.ini does not pin test files -- downgraded 2026-09-07.",
+            "evidence": "Git repo with CI on every push from a single clean checkout; pyproject.toml version 1.1.0 with every cross-repo dependency declared; CHANGELOG.md. No release tags exist and pytest.ini does not pin test files -- downgraded 2026-09-07.",
             "sign_off": "IT",
             "notes": "Current: local development only. Need CI/CD pipeline + release tagging (Phase 2).",
         },
