@@ -261,7 +261,15 @@ class GovernanceOrchestrator:
         """Orchestrate the flow (see `_orchestrate`) and receipt the result."""
         result = self._orchestrate(sentinel_artifact, operation_type, gsa815_operation_func, vitals_snapshot, context)
         if self.receipts is not None:
-            result["receipt"] = self.receipts.append(result)
+            try:
+                result["receipt"] = self.receipts.append(result)
+            except Exception as e:  # noqa: BLE001
+                # The action (if any) has already happened; raising here
+                # would lose even the in-memory record. Degrade explicitly:
+                # the result says it was not receipted, and says why.
+                result["receipt"] = None
+                result["receipt_error"] = f"{type(e).__name__}: {e}"
+                logger.critical(f"[Orchestrator] Result NOT receipted: {result['receipt_error']}")
         return result
 
     def _orchestrate(
@@ -405,10 +413,31 @@ class GovernanceOrchestrator:
         # speaks GovernanceDecision. The adapter owns that translation (see
         # sentinel_perceive_adapter for why the two vocabularies stay separate).
         logger.info("[Orchestrator] Phase 2: PERCEIVE evaluation (unanimous consensus across applied gates)")
-        perceive_decision = self.sentinel_adapter.evaluate_through_perceive(
-            self.perceive,
-            governance_request
-        )
+        try:
+            perceive_decision = self.sentinel_adapter.evaluate_through_perceive(
+                self.perceive,
+                governance_request
+            )
+        except Exception as e:
+            # Measured 2026-09-08: with no PERCEIVE configured this phase
+            # raised AttributeError out of the orchestrator and left no
+            # record at all -- the one stage whose failure was a crash rather
+            # than a refusal. Same shape as the other stages now.
+            logger.warning(
+                "[Orchestrator] PERCEIVE stage did not run to a verdict -- "
+                f"it raised {type(e).__name__}: {e}. Recording REJECTED with stage_refused=False."
+            )
+            if self.raise_on_stage_error:
+                raise
+            return self._stamp({
+                "status": "REJECTED",
+                "reason": f"PERCEIVE stage did not run to a verdict: {type(e).__name__}: {e}",
+                "refused_by": None,
+                "stage_refused": False,
+                "stage_error": f"{type(e).__name__}: {e}",
+                "governance_decision": None,
+                "audit_chain": None,
+            }, governance_request)
         logger.info(f"[Orchestrator] PERCEIVE approval: {perceive_decision.approval.value}")
         logger.info(f"[Orchestrator] Applied gates: {perceive_decision.applied_gates}")
         logger.info(f"[Orchestrator] Unanimous: {perceive_decision.unanimous_consensus}")

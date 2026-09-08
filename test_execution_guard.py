@@ -130,7 +130,6 @@ def test_a_guarded_executor_records_its_authorization_in_the_result(orchestrator
 ])
 def test_a_context_altered_after_issuance_is_refused(orchestrator, field, value):
     ran = []
-    executor = guarded(lambda ctx: ran.append(1) or {}, orchestrator.execution_ledger)
     # Issue without executing: capture the context the orchestrator hands over.
     captured = {}
     def capture(ctx):
@@ -199,7 +198,8 @@ def test_a_tampered_ledger_file_is_refused_outright(tmp_path, perceive, kernel):
     # ...so truncation is the one edit a hash chain cannot see. Record it:
     # the defence is the append-only file plus the consumed entry being
     # required by any executor that already ran. Now alter an entry instead:
-    issued = json.loads(lines[0]); issued["context_timestamp"] = "1999-01-01T00:00:00+00:00"
+    issued = json.loads(lines[0])
+    issued["context_timestamp"] = "1999-01-01T00:00:00+00:00"
     path.write_text(json.dumps(issued, sort_keys=True) + "\n" + lines[1] + "\n")
     with pytest.raises(LedgerIntegrityError):
         ExecutionLedger(path)
