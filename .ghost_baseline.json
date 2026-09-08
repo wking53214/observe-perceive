@@ -2615,5 +2615,525 @@
     "severity": "minor",
     "status": "suppressed",
     "summary": "'RED_TEAM_REPORT.md' claims 249 test(s), but at least 404 test_* function(s) exist in the scanned .py files -- this claim is stale"
+  },
+  {
+    "category": "complexity",
+    "confidence": null,
+    "detail": "Line-count proxy for the 'Long Method' smell, not true cyclomatic complexity -- a long function that's mostly a flat sequence of simple statements is a weaker signal than a short function with deep branching. Treat as a prompt to look, not a verdict.",
+    "detector": "long_function",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/governance_orchestrator.py",
+      "line_end": 110,
+      "line_start": 21,
+      "related_files": [],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.316248+00:00",
+    "id": "ghost-ddf36e8c2bb8",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'__init__' spans 89 lines (threshold 80)"
+  },
+  {
+    "category": "complexity",
+    "confidence": null,
+    "detail": "Line-count proxy for the 'Long Method' smell, not true cyclomatic complexity -- a long function that's mostly a flat sequence of simple statements is a weaker signal than a short function with deep branching. Treat as a prompt to look, not a verdict.",
+    "detector": "long_function",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/governance_orchestrator.py",
+      "line_end": 456,
+      "line_start": 112,
+      "related_files": [],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.316398+00:00",
+    "id": "ghost-bb0d9920d761",
+    "layer": "mechanical",
+    "severity": "major",
+    "status": "suppressed",
+    "summary": "'orchestrate_request' spans 344 lines (threshold 80)"
+  },
+  {
+    "category": "complexity",
+    "confidence": null,
+    "detail": "Line-count proxy for the 'Long Method' smell, not true cyclomatic complexity -- a long function that's mostly a flat sequence of simple statements is a weaker signal than a short function with deep branching. Treat as a prompt to look, not a verdict.",
+    "detector": "long_function",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/perceive_conservation_adapter.py",
+      "line_end": 211,
+      "line_start": 61,
+      "related_files": [],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.345568+00:00",
+    "id": "ghost-ad1a1f79e5df",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'verify_perceive_decision' spans 150 lines (threshold 80)"
+  },
+  {
+    "category": "complexity",
+    "confidence": null,
+    "detail": "Line-count proxy for the 'Long Method' smell, not true cyclomatic complexity -- a long function that's mostly a flat sequence of simple statements is a weaker signal than a short function with deep branching. Treat as a prompt to look, not a verdict.",
+    "detector": "long_function",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/perceive_consolidated.py",
+      "line_end": 1122,
+      "line_start": 980,
+      "related_files": [],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.354349+00:00",
+    "id": "ghost-6da4d43a0a38",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'evaluate_request' spans 142 lines (threshold 80)"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/fda_510k_checklist.py",
+      "line_end": 285,
+      "line_start": 285,
+      "related_files": [
+        "/home/wking53214/observe-perceive/fda_510k_checklist.py:286-286",
+        "/home/wking53214/observe-perceive/fda_510k_checklist.py:287-287"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.662291+00:00",
+    "id": "ghost-1ce4504fca69",
+    "layer": "mechanical",
+    "severity": "major",
+    "status": "suppressed",
+    "summary": "'report' repeats the same single statement 3 times (lines 285-285, 286-286, 287-287): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/governance_orchestrator.py",
+      "line_end": 97,
+      "line_start": 97,
+      "related_files": [
+        "/home/wking53214/observe-perceive/governance_orchestrator.py:108-108"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.682238+00:00",
+    "id": "ghost-2665f5f31694",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'__init__' repeats the same single statement 2 times (lines 97-97, 108-108): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/governance_orchestrator.py",
+      "line_end": 148,
+      "line_start": 148,
+      "related_files": [
+        "/home/wking53214/observe-perceive/governance_orchestrator.py:427-427"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.688066+00:00",
+    "id": "ghost-0bf5e4d66407",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'orchestrate_request' repeats the same single statement 2 times (lines 148-148, 427-427): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/governance_orchestrator.py",
+      "line_end": 194,
+      "line_start": 194,
+      "related_files": [
+        "/home/wking53214/observe-perceive/governance_orchestrator.py:420-420"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.688300+00:00",
+    "id": "ghost-aecd4db9840f",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'orchestrate_request' repeats the same single statement 2 times (lines 194-194, 420-420): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/governance_orchestrator.py",
+      "line_end": 251,
+      "line_start": 251,
+      "related_files": [
+        "/home/wking53214/observe-perceive/governance_orchestrator.py:308-308"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.688414+00:00",
+    "id": "ghost-4a216defbb39",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'orchestrate_request' repeats the same single statement 2 times (lines 251-251, 308-308): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/perceive_consolidated.py",
+      "line_end": 158,
+      "line_start": 158,
+      "related_files": [
+        "/home/wking53214/observe-perceive/perceive_consolidated.py:162-162"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.774584+00:00",
+    "id": "ghost-0e2a29574487",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'can_escalate' repeats the same single statement 2 times (lines 158-158, 162-162): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/perceive_consolidated.py",
+      "line_end": 159,
+      "line_start": 159,
+      "related_files": [
+        "/home/wking53214/observe-perceive/perceive_consolidated.py:163-163",
+        "/home/wking53214/observe-perceive/perceive_consolidated.py:167-167"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.774734+00:00",
+    "id": "ghost-f86b295af5e9",
+    "layer": "mechanical",
+    "severity": "major",
+    "status": "suppressed",
+    "summary": "'can_escalate' repeats the same single statement 3 times (lines 159-159, 163-163, 167-167): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/perceive_consolidated.py",
+      "line_end": 193,
+      "line_start": 193,
+      "related_files": [
+        "/home/wking53214/observe-perceive/perceive_consolidated.py:195-195"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.775175+00:00",
+    "id": "ghost-d1a5356da032",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'can_modify' repeats the same single statement 2 times (lines 193-193, 195-195): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/perceive_consolidated.py",
+      "line_end": 194,
+      "line_start": 194,
+      "related_files": [
+        "/home/wking53214/observe-perceive/perceive_consolidated.py:196-196"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.775244+00:00",
+    "id": "ghost-244868e72e24",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'can_modify' repeats the same single statement 2 times (lines 194-194, 196-196): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/perceive_consolidated.py",
+      "line_end": 221,
+      "line_start": 221,
+      "related_files": [
+        "/home/wking53214/observe-perceive/perceive_consolidated.py:223-223",
+        "/home/wking53214/observe-perceive/perceive_consolidated.py:225-225"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.775630+00:00",
+    "id": "ghost-cc3eab7db9df",
+    "layer": "mechanical",
+    "severity": "major",
+    "status": "suppressed",
+    "summary": "'can_export' repeats the same single statement 3 times (lines 221-221, 223-223, 225-225): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/perceive_consolidated.py",
+      "line_end": 252,
+      "line_start": 252,
+      "related_files": [
+        "/home/wking53214/observe-perceive/perceive_consolidated.py:256-256"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.776243+00:00",
+    "id": "ghost-7a924b28705d",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'can_override' repeats the same single statement 2 times (lines 252-252, 256-256): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/perceive_consolidated.py",
+      "line_end": 424,
+      "line_start": 424,
+      "related_files": [
+        "/home/wking53214/observe-perceive/perceive_consolidated.py:436-436"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.779971+00:00",
+    "id": "ghost-9796317e01ac",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'sentinel' repeats the same single statement 2 times (lines 424-424, 436-436): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/perceive_consolidated.py",
+      "line_end": 833,
+      "line_start": 833,
+      "related_files": [
+        "/home/wking53214/observe-perceive/perceive_consolidated.py:834-834"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.784122+00:00",
+    "id": "ghost-259e4c09fd04",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'__init__' repeats the same single statement 2 times (lines 833-833, 834-834): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/perceive_consolidated.py",
+      "line_end": 845,
+      "line_start": 845,
+      "related_files": [
+        "/home/wking53214/observe-perceive/perceive_consolidated.py:846-846"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.784654+00:00",
+    "id": "ghost-d1bf4844c12d",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'escalation_window_counts' repeats the same single statement 2 times (lines 845-845, 846-846): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/test_clinical_governance_system.py",
+      "line_end": 160,
+      "line_start": 160,
+      "related_files": [
+        "/home/wking53214/observe-perceive/test_clinical_governance_system.py:161-161"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.820999+00:00",
+    "id": "ghost-395816a78d4f",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'test_both_chains_valid_after_mixed_traffic' repeats the same single statement 2 times (lines 160-160, 161-161): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/test_stage_visibility.py",
+      "line_end": 150,
+      "line_start": 150,
+      "related_files": [
+        "/home/wking53214/observe-perceive/test_stage_visibility.py:155-155"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.952575+00:00",
+    "id": "ghost-4b47d2804eba",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'test_the_record_says_whether_observe_ran' repeats the same single statement 2 times (lines 150-150, 155-155): same shape, names/literals differ"
+  },
+  {
+    "category": "duplication",
+    "confidence": null,
+    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
+    "detector": "intra_function_duplicate_block",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/test_tie_governance_adapter.py",
+      "line_end": 185,
+      "line_start": 185,
+      "related_files": [
+        "/home/wking53214/observe-perceive/test_tie_governance_adapter.py:186-186"
+      ],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:56.958208+00:00",
+    "id": "ghost-721c2f6779c9",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'test_coverage_completeness_is_carried_not_inferred_from_the_ratio' repeats the same single statement 2 times (lines 185-185, 186-186): same shape, names/literals differ"
+  },
+  {
+    "category": "doc_drift",
+    "confidence": null,
+    "detail": "actual is a static AST lower bound (functions named test_*, counted directly, no pytest run) -- the true collected count can only be higher (pytest.mark.parametrize expands one function into several cases), never lower, so this can only under-flag, not over-flag. Confirm by running the real suite and update the claim, or remove the specific number if it will keep going stale.",
+    "detector": "doc_test_count_drift",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/RED_TEAM_REPORT.md",
+      "line_end": 190,
+      "line_start": 190,
+      "related_files": [],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:57.116734+00:00",
+    "id": "ghost-f538a358c9d5",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'RED_TEAM_REPORT.md' claims 241 test(s), but at least 424 test_* function(s) exist in the scanned .py files -- this claim is stale"
+  },
+  {
+    "category": "doc_drift",
+    "confidence": null,
+    "detail": "actual is a static AST lower bound (functions named test_*, counted directly, no pytest run) -- the true collected count can only be higher (pytest.mark.parametrize expands one function into several cases), never lower, so this can only under-flag, not over-flag. Confirm by running the real suite and update the claim, or remove the specific number if it will keep going stale.",
+    "detector": "doc_test_count_drift",
+    "disposition": null,
+    "disposition_note": "",
+    "evidence": {
+      "file": "/home/wking53214/observe-perceive/RED_TEAM_REPORT.md",
+      "line_end": 190,
+      "line_start": 190,
+      "related_files": [],
+      "snippet": null
+    },
+    "first_seen": "2026-09-08T03:47:57.116891+00:00",
+    "id": "ghost-ec96c041a4ac",
+    "layer": "mechanical",
+    "severity": "minor",
+    "status": "suppressed",
+    "summary": "'RED_TEAM_REPORT.md' claims 249 test(s), but at least 424 test_* function(s) exist in the scanned .py files -- this claim is stale"
   }
 ]
