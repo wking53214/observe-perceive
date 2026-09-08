@@ -40,6 +40,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -209,11 +210,22 @@ def _receipt_hash(previous: str, record_digest: str, written_at: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-class ReceiptLog:
-    """Append-only, hash-chained receipts, one per orchestrated result."""
+class RecordAuthenticityError(RecordIntegrityError):
+    """A receipt is unsigned, signed by another key, or does not verify, and
+    the log was opened with a signer. Nothing is loaded."""
 
-    def __init__(self, path: str | Path):
+
+class ReceiptLog:
+    """Append-only, hash-chained receipts, one per orchestrated result.
+
+    With a `signer` (conservation_kernel.signing.Signer) every receipt is
+    signed over its hash and the file refuses to load unless every receipt
+    verifies under that key.
+    """
+
+    def __init__(self, path: str | Path, *, signer=None):
         self.path = Path(path)
+        self.signer = signer
         self._entries: List[Dict[str, Any]] = []
         if self.path.exists():
             self._load()
@@ -231,8 +243,27 @@ class ReceiptLog:
                 raise RecordIntegrityError(f"{self.path}:{line_no}: record hash does not recompute")
             if _receipt_hash(previous, receipt["record_hash"], receipt["written_at"]) != receipt["hash"]:
                 raise RecordIntegrityError(f"{self.path}:{line_no}: receipt hash does not recompute")
+            if self.signer is not None:
+                from conservation_kernel.signing import check_signature
+                problem = check_signature(self.signer, receipt["hash"], receipt.get("signature"))
+                if problem:
+                    raise RecordAuthenticityError(f"{self.path}:{line_no}: {problem}")
             self._entries.append(entry)
             previous = receipt["hash"]
+
+    def probe(self) -> None:
+        """Prove the store can take an append now, before an action depends on it.
+
+        Opens the file for append and syncs it. Raises whatever the OS
+        raises (missing directory, permissions, read-only mount), so the
+        orchestrator can refuse before executing rather than discover after.
+        A full disk can still fail the later write; that residual is
+        recorded as `receipt_error` on the result.
+        """
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a", encoding="utf-8") as fh:
+            fh.flush()
+            os.fsync(fh.fileno())
 
     def append(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Write a receipt for `result` and return it."""
@@ -250,6 +281,9 @@ class ReceiptLog:
             "request_id": getattr(result.get("governance_request"), "request_id", None),
             "execution_id": getattr(result.get("execution_context"), "execution_id", None),
         }
+        if self.signer is not None:
+            from conservation_kernel.signing import signature_block
+            receipt["signature"] = signature_block(self.signer, receipt["hash"])
         entry = {"receipt": receipt, "record": record}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as fh:

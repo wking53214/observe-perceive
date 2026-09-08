@@ -41,6 +41,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -58,6 +60,34 @@ class ExecutionRefusal(Exception):
 
 class LedgerIntegrityError(Exception):
     """The ledger file's hash chain does not recompute. Nothing is loaded."""
+
+
+class LedgerAuthenticityError(LedgerIntegrityError):
+    """An entry is unsigned, signed by another key, or its signature does
+    not verify, and this ledger was opened with a signer. Nothing is loaded.
+
+    Integrity says the file was not corrupted; only a signature says this
+    deployment wrote it. Measured 2026-09-08: a writer with the public hash
+    function could append a consistent forgery. With a signer, it cannot.
+    """
+
+
+try:
+    import fcntl
+
+    def _flock(fh):
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+
+    def _funlock(fh):
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+except ImportError:  # pragma: no cover - Windows
+    import msvcrt
+
+    def _flock(fh):
+        msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+
+    def _funlock(fh):
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def _iso(value: Any) -> Optional[str]:
@@ -131,42 +161,118 @@ class ExecutionLedger:
     entry is appended to a JSONL file as it happens and the whole chain is
     re-verified on load; a file whose chain does not recompute is refused
     outright rather than partially trusted.
+
+    Shared file (1.3.0). The file, not this object, is the ledger: every
+    write takes a lock on `<path>.lock`, re-reads whatever other processes
+    appended since, then checks and appends. Two processes opening the same
+    path therefore see one ledger, and a context issued in one cannot be
+    issued or consumed twice in the other. Reads re-read too.
+
+    Signed (1.3.0). With a `signer` (conservation_kernel.signing.Signer),
+    every entry carries a signature over its hash and the file refuses to
+    load unless every entry verifies under that key: a writer with the file
+    and the public hash function can no longer append a consistent forgery.
+
+    One issuance per artifact (1.3.0). An artifact id already issued in this
+    ledger is refused a second issuance, so the same artifact governed by a
+    second process against a shared file is a replay, not a second decision.
+    `one_per_artifact=False` restores the per-execution-id rule alone.
     """
 
-    def __init__(self, path: Optional[str | Path] = None):
+    def __init__(self, path: Optional[str | Path] = None, *, signer=None, one_per_artifact: bool = True):
         self.path = Path(path) if path else None
+        self.signer = signer
+        self.one_per_artifact = one_per_artifact
         self._entries: List[Dict[str, Any]] = []
         self._issued: Dict[str, Dict[str, Any]] = {}
         self._consumed: Dict[str, Dict[str, Any]] = {}
+        self._by_artifact: Dict[str, str] = {}
+        self._offset = 0          # bytes of the file already indexed
         if self.path and self.path.exists():
-            self._load()
+            self._refresh()
 
     # -- persistence ---------------------------------------------------------
 
-    def _load(self) -> None:
-        previous = ""
-        for line_no, line in enumerate(self.path.read_text(encoding="utf-8").splitlines(), 1):
-            if not line.strip():
+    def _check_entry(self, line_no: int, stored: Dict[str, Any], previous: str) -> Dict[str, Any]:
+        signature = stored.pop("signature", None)
+        recorded_hash = stored.pop("hash", None)
+        if stored.get("previous") != previous:
+            raise LedgerIntegrityError(f"{self.path}:{line_no}: previous-hash link broken")
+        if _entry_hash(previous, {k: v for k, v in stored.items() if k != "previous"}) != recorded_hash:
+            raise LedgerIntegrityError(f"{self.path}:{line_no}: entry hash does not recompute")
+        if self.signer is not None:
+            from conservation_kernel.signing import check_signature
+            problem = check_signature(self.signer, recorded_hash, signature)
+            if problem:
+                raise LedgerAuthenticityError(f"{self.path}:{line_no}: {problem}")
+        stored["hash"] = recorded_hash
+        if signature is not None:
+            stored["signature"] = signature
+        return stored
+
+    def _refresh(self) -> None:
+        """Index whatever the file holds beyond what this object has seen.
+
+        Only complete lines are taken; a line another process is still
+        writing waits for the next refresh. The chain is verified across the
+        boundary, so a file edited between two refreshes is still refused.
+        """
+        if not self.path or not self.path.exists():
+            return
+        with self.path.open("rb") as fh:
+            fh.seek(self._offset)
+            data = fh.read()
+        if not data:
+            return
+        complete = data.rfind(b"\n")
+        if complete < 0:
+            return
+        chunk = data[: complete + 1]
+        previous = self._entries[-1]["hash"] if self._entries else ""
+        line_no = len(self._entries)
+        for raw in chunk.decode("utf-8").splitlines():
+            line_no += 1
+            if not raw.strip():
                 continue
-            stored = json.loads(line)
-            recorded_hash = stored.pop("hash", None)
-            if stored.get("previous") != previous:
-                raise LedgerIntegrityError(f"{self.path}:{line_no}: previous-hash link broken")
-            if _entry_hash(previous, {k: v for k, v in stored.items() if k != "previous"}) != recorded_hash:
-                raise LedgerIntegrityError(f"{self.path}:{line_no}: entry hash does not recompute")
-            stored["hash"] = recorded_hash
+            stored = self._check_entry(line_no, json.loads(raw), previous)
             self._index(stored)
-            previous = recorded_hash
+            previous = stored["hash"]
+        self._offset += len(chunk)
+
+    def _load(self) -> None:          # kept for callers of the 1.2.0 name
+        self._refresh()
+
+    @contextmanager
+    def _locked(self):
+        """Exclusive lock on `<path>.lock` for the duration; a no-op in memory."""
+        if not self.path:
+            yield
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self.path.with_name(self.path.name + ".lock")
+        with lock_path.open("a+") as lock:
+            _flock(lock)
+            try:
+                self._refresh()
+                yield
+            finally:
+                _funlock(lock)
 
     def _append(self, kind: str, body: Dict[str, Any]) -> Dict[str, Any]:
         previous = self._entries[-1]["hash"] if self._entries else ""
         entry = {"kind": kind, "recorded_at": _now(), **body}
         entry_hash = _entry_hash(previous, entry)
         stored = {**entry, "previous": previous, "hash": entry_hash}
+        if self.signer is not None:
+            from conservation_kernel.signing import signature_block
+            stored["signature"] = signature_block(self.signer, entry_hash)
         if self.path:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
+            line = json.dumps(stored, sort_keys=True, default=str) + "\n"
             with self.path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(stored, sort_keys=True, default=str) + "\n")
+                fh.write(line)
+                fh.flush()
+                os.fsync(fh.fileno())
+            self._offset += len(line.encode("utf-8"))
         self._index(stored)
         return stored
 
@@ -174,6 +280,9 @@ class ExecutionLedger:
         self._entries.append(stored)
         if stored["kind"] == "issued":
             self._issued[stored["execution_id"]] = stored
+            artifact_id = stored.get("artifact_id")
+            if artifact_id and artifact_id not in self._by_artifact:
+                self._by_artifact[artifact_id] = stored["execution_id"]
         elif stored["kind"] == "consumed":
             self._consumed[stored["execution_id"]] = stored
 
@@ -181,48 +290,65 @@ class ExecutionLedger:
 
     @property
     def entries(self) -> List[Dict[str, Any]]:
+        self._refresh()
         return list(self._entries)
 
     def issued(self, execution_id: str) -> Optional[Dict[str, Any]]:
+        self._refresh()
         return self._issued.get(execution_id)
 
     def consumed(self, execution_id: str) -> Optional[Dict[str, Any]]:
+        self._refresh()
         return self._consumed.get(execution_id)
+
+    def issued_for_artifact(self, artifact_id: str) -> Optional[str]:
+        """The execution id first issued for this artifact in this ledger, if any."""
+        self._refresh()
+        return self._by_artifact.get(artifact_id)
 
     def issue(self, execution_context) -> Dict[str, Any]:
         """Record that the orchestrator issued this context. Refuses a second
         issuance under the same execution id: an id is an identity, and two
         approvals under one id would make the ledger unable to say which one
-        an executor consumed."""
+        an executor consumed. With `one_per_artifact`, also refuses a second
+        issuance for an artifact this ledger has already issued for."""
         record = issuance_record(execution_context)
         if not record["execution_id"]:
             raise ExecutionRefusal("cannot issue an execution context with no execution_id")
-        if record["execution_id"] in self._issued:
-            raise ExecutionRefusal(
-                f"execution id {record['execution_id']!r} was already issued; a replayed "
-                "request must carry a new execution id"
-            )
-        return self._append("issued", record)
+        with self._locked():
+            if record["execution_id"] in self._issued:
+                raise ExecutionRefusal(
+                    f"execution id {record['execution_id']!r} was already issued; a replayed "
+                    "request must carry a new execution id"
+                )
+            earlier = self._by_artifact.get(record["artifact_id"] or "")
+            if self.one_per_artifact and earlier is not None:
+                raise ExecutionRefusal(
+                    f"artifact {record['artifact_id']!r} was already issued an execution ({earlier!r}) "
+                    "in this ledger; a second issuance is a replay"
+                )
+            return self._append("issued", record)
 
     def consume(self, execution_context, *, consumer: str, outcome: str = "authorized") -> Dict[str, Any]:
         record = issuance_record(execution_context)
         execution_id = record["execution_id"]
-        if execution_id not in self._issued:
-            raise ExecutionRefusal(f"execution id {execution_id!r} was never issued")
-        if execution_id in self._consumed:
-            raise ExecutionRefusal(f"execution id {execution_id!r} was already consumed")
-        return self._append("consumed", {
-            "execution_id": execution_id,
-            "context_commitment": record["context_commitment"],
-            "consumer": consumer,
-            "outcome": outcome,
-            "issued_entry_hash": self._issued[execution_id]["hash"],
-        })
+        with self._locked():
+            if execution_id not in self._issued:
+                raise ExecutionRefusal(f"execution id {execution_id!r} was never issued")
+            if execution_id in self._consumed:
+                raise ExecutionRefusal(f"execution id {execution_id!r} was already consumed")
+            return self._append("consumed", {
+                "execution_id": execution_id,
+                "context_commitment": record["context_commitment"],
+                "consumer": consumer,
+                "outcome": outcome,
+                "issued_entry_hash": self._issued[execution_id]["hash"],
+            })
 
     def verify_chain(self) -> bool:
         previous = ""
         for stored in self._entries:
-            body = {k: v for k, v in stored.items() if k not in ("previous", "hash")}
+            body = {k: v for k, v in stored.items() if k not in ("previous", "hash", "signature")}
             if stored["previous"] != previous or _entry_hash(previous, body) != stored["hash"]:
                 return False
             previous = stored["hash"]

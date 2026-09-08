@@ -31,7 +31,12 @@ class GovernanceOrchestrator:
                  raise_on_stage_error: bool = False,
                  raise_on_execution_error: bool = False,
                  execution_ledger: "ExecutionLedger | None" = None,
-                 receipts=None):
+                 receipts=None,
+                 profile: str = "advisory",
+                 guard_executor: bool = True,
+                 source_signers=None,
+                 require_attested_event_time: bool = False,
+                 enforce_advisory_violations: bool = False):
         """
         Initialize orchestrator with all governance systems.
 
@@ -81,8 +86,28 @@ class GovernanceOrchestrator:
                 case into an exception for callers that would rather not
                 have a stage failure filed as a verdict.
         """
-        self.require_declared_scope = require_declared_scope
-        self.require_vitals = require_vitals
+        # 1.3.0 profile. "advisory" is the historical default: every check
+        # runs and records, only refusals refuse. "strict" turns every
+        # advisory check into a refusal: a scope must be sealed, vitals must
+        # be supplied, the event time must be attested by a registered source
+        # key, and violations PERCEIVE only advised on are enforced here.
+        # Whichever profile produced a record is named on the record.
+        if profile not in ("advisory", "strict"):
+            raise ValueError(f"unknown profile {profile!r}; use 'advisory' or 'strict'")
+        self.profile = profile
+        strict = profile == "strict"
+        self.require_declared_scope = require_declared_scope or strict
+        self.require_vitals = require_vitals or strict
+        self.require_attested_event_time = require_attested_event_time or strict
+        self.enforce_advisory_violations = enforce_advisory_violations or strict
+        # The executor is wrapped with execution_guard.guarded by the
+        # orchestrator itself unless the caller already did, so an executor
+        # that ignores the context still runs only an issued, unaltered,
+        # unused one. Off only for callers that guard elsewhere.
+        self.guard_executor = guard_executor
+        # Keys of the sources whose event-time attestations count:
+        # {key_id: Signer} or an iterable of Signers.
+        self.source_signers = source_signers
         self.raise_on_stage_error = raise_on_stage_error
         # The execution stage (Phase 5) used to call the caller's function
         # unguarded: an exception there left NO record at all, after
@@ -176,7 +201,7 @@ class GovernanceOrchestrator:
             problems.append(f"admission is for artifact {admitted_id}, this request is for {artifact_id}")
         return problems
 
-    def _consume(self, execution_context, gsa815_result, execution_status: str) -> dict:
+    def _consume(self, execution_context, attached, execution_status: str) -> dict:
         """Mark the issued context consumed, once.
 
         A guarded executor consumes it at the moment of authorization and
@@ -185,7 +210,6 @@ class GovernanceOrchestrator:
         the orchestrator, after the fact, so the ledger still shows one use
         per issuance, and the record says which of the two it was.
         """
-        attached = gsa815_result.get("_authorization") if isinstance(gsa815_result, dict) else None
         already = self.execution_ledger.consumed(execution_context.execution_id)
         if already is not None:
             return {
@@ -218,6 +242,9 @@ class GovernanceOrchestrator:
                 anomalies.append(f"event_time {request.event_time} is after ingestion {request.ingested_at}")
             elif ingested - event > timedelta(days=30):
                 anomalies.append(f"event_time {request.event_time} is more than 30 days before ingestion")
+        problem = getattr(request, "event_time_attestation_problem", None)
+        if problem:
+            anomalies.append(f"event_time attestation rejected: {problem}")
         return anomalies
 
     def _stamp(self, result: dict, governance_request=None) -> dict:
@@ -240,13 +267,20 @@ class GovernanceOrchestrator:
             "epistemic_status": getattr(governance_request, "epistemic_status", None),
             "origin": getattr(governance_request, "origin", None),
             "request_state_commitment": getattr(governance_request, "state_commitment", None),
+            "profile": self.profile,
             "strict": {
                 "require_declared_scope": self.require_declared_scope,
                 "require_vitals": self.require_vitals,
+                "require_attested_event_time": self.require_attested_event_time,
+                "enforce_advisory_violations": self.enforce_advisory_violations,
+                "guard_executor": self.guard_executor,
                 "raise_on_stage_error": self.raise_on_stage_error,
                 "raise_on_execution_error": self.raise_on_execution_error,
             },
             "execution_ledger": str(self.execution_ledger.path) if self.execution_ledger.path else "in-memory",
+            "execution_ledger_signed": self.execution_ledger.signer is not None,
+            "receipts": str(getattr(self.receipts, "path", None)) if self.receipts is not None else None,
+            "receipts_signed": getattr(self.receipts, "signer", None) is not None,
         })
         return result
 
@@ -344,9 +378,22 @@ class GovernanceOrchestrator:
         governance_request = self.sentinel_adapter.sentinel_artifact_to_governance_request(
             sentinel_artifact,
             operation_type,
-            context
+            context,
+            source_signers=self.source_signers,
         )
         logger.info(f"[Orchestrator] Request ID: {governance_request.request_id}")
+        if self.require_attested_event_time and not governance_request.event_time_attested:
+            why = governance_request.event_time_attestation_problem or (
+                "no attestation offered" if governance_request.event_time else "no event time stated")
+            logger.error(f"[Orchestrator] Refusing: event time not attested ({why})")
+            return self._stamp({
+                "status": "REJECTED",
+                "reason": f"event time not attested by a registered source key: {why}",
+                "refused_by": "source_attestation",
+                "stage_refused": True,
+                "governance_decision": None,
+                "audit_chain": None,
+            }, governance_request)
         # Temporal sanity is recorded, never assumed. An event time after
         # ingestion, or an ingestion before the event by more than a day,
         # is an anomaly the record names; refusing on it would be a policy
@@ -443,6 +490,21 @@ class GovernanceOrchestrator:
         logger.info(f"[Orchestrator] Unanimous: {perceive_decision.unanimous_consensus}")
         if perceive_decision.violations:
             logger.info(f"[Orchestrator] Violations: {perceive_decision.violations}")
+        advisory = list(getattr(perceive_decision, "advisory_violations", None) or [])
+        if advisory and self.enforce_advisory_violations and perceive_decision.approval.value == "approved":
+            # PERCEIVE's gates advised and approved; this profile does not
+            # let an advised violation through. Refused here, in PERCEIVE's
+            # name, with PERCEIVE's own findings as the reason.
+            logger.error(f"[Orchestrator] Refusing: PERCEIVE advised violations {advisory} and this profile enforces them")
+            return self._stamp({
+                "status": "REJECTED",
+                "reason": "PERCEIVE advised violations and this profile enforces them: " + "; ".join(map(str, advisory)),
+                "refused_by": "perceive",
+                "stage_refused": True,
+                "advisory_violations": advisory,
+                "governance_decision": perceive_decision,
+                "audit_chain": None,
+            }, governance_request)
 
         # PHASE 2b: fortress-kernel safety containment (opt-in)
         #
@@ -518,6 +580,25 @@ class GovernanceOrchestrator:
             }, governance_request)
 
         # PHASE 4: GSA-815 execution approval
+        # Before anything is issued: can the result be receipted? A store
+        # that cannot take an append now would leave an executed action with
+        # only an in-memory record (measured as F10). Refuse first.
+        if self.receipts is not None and hasattr(self.receipts, "probe"):
+            try:
+                self.receipts.probe()
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"[Orchestrator] Refusing: receipt store unavailable ({type(e).__name__}: {e})")
+                return self._stamp({
+                    "status": "REJECTED",
+                    "reason": f"receipt store unavailable before execution: {type(e).__name__}: {e}",
+                    "refused_by": "receipt_store",
+                    "stage_refused": True,
+                    "stage_error": f"{type(e).__name__}: {e}",
+                    "governance_decision": perceive_decision,
+                    "conservation_decision": conservation_decision,
+                    "audit_chain": None,
+                }, governance_request)
+
         logger.info("[Orchestrator] Phase 4: GSA-815 execution approval")
         try:
             execution_approval = self.conservation_adapter.approve_execution(
@@ -706,9 +787,14 @@ class GovernanceOrchestrator:
             )
 
         logger.info("[Orchestrator] Phase 5: GSA-815 execution")
+        executor = gsa815_operation_func
+        if self.guard_executor and not getattr(gsa815_operation_func, "execution_guard", False):
+            from execution_guard import guarded
+            executor = guarded(gsa815_operation_func, self.execution_ledger,
+                               kernel=self.conservation_kernel, consumer="orchestrator")
         executed_at = {"started": datetime.now(timezone.utc).isoformat(), "finished": None}
         try:
-            gsa815_result = gsa815_operation_func(execution_context)
+            gsa815_result = executor(execution_context)
         except Exception as e:
             executed_at["finished"] = datetime.now(timezone.utc).isoformat()
             logger.error(f"[Orchestrator] Execution FAILED: {type(e).__name__}: {e}")
@@ -747,6 +833,15 @@ class GovernanceOrchestrator:
             }, governance_request)
             return self._verify_on_the_way_out(failed, None)
         executed_at["finished"] = datetime.now(timezone.utc).isoformat()
+        # The guard attaches its authorization to a mapping result. It is
+        # recorded under execution_authorization, not inside the executor's
+        # result: the outcome commits the result, and the authorization
+        # carries a timestamp that would make a canonical replay's outcome
+        # commitment differ from the original's.
+        attached = None
+        if isinstance(gsa815_result, dict) and "_authorization" in gsa815_result:
+            gsa815_result = dict(gsa815_result)
+            attached = gsa815_result.pop("_authorization")
         # The callable may report a partial execution explicitly by returning
         # a mapping with status "partial". Anything else that returned is
         # "completed" from the chain's point of view; the chain does not guess.
@@ -756,7 +851,7 @@ class GovernanceOrchestrator:
             else "completed"
         )
         logger.info(f"[Orchestrator] GSA-815 result ({execution_status}): {gsa815_result}")
-        execution_authorization = self._consume(execution_context, gsa815_result, execution_status)
+        execution_authorization = self._consume(execution_context, attached, execution_status)
 
         # PHASE 6: OBSERVE monitoring
         logger.info("[Orchestrator] Phase 6: OBSERVE clinical monitoring")

@@ -13,11 +13,12 @@ without leaving a verifiable explanation of why it was permitted.
 
 ## CURRENT PHASE
 
-Phase 5 complete (2026-09-08). Verdict: proven for the shipped configuration
-against an external caller, a file editor and a restart; not proven against
-an in-process or file-writing attacker (unkeyed commitments), an unguarded
-executor, unshared processes, or a receipt store failing after the action.
-See docs/closure/ARCHITECTURE_CLOSURE_REPORT.md section 1.
+Phase 5 complete; the seven residual risks worked (1.3.0, 2026-09-08).
+Verdict: proven for the shipped configuration against an external caller,
+a file editor without the key, a second process on the shared ledger, and
+a restart. What remains is the key holder, a callable invoked outside the
+orchestrator, and processes that do not share the file. See
+docs/closure/ARCHITECTURE_CLOSURE_REPORT.md sections 1 and 12.
 
 ## ARCHITECTURE MAP (actual, from code)
 
@@ -41,8 +42,8 @@ by the receipt and ledger entry hashes.
 
 | repo | role | branch / state |
 |---|---|---|
-| observe-perceive | the spine | claude/prompt-red-blue-team-sj9a31; 1.2.0; 589 passed / 5 skipped (all packs), 494 / 63 (kernel only) |
-| conservation_kernel | constitutional hub | main at 5b388f1, tagged v0.2.0 (PR #4 merged); 67 passed. Spine pins the tag |
+| observe-perceive | the spine | claude/prompt-red-blue-team-sj9a31; 1.3.0; 610 passed / 5 skipped (all packs) |
+| conservation_kernel | constitutional hub | main at 25145aa (0.3.0, PR #5 merged, signed snapshots); 75 passed. Spine pins that commit |
 | Governance_Gateway | admission / sealing | main; 0.1.0; CI green |
 | ghost_tools | assurance | main (PR #11 merged); 0.5.2 + baseline integrity; 167 passed |
 | CCC | recurrence ledger | main (PR #12 merged into the frozen repo); 142 passed, 1 xfailed |
@@ -65,6 +66,10 @@ docs/closure/GOVERNANCE_BYPASS_REPORT.md.
 
 ## REPAIRS PERFORMED
 
+1.3.0: signed ledger/receipts/snapshots (kernel 0.3.0 Signer); orchestrator
+guards every executor; shared ledger file (lock, re-read, one issuance per
+artifact); receipt probe before issuance; PERCEIVE ledger persisted; strict
+profile; attested event time (contract 1.2.0). Earlier:
 observe-perceive: execution_guard (ledger, authorize, guarded);
 governance_record (record, verify_record, ReceiptLog); contract 1.1.0;
 verifier hardening; adapter hands the kernel real propositions; scope
@@ -78,22 +83,24 @@ escalation, exit codes, JSON accept.
 
 ## TEST RESULTS
 
-observe-perceive 589 passed / 5 skipped / 3 subtests (was 529);
+observe-perceive 610 passed / 5 skipped / 3 subtests (was 529);
 kernel-only clean clone 494 / 63 (was 3 collection errors, 24 failures);
-conservation_kernel 67 (was 52); CCC 142 + 1 xfail (was 134); ghost_tools
+conservation_kernel 75 (was 52); CCC 142 + 1 xfail (was 134); ghost_tools
 167 (was 159). ruff clean everywhere.
 
 ## UNRESOLVED RISKS (ranked)
 
-R1/R4 unkeyed commitments, unsigned files; R2 unguarded executors; R6
-cross-process replay without shared files; R7 receipt failure after the
-action; R3 PERCEIVE ledger not persisted; R5 advisory defaults; R8 source
-clock is a claim; R9 CCC recording explicit; R10 OBSERVE clinical regime.
+After 1.3.0: the signing key holder (hold it outside the process; the
+Signer protocol admits a signing service); a callable invoked outside the
+orchestrator; processes that do not share the ledger file; a disk filling
+between the receipt probe and the write; sources without a key (still
+claims, recorded as such); the advisory default profile (visible on every
+record); R9 CCC recording explicit; R10 OBSERVE clinical regime.
 
 ## NEXT HIGHEST-VALUE ACTION
 
-1. Close R1: key the commitments (HMAC or signature) with the key held
-   outside the process, at the adapter boundary; sign ledger entries,
-   receipts and kernel snapshots with the same key.
-2. Make `guarded` the only documented executor path (R2) and add a
-   pre-execution receipt probe (R7).
+1. Merge observe-perceive PR #24 (1.3.0). Create tag v0.3.0 on kernel
+   commit 25145aa from the GitHub UI.
+2. Key management: a Signer backed by a service or HSM, and key rotation
+   (a record names its key_id, so rotation is a verifier-side map).
+3. A shared ledger service for processes that cannot share a file.

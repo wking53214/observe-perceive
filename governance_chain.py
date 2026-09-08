@@ -81,6 +81,10 @@ def request_state(request) -> Dict[str, Any]:
         # 1.1.0: event time is part of what the request is. Absent on
         # requests made before 1.1.0 and on sources that state no time.
         "event_time": getattr(request, "event_time", None),
+        # 1.2.0: an attested event time is a different request from a
+        # claimed one; the key that attested it is part of the finding.
+        "event_time_attested": bool(getattr(request, "event_time_attested", False)),
+        "event_time_key_id": getattr(request, "event_time_key_id", None),
     }
 
 
