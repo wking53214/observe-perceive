@@ -1,5 +1,22 @@
 # OBSERVE / PERCEIVE
 
+## Install and run
+
+    pip install -e ".[test,chain,fortress]"    # or: pip install -r requirements.txt
+    pytest                                     # 529 tests, 5 clinical known-gap skips
+    python demo_why.py                         # why the gate decided what it decided
+
+Version 1.1.0 in `pyproject.toml`. The one hard dependency is the
+Conservation Kernel; the `chain` extra installs the optional stages (CCC,
+AUGUR, GEMS, Governance_Gateway) and `fortress` the opt-in strict stage. Each
+adapter resolves a sibling checkout first and the installed package second,
+so a clone beside the other repositories works without installing them.
+
+The entrypoint is `GovernanceOrchestrator` in `governance_orchestrator.py`;
+`governance_chain.verify_result` re-derives the hash chain of any result it
+returns, and `test_chain_adversarial.py` is the sixteen attacks that
+verification must reject.
+
 ## Governed Observation and Interpretation System
 
 OBSERVE/PERCEIVE is a governed observation-and-interpretation architecture that separates the detection and assessment of system state from the policy-governed interpretation and authorization of responses to that state.
