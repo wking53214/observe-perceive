@@ -11,6 +11,11 @@ import pytest
 
 from vertical_slice import Paths, explain, run_action, run_slice
 
+# The slice is real implementations only: it seals at the Gateway, so it
+# needs the Gateway. Importing vertical_slice first lets the adapter resolve
+# a sibling checkout before this check runs.
+pytest.importorskip("governance_gateway.models", reason="Governance_Gateway checkout not available")
+
 
 def test_one_governed_action_is_explained_after_a_restart_and_cannot_be_replayed(tmp_path):
     out = run_slice(tmp_path / "slice")

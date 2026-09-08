@@ -30,7 +30,11 @@ try:
 except (ModuleNotFoundError, ImportError):  # pragma: no cover
     gems_available = False
 
-pytestmark = pytest.mark.skipif(not gems_available, reason="GEMS checkout not available")
+# Module-level skip rather than a skipif mark: the parametrize decorators
+# below use GEMS types at collection time, so a mark alone still raised
+# NameError from a checkout without GEMS.
+if not gems_available:
+    pytest.skip("GEMS checkout not available", allow_module_level=True)
 
 
 def _artifact(artifact_id="art-1", origin=None, authority=None, status=None):

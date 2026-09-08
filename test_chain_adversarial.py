@@ -176,6 +176,7 @@ def test_13_a_sealed_gateway_artifact_altered_after_sealing_is_not_admitted():
     covers what it claims to cover, and admission must refuse."""
     import dataclasses
     gw = pytest.importorskip("gateway_admission_adapter")
+    pytest.importorskip("governance_gateway.models", reason="Governance_Gateway checkout not available")
     adapter = gw.GatewayAdmissionAdapter()
     sealed = adapter.seal(
         artifact_id="sealed-1", payload={"order": "escalate"},

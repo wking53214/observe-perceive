@@ -104,8 +104,8 @@ def run_scenario(quiet: bool = False):
     context = {"patient_id": "P001", "severity": "high", "execution_id": "exec-demo-001"}
 
     try:
-        from augur_screen_adapter import AugurScreenAdapter  # noqa: F401
-        screen = True
+        import augur_screen_adapter
+        screen = augur_screen_adapter.Augur is not None   # the adapter imports without the pack
     except ImportError:
         screen = False
 

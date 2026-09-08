@@ -59,7 +59,7 @@ def _import_gateway():
         from governance_gateway.models import (
             Artifact, Authority, EpistemicStatus, GateReason, Scope,
         )
-    except ModuleNotFoundError:
+    except ImportError:            # absent, partial or shadowed: all "not available"
         return (None,) * 6
     return GovernanceGateway, Artifact, Authority, EpistemicStatus, GateReason, Scope
 
