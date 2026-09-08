@@ -250,3 +250,89 @@ a private-key pattern. The 18 per-repo agents that were meant to do the
 judgment work per repo were killed by a session rate limit before writing
 anything; the mechanical sweep replaced them, so the per-repo B2 depth is lower
 than the prompt asked for outside observe-perceive.
+
+## Addendum, later the same day: the full-library blackhole run
+
+Part A ran blackhole_extrapolator 0.4 on the 18 repos one at a time. Between
+Part A and this addendum the tool went through three releases on the strength
+of what the corpus taught it (ghost_tools PRs #8, #9, #10; version 0.5.2):
+ecosystem awareness (an import a sibling checkout or a declared dependency
+provides is wiring, not a void), debris archaeology (a flattened file's class
+and def headers read back in token order, with parameter lists and return
+annotations), rename candidates (an undefined name matched against every
+surviving signature by keywords, unpack count, value flow and methods, never
+by name), and four fixes the first full-library run exposed in the tool
+itself. This addendum is the run after those fixes: all 18 checkouts, each
+scanned with the other 17 as siblings.
+
+### Result by repo
+
+| repo | voids (0.4, alone) | voids (0.5.2, ecosystem) | wiring | what the voids are |
+|---|---|---|---|---|
+| ecology | 45 | 44 | 28 | 33 flattened corpus files, each with its interface recovered; 10 undeclared third-party packages; one real bug (below) |
+| TOUCHSTONE | 35 | 25 | 0 | 11 flattened specimens with interfaces; two renames found (below); typing names used without import in superseded specimens |
+| AUGUR | 10 | 9 | 1 | two flattened `_archive/` files with interfaces; seven names used only by those archive drafts |
+| OBSERVE | 14 | 7 | 82 | three flattened files; three packages the vendored requirements omit; one real bug (below) |
+| GSA-815 | 5 | 5 | 94 | all five trace to the uninitialised `vendor/sentinel_os` submodule; the tool says so on each |
+| ATS | 4 | 3 | 3 | openai, voyageai, sentence-transformers imported and not declared |
+| sentinel_os | 8 | 0 | 111 | clean once its nested requirements file is read |
+| observe-perceive | 5 | 0 | 17 | clean; the last nominal dependency became wiring once sentinel_os was a sibling |
+| the other 10 | 0 | 0 | 2 | clean |
+| **total** | 126 | **93** | 338 | |
+
+The four active repos (observe-perceive, conservation_kernel,
+Governance_Gateway, ghost_tools) report zero voids. Of the five frozen repos,
+fortress-kernel, CCC and sentinel_os report zero; AUGUR's nine are all inside
+its own `_archive/` folder; GSA-815's five are one missing submodule.
+
+### Findings for the record [executed]
+
+1. **OBSERVE has drifted from the sentinel_os it vendors.** Its
+   `sentinel_os/GSA.py` calls the dataclass `replace` function at lines 3706
+   and 4149 without importing it (the file imports only `dataclass` and
+   `field`); the live sentinel_os has no `GSA.py` at all. Its
+   `sentinel_os/requirements.txt` omits httpx, redis and the opentelemetry
+   packages the vendored code imports; the live sentinel_os declares all
+   three. This is Part C's "vendored snapshot" finding with the specific
+   divergence attached. OBSERVE is archived; nothing to push.
+2. **Ecology's `corpus/AI_Governance_OS_V7.py` uses the `re` module at line
+   320 without importing it.** Archived corpus file; nothing to push.
+3. **GSA-815 cannot be dependency-checked from a clone** until
+   `git submodule update --init` runs: its requirements file is a single
+   `-r` include into the submodule. Already recorded in Part C1 as the
+   manifest gap; the tool now names the cause on every affected void.
+4. **ATS imports three embedding packages it does not declare**
+   (`ats_embeddings.py`: openai, voyageai, sentence_transformers). Archived.
+5. **Two renames in TOUCHSTONE's superseded specimens**, found by shape and
+   not by name: `initialize_hybrid_cluster` is `initialize_network_cluster`
+   (keyword `node_count`, three values unpacked against a three-tuple return,
+   two of them flowing into `QuorumConsensusEngine` parameters of the declared
+   types, shared name tokens) and `UnifiedGovernanceKernel` is
+   `GovernanceKernel` (all four keyword arguments are its parameters). Both
+   definitions live in the flattened `quorum_state_governance_source.py` the
+   callers never name. Zero rename candidates on the other 17 repos.
+
+### What the run found in the tool [executed, fixed]
+
+Each first-run defect changed a count on a repo above and is fixed with a
+regression test in ghost_tools 0.5.2: a namespace package holding only
+sub-packages was not importable (ecology's `src`, 38 false signals);
+requirements files below the root were never read and `-r` includes were
+not followed (most of sentinel_os and OBSERVE); a declared distribution was
+not matched to the module it provides (psycopg2-binary, opentelemetry-api);
+a requirements line beginning with `http` was skipped as a URL, which
+swallowed `httpx<0.28` and was sentinel_os's last void; dict-literal `True`
+and `False` in flattened files were read as type annotations.
+
+### Still noise, and known
+
+Typing names (`Any`, `Dict`) used without import inside TOUCHSTONE's
+superseded specimens are reported as never built; they are defects of the
+specimens, not of the archive. Third-party packages a repo imports and does
+not declare are reported as never built, which is the correct reading of the
+evidence and the wrong reading of the world; the fix is a manifest in the
+repo, not a change to the tool.
+
+**Executed:** the 18-checkout ecosystem run, three times (before and after
+each fix batch); the by-hand confirmation of findings 1, 2 and 5 against the
+files. **Inferred:** nothing in this addendum.
