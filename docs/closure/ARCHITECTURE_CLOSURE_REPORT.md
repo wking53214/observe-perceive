@@ -164,7 +164,7 @@ test_scope_binding (8), test_vertical_slice (5), test_failure_semantics (11).
 | Failure semantics | 8 | 22 rows pinned; receipt-after-action is the one honest hole |
 | Temporal integrity | 7 | event time committed; source clock unverified |
 | Resistance to an in-process attacker | 3 | unkeyed commitments (R1) |
-| Cross-repo integration | 7 | contracts enumerated, minimal install tested; kernel pinned to a branch until tagged |
+| Cross-repo integration | 7 | contracts enumerated, minimal install tested; kernel pinned to its 0.2.0 merge commit |
 | Release hygiene | 7 | clean-clone installs and CI for the active repos; optional packs still resolved as siblings first |
 | Operability (deploying it) | 5 | the vertical slice is the only end-to-end reference; no service, no key management, no shared ledger |
 

@@ -42,10 +42,10 @@ by the receipt and ledger entry hashes.
 | repo | role | branch / state |
 |---|---|---|
 | observe-perceive | the spine | claude/prompt-red-blue-team-sj9a31; 1.2.0; 589 passed / 5 skipped (all packs), 494 / 63 (kernel only) |
-| conservation_kernel | constitutional hub | mission/close-the-system; 0.2.0; 67 passed. Spine pins the branch until tagged |
+| conservation_kernel | constitutional hub | main at 5b388f1 (PR #4 merged, 0.2.0); 67 passed. Spine pins that commit; tag v0.2.0 not yet created (proxy refuses tag pushes) |
 | Governance_Gateway | admission / sealing | main; 0.1.0; CI green |
-| ghost_tools | assurance | mission/close-the-system; 0.5.2 + baseline integrity; 167 passed |
-| CCC | recurrence ledger | mission/close-the-system (frozen repo, hardening branch); 142 passed, 1 xfailed |
+| ghost_tools | assurance | main (PR #11 merged); 0.5.2 + baseline integrity; 167 passed |
+| CCC | recurrence ledger | main (PR #12 merged into the frozen repo); 142 passed, 1 xfailed |
 | AUGUR, fortress-kernel | opt-in stages | FROZEN |
 | sentinel_os, GSA-815 | never imported | FROZEN |
 | ANVIL | candidate lineage layer | not integrated; not needed by the closure |
@@ -92,8 +92,8 @@ clock is a claim; R9 CCC recording explicit; R10 OBSERVE clinical regime.
 
 ## NEXT HIGHEST-VALUE ACTION
 
-1. Merge the four branches; tag conservation_kernel 0.2.0 and move the
-   spine's pin from the branch to the tag.
+1. Merge observe-perceive PR #23 (the other three are merged; the kernel
+   0.2.0 commit is pinned). Create tag v0.2.0 on 5b388f1 from the GitHub UI.
 2. Close R1: key the commitments (HMAC or signature) with the key held
    outside the process, at the adapter boundary; sign ledger entries,
    receipts and kernel snapshots with the same key.

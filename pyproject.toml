@@ -13,8 +13,10 @@ license = { text = "MIT" }
 # so it is a hard dependency, declared here rather than found as a sibling.
 dependencies = [
   # 0.2.0 (root admission, snapshot restore) is required by the boundary
-  # this package now holds; pinned to the branch until it is tagged.
-  "conservation-kernel @ git+https://github.com/wking53214/conservation_kernel@mission/close-the-system",
+  # this package now holds; pinned to the immutable commit that the 0.2.0
+  # release (PR #4, squash-merged 2026-09-08) landed as. A tag would be
+  # friendlier; the commit cannot be moved.
+  "conservation-kernel @ git+https://github.com/wking53214/conservation_kernel@5b388f105ac33a9b9b48f368b5a3c070a15ca492",
 ]
 
 [project.optional-dependencies]
