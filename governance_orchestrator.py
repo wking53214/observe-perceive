@@ -158,6 +158,24 @@ class GovernanceOrchestrator:
             )
         return result
 
+    @staticmethod
+    def _admission_problems(admission, declared_scope: str, artifact_id: str) -> list:
+        """Why a Gateway admission does not back a declared scope; empty if it does."""
+        problems = []
+        expected = getattr(admission, "expected_integrity", None)
+        integrity = getattr(admission, "integrity", None)
+        if not callable(expected) or not integrity:
+            return ["admission is not a sealed Gateway artifact"]
+        if expected() != integrity:
+            problems.append("admission integrity does not recompute (altered since sealing)")
+        sealed_scope = getattr(getattr(admission, "scope", None), "value", getattr(admission, "scope", None))
+        if sealed_scope != declared_scope:
+            problems.append(f"sealed scope is {sealed_scope}, declared scope is {declared_scope}")
+        admitted_id = getattr(admission, "artifact_id", None)
+        if admitted_id is not None and admitted_id != artifact_id:
+            problems.append(f"admission is for artifact {admitted_id}, this request is for {artifact_id}")
+        return problems
+
     def _consume(self, execution_context, gsa815_result, execution_status: str) -> dict:
         """Mark the issued context consumed, once.
 
@@ -282,6 +300,19 @@ class GovernanceOrchestrator:
         logger.info("[Orchestrator] Phase 1: Converting Sentinel artifact to governance request")
         if context is None:
             context = {}
+        # The sealed Gateway admission is checked here, not committed into
+        # the request: the request's context is part of its commitment and
+        # must stay plain data. What is recorded about the admission is its
+        # id, scope and integrity digest.
+        gateway_admission = context.pop("gateway_admission", None) if "gateway_admission" in context else None
+        admission_summary = None
+        if gateway_admission is not None:
+            admission_summary = {
+                "artifact_id": getattr(gateway_admission, "artifact_id", None),
+                "scope": getattr(getattr(gateway_admission, "scope", None), "value", None),
+                "integrity": getattr(gateway_admission, "integrity", None),
+            }
+            context["gateway_admission_integrity"] = admission_summary["integrity"]
         governance_request = self.sentinel_adapter.sentinel_artifact_to_governance_request(
             sentinel_artifact,
             operation_type,
@@ -511,6 +542,45 @@ class GovernanceOrchestrator:
         # predate the Gateway seam pass no scope and must keep working.
         declared_scope = (context or {}).get("gateway_scope")
 
+        # A declared scope is only as good as the seal behind it. The Gateway
+        # seals scope into the artifact's integrity digest; the admission
+        # adapter passes that artifact along. A scope with no admission is a
+        # claim; a scope whose admission does not recompute, or names another
+        # scope or another artifact, is tamper evidence and is refused in
+        # every mode. A bare claim is refused in strict mode and recorded
+        # (`scope_sealed: False`) otherwise.
+        scope_sealed = None
+        if declared_scope is not None:
+            admission = gateway_admission
+            if admission is None:
+                scope_sealed = False
+                if self.require_declared_scope:
+                    logger.error("[Orchestrator] Refusing execution: scope declared without a sealed Gateway admission")
+                    return self._stamp({
+                        "status": "REJECTED",
+                        "reason": f"scope {declared_scope} declared without a sealed Gateway admission",
+                        "governance_decision": perceive_decision,
+                        "conservation_decision": conservation_decision,
+                        "execution_approval": execution_approval,
+                        "scope_enforced": True, "scope_sealed": False,
+                        "audit_chain": None,
+                    }, governance_request)
+                logger.warning("[Orchestrator] Scope declared without a sealed Gateway admission; honouring it as a CLAIM (scope_sealed=False)")
+            else:
+                problems = self._admission_problems(admission, declared_scope, governance_request.artifact_id)
+                scope_sealed = not problems
+                if problems:
+                    logger.error(f"[Orchestrator] Refusing execution: Gateway admission does not back the declared scope: {problems}")
+                    return self._stamp({
+                        "status": "REJECTED",
+                        "reason": "Gateway admission does not back the declared scope: " + "; ".join(problems),
+                        "governance_decision": perceive_decision,
+                        "conservation_decision": conservation_decision,
+                        "execution_approval": execution_approval,
+                        "scope_enforced": True, "scope_sealed": False,
+                        "audit_chain": None,
+                    }, governance_request)
+
         # An undeclared scope used to fall straight through here, silently.
         # That is the worse half of the two ways this can be wrong: a request
         # with a READ_ONLY scope is refused loudly, while a request with no
@@ -603,6 +673,7 @@ class GovernanceOrchestrator:
                 "execution_error": f"{type(e).__name__}: {e}",
                 "executed_at": executed_at,
                 "scope_enforced": declared_scope is not None,
+                "scope_sealed": scope_sealed,
                 "declared_scope": declared_scope,
                 "governance_decision": perceive_decision,
                 "simulation_screen": screen_result,
@@ -669,7 +740,9 @@ class GovernanceOrchestrator:
         result = self._stamp({
             "status": "APPROVED_AND_EXECUTED",
             "scope_enforced": declared_scope is not None,
+            "scope_sealed": scope_sealed,
             "declared_scope": declared_scope,
+            "gateway_admission": admission_summary,
             "observe_enforced": observe_verdict is not None,
             "observe_error": observe_error,
             "execution_status": execution_status,

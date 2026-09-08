@@ -195,6 +195,11 @@ class GatewayAdmissionAdapter:
         merged = dict(context or {})
         merged.setdefault("gateway_scope", admission.scope)
         merged.setdefault("gateway_admitted", True)
+        # The sealed artifact travels with the scope, so the orchestrator can
+        # check that the scope it is about to honour is the one the Gateway
+        # sealed -- not a string a caller put in the context (measured
+        # 2026-09-08: context["gateway_scope"] = "EXECUTE" was enough).
+        merged.setdefault("gateway_admission", admission.artifact)
 
         # `vitals_snapshot` is threaded through so the admitted path can reach
         # OBSERVE. It could not before: every production caller entered the

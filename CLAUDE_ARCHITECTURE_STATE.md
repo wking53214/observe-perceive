@@ -13,9 +13,9 @@ without leaving a verifiable explanation of why it was permitted.
 
 ## CURRENT PHASE
 
-Phase 1 (reconstruction) complete for the spine; four read-only audits of
-CCC, Conservation Kernel, ANVIL/sentinel_os/GSA-815/GRAPH and ghost_tools
-baseline in flight. Phase 3 (red team) started on the spine.
+Phase 3 (red team, repair, second-order) largely complete across the spine,
+the Conservation Kernel, CCC and ghost_tools. Phase 4/5 next: the
+Gateway-scope boundary, the vertical slice, the matrices and the reports.
 
 ## ARCHITECTURE MAP (actual, from code, 2026-09-08)
 
@@ -100,18 +100,46 @@ the execution-context commitment.
   `conservation.in_kernel_ledger` pass without a submit (verifier check is
   reconstruct-succeeds only).
 
-## ATTACKS PERFORMED
+## ATTACKS PERFORMED (all confirmed before repair, all refused after; see GOVERNANCE_BYPASS_REPORT.md)
 
-(none yet recorded; see GOVERNANCE_BYPASS_REPORT.md once written)
+Spine: H1 forged ExecutionContext executes; H2 issued context executes twice;
+H3 request timestamp backdated, verify_result valid; H3b outcome future-dated;
+H3c execution_id relabelled on a no-OBSERVE record; H4 root registered as
+`decision-<id>` passes kernel membership; result dict str(dict) hash order
+after JSON round trip. Kernel: forged root with dangling refs; self-declared
+HUMAN actor; wildcard evidence; born-canonical on unrelated authorization;
+verified-then-erased; propositions=() on the spine path. CCC: event dates
+lost on reload; non-numeric similarity crashes recording; unsorted provider
+makes nearest the weakest; provider failure leaves no trace; semantic index
+not rebuilt on load. ghost_tools: committed baselines inert (137/137); scan
+of nothing exits 0; MINOR entry suppresses CRITICAL; corrupt baseline exits
+1; --accept --json emits prose.
 
 ## REPAIRS PERFORMED
 
-(none yet)
+observe-perceive (branch claude/prompt-red-blue-team-sj9a31, commits
+116f642, a836a4c, 622644e): execution_guard.py (ExecutionLedger,
+authorize_execution, guarded); orchestrator issues/consumes, refuses
+reissue, unconditional outcome, receipts; contract 1.1.0 (event_time,
+ingested_at, execution_id committed, self-describing approval);
+verify_result hardened (derived-by-transformation membership, outcome
+present/committed, execution_status); governance_record.py (to/from record,
+record_hash, ReceiptLog, verify_record); adapter hands the kernel real
+propositions with conservative mapping; dead sentinel importer removed.
+conservation_kernel (branch mission/close-the-system, c39d781, e5814cd):
+root admission, born-authoritative/canonical rule, trusted_humans,
+wildcard scope, kept reports, snapshot/from_snapshot with re-verification.
+CCC (mission/close-the-system, 6b194db): event dates on load, provider
+validation and ordering, index rebuild on load, failure audit event.
+ghost_tools (mission/close-the-system, b761da4): portable stored paths,
+stale entries reported, escalation surfaces, nothing-scanned exit 2,
+corrupt baseline exit 2, --accept --json.
 
 ## TEST RESULTS
 
-Baseline at start: observe-perceive 529 passed / 5 skipped; conservation_kernel
-52; Governance_Gateway 45; ghost_tools 159; ruff clean on all four.
+observe-perceive 565 passed / 5 skipped (was 529); conservation_kernel 67
+(was 52); CCC 142 + 1 xfail (was 134); ghost_tools 167 (was 159). ruff
+clean on all four.
 
 ## UNRESOLVED RISKS
 
