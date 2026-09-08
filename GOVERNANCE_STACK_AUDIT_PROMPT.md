@@ -274,9 +274,12 @@ each still holds; do not re-report any of them:**
 | b778a38 | PERCEIVE citadel approval carried a key but named no reviewer      |
 | ddca375 | TIE adapter restated a coverage gap TIE already declared           |
 | 717c2e2 | 510(k) checklist items marked ready with no test behind them       |
+| 3ff4569 | three-approvals test could not tell 3 from 100; five clinical missed detections filed as skips (now `OBSERVE_STRICT_CLINICAL=1` fails) |
 
-The last nine are what the first pass of this audit found in one repo in one
-day. Expect the same density elsewhere.
+The last ten are what the first pass of this audit found in one repo in one
+day. Expect the same density elsewhere. The full first-pass result, all
+parts, is `docs/audit/AUDIT_REPORT_2026-09-08.md` on main: read it before
+running so you extend it rather than repeat it.
 
 ### B3 — tests that mutate the repository
 
