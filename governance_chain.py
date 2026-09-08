@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from governance_contracts import CONTRACT_VERSION, compute_state_commitment
+from governance_contracts import canonical_repr, CONTRACT_VERSION, compute_state_commitment
 
 
 @dataclass
@@ -282,7 +282,7 @@ def verify_result(result: Dict[str, Any], kernel=None, perceive=None) -> ChainVe
         gsa = result.get("gsa815_result")
         verdict = result.get("observe_verdict")
         regime = verdict.regime.value if verdict is not None else "no-observe"
-        expected_result_hash = hashlib.sha256(f"{gsa}:{regime}".encode()).hexdigest()
+        expected_result_hash = hashlib.sha256(f"{canonical_repr(gsa)}:{regime}".encode()).hexdigest()
         check("outcome.result_artifact_hash", outcome.result_artifact_hash == expected_result_hash, "result artifact hash matches the recorded execution result and verdict")
         if verdict is not None:
             check("outcome.matches_verdict", outcome.outcome.get("observe_audit_hash") == verdict.audit_hash and outcome.outcome.get("observe_regime") == verdict.regime.value, "outcome records the verdict that was observed")

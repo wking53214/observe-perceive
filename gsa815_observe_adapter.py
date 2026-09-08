@@ -5,7 +5,7 @@ Passes governance context to OBSERVE monitoring.
 Links decision audit hash ↔ outcome audit hash for complete forensic replay.
 """
 
-from governance_contracts import ExecutionContext, OutcomeContext, compute_state_commitment
+from governance_contracts import ExecutionContext, OutcomeContext, canonical_repr, compute_state_commitment
 from observe_consolidated import FusedVerdict
 from datetime import datetime, timezone
 import hashlib
@@ -39,7 +39,7 @@ class GSA815ObserveAdapter:
         regime = observe_verdict.regime.value if observe_verdict is not None else "no-observe"
         result_artifact_id = f"outcome-{execution_context.execution_id}"
         result_artifact_hash = GSA815ObserveAdapter._compute_artifact_hash(
-            f"{gsa815_result}:{regime}"
+            f"{canonical_repr(gsa815_result)}:{regime}"
         )
 
         # Create complete lineage including governance decisions

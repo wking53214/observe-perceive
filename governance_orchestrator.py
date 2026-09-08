@@ -30,7 +30,8 @@ class GovernanceOrchestrator:
                  require_vitals: bool = False,
                  raise_on_stage_error: bool = False,
                  raise_on_execution_error: bool = False,
-                 execution_ledger: "ExecutionLedger | None" = None):
+                 execution_ledger: "ExecutionLedger | None" = None,
+                 receipts=None):
         """
         Initialize orchestrator with all governance systems.
 
@@ -98,6 +99,10 @@ class GovernanceOrchestrator:
         # ledger that survives the process, so a replay after restart is
         # still a replay.
         self.execution_ledger = execution_ledger if execution_ledger is not None else ExecutionLedger()
+        # A governance_record.ReceiptLog. When set, every result -- refusal,
+        # failure or execution -- is written as a hash-chained receipt before
+        # it is returned, so the explanation exists outside this process.
+        self.receipts = receipts
         self.perceive = perceive
         self.conservation_kernel = conservation_kernel
         self.observe_engine = observe_engine
@@ -213,6 +218,20 @@ class GovernanceOrchestrator:
         operation_type: str,
         gsa815_operation_func,
         vitals_snapshot=None,  # VitalsSnapshot (type annotation removed to avoid import)
+        context: dict = None
+    ) -> dict:
+        """Orchestrate the flow (see `_orchestrate`) and receipt the result."""
+        result = self._orchestrate(sentinel_artifact, operation_type, gsa815_operation_func, vitals_snapshot, context)
+        if self.receipts is not None:
+            result["receipt"] = self.receipts.append(result)
+        return result
+
+    def _orchestrate(
+        self,
+        sentinel_artifact,
+        operation_type: str,
+        gsa815_operation_func,
+        vitals_snapshot=None,
         context: dict = None
     ) -> dict:
         """

@@ -40,6 +40,17 @@ def _canonicalize_commitment_value(value: Any) -> Any:
     return str(value)
 
 
+def canonical_repr(value: Any) -> str:
+    """A stable string for hashing arbitrary result payloads.
+
+    `str(dict)` depends on insertion order, so a result that was written
+    with sorted keys and read back no longer hashed to what the outcome
+    committed (measured 2026-09-08 on the first receipt read from disk).
+    """
+    return json.dumps(_canonicalize_commitment_value(value), sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, default=str)
+
+
 def compute_state_commitment(parent_commitment: Optional[str], state: Dict[str, Any]) -> str:
     """Return a deterministic SHA-256 commitment for a durable governance state.
 
