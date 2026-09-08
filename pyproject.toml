@@ -12,7 +12,9 @@ license = { text = "MIT" }
 # The orchestrator calls the Conservation Kernel unconditionally (Phase 3),
 # so it is a hard dependency, declared here rather than found as a sibling.
 dependencies = [
-  "conservation-kernel @ git+https://github.com/wking53214/conservation_kernel",
+  # 0.2.0 (root admission, snapshot restore) is required by the boundary
+  # this package now holds; pinned to the branch until it is tagged.
+  "conservation-kernel @ git+https://github.com/wking53214/conservation_kernel@mission/close-the-system",
 ]
 
 [project.optional-dependencies]

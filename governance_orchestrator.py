@@ -202,6 +202,24 @@ class GovernanceOrchestrator:
             "guard": None,
         }
 
+    @staticmethod
+    def _temporal_anomalies(request) -> list:
+        from datetime import timedelta
+        anomalies = []
+        try:
+            event = datetime.fromisoformat(request.event_time) if request.event_time else None
+            ingested = datetime.fromisoformat(request.ingested_at) if request.ingested_at else None
+        except (TypeError, ValueError):
+            return ["event_time or ingested_at is not ISO-8601"]
+        if event is not None and ingested is not None:
+            if event.tzinfo is None or ingested.tzinfo is None:
+                anomalies.append("event_time or ingested_at has no timezone")
+            elif event > ingested:
+                anomalies.append(f"event_time {request.event_time} is after ingestion {request.ingested_at}")
+            elif ingested - event > timedelta(days=30):
+                anomalies.append(f"event_time {request.event_time} is more than 30 days before ingestion")
+        return anomalies
+
     def _stamp(self, result: dict, governance_request=None) -> dict:
         """Attach the handoff record and the request to every result.
 
@@ -212,6 +230,8 @@ class GovernanceOrchestrator:
         it decided cannot be reconstructed from the record alone.
         """
         result.setdefault("governance_request", governance_request)
+        result.setdefault("temporal_anomalies",
+                          self._temporal_anomalies(governance_request) if governance_request is not None else [])
         result.setdefault("handoff", {
             "producer": "observe-perceive.GovernanceOrchestrator",
             "contract_version": CONTRACT_VERSION,
@@ -319,6 +339,13 @@ class GovernanceOrchestrator:
             context
         )
         logger.info(f"[Orchestrator] Request ID: {governance_request.request_id}")
+        # Temporal sanity is recorded, never assumed. An event time after
+        # ingestion, or an ingestion before the event by more than a day,
+        # is an anomaly the record names; refusing on it would be a policy
+        # this library does not own.
+        temporal_anomalies = self._temporal_anomalies(governance_request)
+        if temporal_anomalies:
+            logger.warning(f"[Orchestrator] Temporal anomalies on {governance_request.request_id}: {temporal_anomalies}")
 
         # PHASE 1b: behavioural-simulation screen
         #
