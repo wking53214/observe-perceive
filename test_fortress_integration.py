@@ -8,7 +8,13 @@ between PERCEIVE and downstream verification.
 
 import pytest
 
-from fortress_perceive_adapter import FortressPerceiveAdapter, FortressProcessingResult
+# The adapter raises a plain ImportError (not ModuleNotFoundError) when the
+# pack is absent, which recent pytest's importorskip no longer treats as a
+# skip; guard it explicitly so a kernel-only install skips instead of erroring.
+try:
+    from fortress_perceive_adapter import FortressPerceiveAdapter, FortressProcessingResult
+except ImportError:  # pragma: no cover - fortress-kernel is an optional pack
+    pytest.skip("fortress-kernel checkout not available", allow_module_level=True)
 
 
 class TestFortressEnergyMode:

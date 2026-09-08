@@ -32,7 +32,7 @@ ccc_available = True
 try:
     from ccc import AnalysisStage, CCCSystem
     from ccc.matching import MINIMUM_MATCH_LENGTH, anti_probability_of_coincidental_match
-except ModuleNotFoundError:  # pragma: no cover - CCC is a sibling checkout
+except ImportError:  # pragma: no cover - CCC is a sibling checkout
     ccc_available = False
 
 pytestmark = pytest.mark.skipif(not ccc_available, reason="CCC checkout not available")

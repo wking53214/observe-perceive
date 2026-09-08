@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 from governance_contracts import CONTRACT_VERSION
 from governance_chain import verify_result
+from execution_guard import ExecutionLedger, ExecutionRefusal as LedgerRefusal
 
 logger = logging.getLogger("GovernanceOrchestrator")
 
@@ -28,7 +29,9 @@ class GovernanceOrchestrator:
                  require_declared_scope: bool = False,
                  require_vitals: bool = False,
                  raise_on_stage_error: bool = False,
-                 raise_on_execution_error: bool = False):
+                 raise_on_execution_error: bool = False,
+                 execution_ledger: "ExecutionLedger | None" = None,
+                 receipts=None):
         """
         Initialize orchestrator with all governance systems.
 
@@ -87,6 +90,19 @@ class GovernanceOrchestrator:
         # failure is a recorded state, EXECUTION_FAILED, with the approval and
         # context that preceded it. Opt in to raising instead.
         self.raise_on_execution_error = raise_on_execution_error
+        # Every execution context this orchestrator issues is recorded here
+        # before the executor sees it, and marked consumed after. An executor
+        # wrapped with `execution_guard.guarded(func, ledger)` refuses a
+        # context that is not in this ledger, was altered since issuance, or
+        # was consumed before -- measured 2026-09-08, all three executed
+        # without it. In memory by default; pass ExecutionLedger(path) for a
+        # ledger that survives the process, so a replay after restart is
+        # still a replay.
+        self.execution_ledger = execution_ledger if execution_ledger is not None else ExecutionLedger()
+        # A governance_record.ReceiptLog. When set, every result -- refusal,
+        # failure or execution -- is written as a hash-chained receipt before
+        # it is returned, so the explanation exists outside this process.
+        self.receipts = receipts
         self.perceive = perceive
         self.conservation_kernel = conservation_kernel
         self.observe_engine = observe_engine
@@ -142,6 +158,68 @@ class GovernanceOrchestrator:
             )
         return result
 
+    @staticmethod
+    def _admission_problems(admission, declared_scope: str, artifact_id: str) -> list:
+        """Why a Gateway admission does not back a declared scope; empty if it does."""
+        problems = []
+        expected = getattr(admission, "expected_integrity", None)
+        integrity = getattr(admission, "integrity", None)
+        if not callable(expected) or not integrity:
+            return ["admission is not a sealed Gateway artifact"]
+        if expected() != integrity:
+            problems.append("admission integrity does not recompute (altered since sealing)")
+        sealed_scope = getattr(getattr(admission, "scope", None), "value", getattr(admission, "scope", None))
+        if sealed_scope != declared_scope:
+            problems.append(f"sealed scope is {sealed_scope}, declared scope is {declared_scope}")
+        admitted_id = getattr(admission, "artifact_id", None)
+        if admitted_id is not None and admitted_id != artifact_id:
+            problems.append(f"admission is for artifact {admitted_id}, this request is for {artifact_id}")
+        return problems
+
+    def _consume(self, execution_context, gsa815_result, execution_status: str) -> dict:
+        """Mark the issued context consumed, once.
+
+        A guarded executor consumes it at the moment of authorization and
+        attaches the authorization to its result; the orchestrator then only
+        records what happened. An unguarded executor leaves consumption to
+        the orchestrator, after the fact, so the ledger still shows one use
+        per issuance, and the record says which of the two it was.
+        """
+        attached = gsa815_result.get("_authorization") if isinstance(gsa815_result, dict) else None
+        already = self.execution_ledger.consumed(execution_context.execution_id)
+        if already is not None:
+            return {
+                "consumed_by": already.get("consumer"),
+                "ledger_entry_hash": already.get("hash"),
+                "authorized_at": already.get("recorded_at"),
+                "guard": attached,
+            }
+        entry = self.execution_ledger.consume(execution_context, consumer="orchestrator", outcome=execution_status)
+        return {
+            "consumed_by": "orchestrator",
+            "ledger_entry_hash": entry["hash"],
+            "authorized_at": entry["recorded_at"],
+            "guard": None,
+        }
+
+    @staticmethod
+    def _temporal_anomalies(request) -> list:
+        from datetime import timedelta
+        anomalies = []
+        try:
+            event = datetime.fromisoformat(request.event_time) if request.event_time else None
+            ingested = datetime.fromisoformat(request.ingested_at) if request.ingested_at else None
+        except (TypeError, ValueError):
+            return ["event_time or ingested_at is not ISO-8601"]
+        if event is not None and ingested is not None:
+            if event.tzinfo is None or ingested.tzinfo is None:
+                anomalies.append("event_time or ingested_at has no timezone")
+            elif event > ingested:
+                anomalies.append(f"event_time {request.event_time} is after ingestion {request.ingested_at}")
+            elif ingested - event > timedelta(days=30):
+                anomalies.append(f"event_time {request.event_time} is more than 30 days before ingestion")
+        return anomalies
+
     def _stamp(self, result: dict, governance_request=None) -> dict:
         """Attach the handoff record and the request to every result.
 
@@ -152,6 +230,8 @@ class GovernanceOrchestrator:
         it decided cannot be reconstructed from the record alone.
         """
         result.setdefault("governance_request", governance_request)
+        result.setdefault("temporal_anomalies",
+                          self._temporal_anomalies(governance_request) if governance_request is not None else [])
         result.setdefault("handoff", {
             "producer": "observe-perceive.GovernanceOrchestrator",
             "contract_version": CONTRACT_VERSION,
@@ -166,6 +246,7 @@ class GovernanceOrchestrator:
                 "raise_on_stage_error": self.raise_on_stage_error,
                 "raise_on_execution_error": self.raise_on_execution_error,
             },
+            "execution_ledger": str(self.execution_ledger.path) if self.execution_ledger.path else "in-memory",
         })
         return result
 
@@ -175,6 +256,28 @@ class GovernanceOrchestrator:
         operation_type: str,
         gsa815_operation_func,
         vitals_snapshot=None,  # VitalsSnapshot (type annotation removed to avoid import)
+        context: dict = None
+    ) -> dict:
+        """Orchestrate the flow (see `_orchestrate`) and receipt the result."""
+        result = self._orchestrate(sentinel_artifact, operation_type, gsa815_operation_func, vitals_snapshot, context)
+        if self.receipts is not None:
+            try:
+                result["receipt"] = self.receipts.append(result)
+            except Exception as e:  # noqa: BLE001
+                # The action (if any) has already happened; raising here
+                # would lose even the in-memory record. Degrade explicitly:
+                # the result says it was not receipted, and says why.
+                result["receipt"] = None
+                result["receipt_error"] = f"{type(e).__name__}: {e}"
+                logger.critical(f"[Orchestrator] Result NOT receipted: {result['receipt_error']}")
+        return result
+
+    def _orchestrate(
+        self,
+        sentinel_artifact,
+        operation_type: str,
+        gsa815_operation_func,
+        vitals_snapshot=None,
         context: dict = None
     ) -> dict:
         """
@@ -225,12 +328,32 @@ class GovernanceOrchestrator:
         logger.info("[Orchestrator] Phase 1: Converting Sentinel artifact to governance request")
         if context is None:
             context = {}
+        # The sealed Gateway admission is checked here, not committed into
+        # the request: the request's context is part of its commitment and
+        # must stay plain data. What is recorded about the admission is its
+        # id, scope and integrity digest.
+        gateway_admission = context.pop("gateway_admission", None) if "gateway_admission" in context else None
+        admission_summary = None
+        if gateway_admission is not None:
+            admission_summary = {
+                "artifact_id": getattr(gateway_admission, "artifact_id", None),
+                "scope": getattr(getattr(gateway_admission, "scope", None), "value", None),
+                "integrity": getattr(gateway_admission, "integrity", None),
+            }
+            context["gateway_admission_integrity"] = admission_summary["integrity"]
         governance_request = self.sentinel_adapter.sentinel_artifact_to_governance_request(
             sentinel_artifact,
             operation_type,
             context
         )
         logger.info(f"[Orchestrator] Request ID: {governance_request.request_id}")
+        # Temporal sanity is recorded, never assumed. An event time after
+        # ingestion, or an ingestion before the event by more than a day,
+        # is an anomaly the record names; refusing on it would be a policy
+        # this library does not own.
+        temporal_anomalies = self._temporal_anomalies(governance_request)
+        if temporal_anomalies:
+            logger.warning(f"[Orchestrator] Temporal anomalies on {governance_request.request_id}: {temporal_anomalies}")
 
         # PHASE 1b: behavioural-simulation screen
         #
@@ -290,10 +413,31 @@ class GovernanceOrchestrator:
         # speaks GovernanceDecision. The adapter owns that translation (see
         # sentinel_perceive_adapter for why the two vocabularies stay separate).
         logger.info("[Orchestrator] Phase 2: PERCEIVE evaluation (unanimous consensus across applied gates)")
-        perceive_decision = self.sentinel_adapter.evaluate_through_perceive(
-            self.perceive,
-            governance_request
-        )
+        try:
+            perceive_decision = self.sentinel_adapter.evaluate_through_perceive(
+                self.perceive,
+                governance_request
+            )
+        except Exception as e:
+            # Measured 2026-09-08: with no PERCEIVE configured this phase
+            # raised AttributeError out of the orchestrator and left no
+            # record at all -- the one stage whose failure was a crash rather
+            # than a refusal. Same shape as the other stages now.
+            logger.warning(
+                "[Orchestrator] PERCEIVE stage did not run to a verdict -- "
+                f"it raised {type(e).__name__}: {e}. Recording REJECTED with stage_refused=False."
+            )
+            if self.raise_on_stage_error:
+                raise
+            return self._stamp({
+                "status": "REJECTED",
+                "reason": f"PERCEIVE stage did not run to a verdict: {type(e).__name__}: {e}",
+                "refused_by": None,
+                "stage_refused": False,
+                "stage_error": f"{type(e).__name__}: {e}",
+                "governance_decision": None,
+                "audit_chain": None,
+            }, governance_request)
         logger.info(f"[Orchestrator] PERCEIVE approval: {perceive_decision.approval.value}")
         logger.info(f"[Orchestrator] Applied gates: {perceive_decision.applied_gates}")
         logger.info(f"[Orchestrator] Unanimous: {perceive_decision.unanimous_consensus}")
@@ -340,7 +484,8 @@ class GovernanceOrchestrator:
                 perceive_decision,
                 governance_request.artifact_id,
                 governance_request.artifact_content,
-                governance_request.artifact_hash
+                governance_request.artifact_hash,
+                request=governance_request,
             )
             logger.info(f"[Orchestrator] Conservation verified: {conservation_decision.verified}")
         except Exception as e:
@@ -393,12 +538,18 @@ class GovernanceOrchestrator:
                 "GSA-815",
                 governance_request.lineage
             )
-            logger.info("[Orchestrator] GSA-815 execution approved")
+            # Issue it. A context that is not in the ledger is one nobody
+            # may execute; an execution id already issued is a replay and is
+            # refused here, before anything downstream can act on it.
+            self.execution_ledger.issue(execution_context)
+            logger.info("[Orchestrator] GSA-815 execution approved and issued")
         except Exception as e:
             from conservation_gsa815_adapter import ExecutionRefusal
             from governance_contracts import GovernanceApproval
-            refused = isinstance(e, ExecutionRefusal)
-            if refused:
+            refused = isinstance(e, (ExecutionRefusal, LedgerRefusal))
+            if isinstance(e, LedgerRefusal):
+                refused_by = "execution_ledger"
+            elif refused:
                 # The approval gate refuses when the decision it was handed is
                 # not an approval -- and that decision is PERCEIVE's. A
                 # PERCEIVE refusal reaches this point with the Conservation
@@ -446,6 +597,45 @@ class GovernanceOrchestrator:
         # check is skipped entirely when no scope was declared: callers that
         # predate the Gateway seam pass no scope and must keep working.
         declared_scope = (context or {}).get("gateway_scope")
+
+        # A declared scope is only as good as the seal behind it. The Gateway
+        # seals scope into the artifact's integrity digest; the admission
+        # adapter passes that artifact along. A scope with no admission is a
+        # claim; a scope whose admission does not recompute, or names another
+        # scope or another artifact, is tamper evidence and is refused in
+        # every mode. A bare claim is refused in strict mode and recorded
+        # (`scope_sealed: False`) otherwise.
+        scope_sealed = None
+        if declared_scope is not None:
+            admission = gateway_admission
+            if admission is None:
+                scope_sealed = False
+                if self.require_declared_scope:
+                    logger.error("[Orchestrator] Refusing execution: scope declared without a sealed Gateway admission")
+                    return self._stamp({
+                        "status": "REJECTED",
+                        "reason": f"scope {declared_scope} declared without a sealed Gateway admission",
+                        "governance_decision": perceive_decision,
+                        "conservation_decision": conservation_decision,
+                        "execution_approval": execution_approval,
+                        "scope_enforced": True, "scope_sealed": False,
+                        "audit_chain": None,
+                    }, governance_request)
+                logger.warning("[Orchestrator] Scope declared without a sealed Gateway admission; honouring it as a CLAIM (scope_sealed=False)")
+            else:
+                problems = self._admission_problems(admission, declared_scope, governance_request.artifact_id)
+                scope_sealed = not problems
+                if problems:
+                    logger.error(f"[Orchestrator] Refusing execution: Gateway admission does not back the declared scope: {problems}")
+                    return self._stamp({
+                        "status": "REJECTED",
+                        "reason": "Gateway admission does not back the declared scope: " + "; ".join(problems),
+                        "governance_decision": perceive_decision,
+                        "conservation_decision": conservation_decision,
+                        "execution_approval": execution_approval,
+                        "scope_enforced": True, "scope_sealed": False,
+                        "audit_chain": None,
+                    }, governance_request)
 
         # An undeclared scope used to fall straight through here, silently.
         # That is the worse half of the two ways this can be wrong: a request
@@ -526,7 +716,12 @@ class GovernanceOrchestrator:
                 raise
             # Everything that led here is kept: the action was approved and
             # attempted, and the record must show both, or a failed action
-            # is indistinguishable from one that was never approved.
+            # is indistinguishable from one that was never approved. The
+            # context is consumed either way: a failed attempt does not
+            # leave an approval that can be tried again.
+            execution_authorization = self._consume(execution_context, None, "failed")
+            outcome_context = self.gsa815_adapter.create_outcome_context(
+                execution_context, None, None, execution_status="failed")
             failed = self._stamp({
                 "status": "EXECUTION_FAILED",
                 "reason": f"execution raised {type(e).__name__}: {e}",
@@ -534,6 +729,7 @@ class GovernanceOrchestrator:
                 "execution_error": f"{type(e).__name__}: {e}",
                 "executed_at": executed_at,
                 "scope_enforced": declared_scope is not None,
+                "scope_sealed": scope_sealed,
                 "declared_scope": declared_scope,
                 "governance_decision": perceive_decision,
                 "simulation_screen": screen_result,
@@ -541,9 +737,11 @@ class GovernanceOrchestrator:
                 "conservation_decision": conservation_decision,
                 "execution_approval": execution_approval,
                 "execution_context": execution_context,
+                "execution_authorization": execution_authorization,
                 "gsa815_result": None,
                 "observe_verdict": None,
                 "observe_enforced": False,
+                "outcome_context": outcome_context,
                 "audit_chain": None,
                 "audit_chain_valid": False,
             }, governance_request)
@@ -558,6 +756,7 @@ class GovernanceOrchestrator:
             else "completed"
         )
         logger.info(f"[Orchestrator] GSA-815 result ({execution_status}): {gsa815_result}")
+        execution_authorization = self._consume(execution_context, gsa815_result, execution_status)
 
         # PHASE 6: OBSERVE monitoring
         logger.info("[Orchestrator] Phase 6: OBSERVE clinical monitoring")
@@ -579,24 +778,27 @@ class GovernanceOrchestrator:
             logger.info("[Orchestrator] No vitals provided, OBSERVE evaluation skipped (warned above)")
 
         # PHASE 7: Link audit chains
+        #
+        # The outcome is created whether or not OBSERVE ran: the execution's
+        # result is committed either way. The forensic proof, which asserts
+        # an observed outcome, exists only when there was one.
         logger.info("[Orchestrator] Phase 7: Linking audit chains")
-        if observe_verdict:
-            outcome_context = self.gsa815_adapter.create_outcome_context(
-                execution_context,
-                gsa815_result,
-                observe_verdict
-            )
-            forensic_proof = self.gsa815_adapter.create_forensic_proof(outcome_context)
-        else:
-            outcome_context = None
-            forensic_proof = None
+        outcome_context = self.gsa815_adapter.create_outcome_context(
+            execution_context,
+            gsa815_result,
+            observe_verdict,
+            execution_status=execution_status,
+        )
+        forensic_proof = self.gsa815_adapter.create_forensic_proof(outcome_context) if observe_verdict else None
 
         # Return complete result
         logger.info("[Orchestrator] Governance flow complete")
         result = self._stamp({
             "status": "APPROVED_AND_EXECUTED",
             "scope_enforced": declared_scope is not None,
+            "scope_sealed": scope_sealed,
             "declared_scope": declared_scope,
+            "gateway_admission": admission_summary,
             "observe_enforced": observe_verdict is not None,
             "observe_error": observe_error,
             "execution_status": execution_status,
@@ -608,6 +810,7 @@ class GovernanceOrchestrator:
             "conservation_decision": conservation_decision,
             "execution_approval": execution_approval,
             "execution_context": execution_context,
+            "execution_authorization": execution_authorization,
             "gsa815_result": gsa815_result,
             "observe_verdict": observe_verdict,
             "outcome_context": outcome_context,

@@ -32,18 +32,13 @@ from governance_contracts import (
 )
 from datetime import datetime, timezone
 import hashlib
-import sys
-import os
 
-# Lazy import to handle cross-repo dependencies
-def _import_sentinel_types():
-    sentinel_path = os.path.join(os.path.dirname(__file__), '..', 'sentinel_os')
-    if sentinel_path not in sys.path:
-        sys.path.insert(0, sentinel_path)
-    from sentinel_os.conservation.types import (
-        SentinelArtifact, ArtifactMetadata, EpistemicStatus, AuthorityStatus
-    )
-    return SentinelArtifact, ArtifactMetadata, EpistemicStatus, AuthorityStatus
+# There used to be a lazy importer here for `sentinel_os.conservation.types`.
+# That module does not exist in sentinel_os and the function was never called
+# (measured 2026-09-08). The artifact this adapter consumes is a duck-typed
+# contract -- see `sentinel_artifact_to_governance_request` -- and no
+# repository implements a `SentinelArtifact` type. Removed rather than kept
+# as a guard that would raise ModuleNotFoundError the first time it ran.
 
 
 class SentinelPerceiveAdapter:
@@ -90,7 +85,9 @@ class SentinelPerceiveAdapter:
             epistemic_status=artifact.metadata.epistemic_status.value if hasattr(artifact.metadata.epistemic_status, 'value') else "INFERRED",
             lineage=artifact.metadata.parent_artifact_ids or [],
             context=context,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
+            event_time=SentinelPerceiveAdapter._event_time_of(artifact),
+            ingested_at=datetime.now(timezone.utc).isoformat(),
         )
         # The state this commitment covers is defined once, in
         # governance_chain.request_state, and shared with the verifier: a
@@ -193,6 +190,29 @@ class SentinelPerceiveAdapter:
         policy_request = cls.governance_request_to_policy_request(request)
         verdict = perceive_kernel.evaluate_request(policy_request)
         return cls.policy_verdict_to_governance_decision(verdict, request)
+
+    @staticmethod
+    def _event_time_of(artifact) -> "str | None":
+        """The source's own statement of when the described thing happened.
+
+        Read from the first of `event_time`, `occurred_at`, `created_at`,
+        `timestamp` present on the artifact's metadata or on the artifact
+        itself, as an ISO-8601 string. None when the source states nothing,
+        which is recorded as None rather than substituted with the clock:
+        a request that says "no event time" is a different request from one
+        that says "now".
+        """
+        for holder in (getattr(artifact, "metadata", None), artifact):
+            if holder is None:
+                continue
+            for name in ("event_time", "occurred_at", "created_at", "timestamp"):
+                value = getattr(holder, name, None)
+                if value is None:
+                    continue
+                if isinstance(value, datetime):
+                    return value.isoformat()
+                return str(value)
+        return None
 
     @staticmethod
     def _compute_hash(content: str) -> str:

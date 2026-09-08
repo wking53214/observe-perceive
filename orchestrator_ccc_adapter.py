@@ -51,7 +51,9 @@ def _import_ccc():
         sys.path.insert(0, ccc_path)
     try:
         from ccc import Actor, CCCSystem, EpistemicStatus
-    except ModuleNotFoundError:
+    except ImportError:
+        # ModuleNotFoundError is the ordinary case; a bare ImportError means a
+        # partial or shadowing `ccc` package, which is equally "not available".
         return None, None, None
     return Actor, CCCSystem, EpistemicStatus
 

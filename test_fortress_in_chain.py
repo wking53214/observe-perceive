@@ -15,6 +15,15 @@ from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
 from observe_consolidated import ObserveClinicalEngine
 from conservation_kernel import ConservationKernel
 
+try:
+    import fortress_perceive_adapter  # noqa: F401
+    fortress_available = True
+except ImportError:  # pragma: no cover - fortress-kernel is an optional pack
+    fortress_available = False
+# Only the tests that ask for a controller need the pack; the absent-by-default
+# test is exactly the minimal-install case and must keep running without it.
+needs_fortress = pytest.mark.skipif(not fortress_available, reason="fortress-kernel checkout not available")
+
 
 class _Status:
     def __init__(self, value):
@@ -77,6 +86,7 @@ def test_fortress_is_absent_by_default(perceive):
     assert result["fortress_result"] is None
 
 
+@needs_fortress
 @pytest.mark.parametrize("controller", ["energy", "lyapunov", "sage"])
 def test_each_controller_runs_inside_the_full_chain(perceive, controller):
     orchestrator = _orchestrator(perceive, controller)
@@ -92,6 +102,7 @@ def test_each_controller_runs_inside_the_full_chain(perceive, controller):
     assert result["execution_approval"] is not None
 
 
+@needs_fortress
 def test_fortress_runs_after_perceive_and_before_conservation(perceive):
     """Ordering is the reason this stage exists. PERCEIVE decides whether the
     request is permitted; FORTRESS decides whether acting on it stays inside
@@ -118,6 +129,7 @@ def test_fortress_runs_after_perceive_and_before_conservation(perceive):
     assert calls == ["fortress", "conservation"]
 
 
+@needs_fortress
 def test_a_fortress_refusal_stops_the_chain_and_fails_closed(perceive):
     """The case the layer exists for: PERCEIVE permitted the request, FORTRESS
     refuses it on safety grounds, and nothing downstream gets to re-approve
@@ -157,6 +169,7 @@ def test_a_fortress_refusal_stops_the_chain_and_fails_closed(perceive):
     assert result["governance_decision"].approval is GovernanceApproval.APPROVED
 
 
+@needs_fortress
 def test_perceive_violations_reach_fortress_as_error_signal(perceive):
     """FORTRESS's error signal is derived from PERCEIVE's violation count, not
     invented -- the two systems' notions of "something is wrong" stay
@@ -178,6 +191,7 @@ def test_perceive_violations_reach_fortress_as_error_signal(perceive):
     assert seen["approved"] is True
 
 
+@needs_fortress
 def test_fortress_keeps_its_own_verifiable_audit_ledger(perceive):
     orchestrator = _orchestrator(perceive, "energy")
     result = _run(orchestrator)

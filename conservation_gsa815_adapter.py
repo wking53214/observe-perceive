@@ -72,7 +72,11 @@ class ConservationGSA815Adapter:
             conservation_receipt_id=conservation_decision.conservation_receipt_id,
             governance_audit_hash=conservation_decision.conservation_audit_hash,
             conservation_audit_hash=conservation_decision.conservation_audit_hash,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
+            artifact_id=artifact_id,
+            artifact_hash=artifact_hash,
+            producer=producer,
+            lineage=list(lineage or []),
         )
         approval.state_commitment = compute_state_commitment(
             parent_commitment=conservation_decision.conservation_audit_hash,
@@ -118,15 +122,14 @@ class ConservationGSA815Adapter:
             execution_id=execution_approval.request_id,
             timestamp=datetime.now(timezone.utc)
         )
+        # The state this commitment covers is defined once, in
+        # governance_chain.execution_context_state, and shared with the
+        # verifier and the execution guard. An inline copy here drifted from
+        # the verifier the first time a field was added (1.1.0, execution_id).
+        from governance_chain import execution_context_state
         context.state_commitment = compute_state_commitment(
             parent_commitment=execution_approval.state_commitment,
-            state={
-                "request_id": context.request_id,
-                "artifact_id": context.artifact_id,
-                "artifact_hash": context.artifact_hash,
-                "lineage": context.lineage,
-                "producer": context.producer,
-            },
+            state=execution_context_state(context),
         )
         return context
 
