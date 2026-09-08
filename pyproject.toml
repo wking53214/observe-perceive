@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "observe-perceive"
-version = "1.1.0"
+version = "1.2.0"
 description = "The governed action gate: admission, screen, policy gates, Conservation Kernel approval, execution, observation, record, with a verifiable hash chain over all of it."
 readme = "README.md"
 requires-python = ">=3.11"

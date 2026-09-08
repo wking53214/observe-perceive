@@ -1,7 +1,7 @@
 # CLAUDE_ARCHITECTURE_STATE
 
-Persistent hand-off state for the CLOSE THE SYSTEM mission. Updated at the end
-of every phase. Read this before touching anything.
+Persistent hand-off state for the CLOSE THE SYSTEM mission. Read this before
+touching anything. Full reports: docs/closure/.
 
 ## CURRENT OBJECTIVE
 
@@ -13,142 +13,89 @@ without leaving a verifiable explanation of why it was permitted.
 
 ## CURRENT PHASE
 
-Phase 3 (red team, repair, second-order) largely complete across the spine,
-the Conservation Kernel, CCC and ghost_tools. Phase 4/5 next: the
-Gateway-scope boundary, the vertical slice, the matrices and the reports.
+Phase 5 complete (2026-09-08). Verdict: proven for the shipped configuration
+against an external caller, a file editor and a restart; not proven against
+an in-process or file-writing attacker (unkeyed commitments), an unguarded
+executor, unshared processes, or a receipt store failing after the action.
+See docs/closure/ARCHITECTURE_CLOSURE_REPORT.md section 1.
 
-## ARCHITECTURE MAP (actual, from code, 2026-09-08)
+## ARCHITECTURE MAP (actual, from code)
 
-The diagram in the mission brief maps onto the code like this. "Participates"
-means the component runs on the path of `GovernanceOrchestrator.orchestrate_request`
-(observe-perceive/governance_orchestrator.py) and its output is linked into
-the commitment chain; "opt-in" means only when the orchestrator is constructed
-with the flag; "manual" means a caller must invoke it separately.
+SOURCE (duck-typed sentinel artifact with event time) → PRESERVE (Gateway
+seal, verified by the orchestrator when passed; kernel root admission with
+real propositions) → INTERPRET (PERCEIVE gates, advisory by default) →
+SCREEN (AUGUR, opt-in) → CONTAIN (fortress, opt-in) → GATE/AUTHORIZE (kernel
+`submit` of the decision as a derived artifact; self-describing approval;
+execution context ISSUED into the hash-chained execution ledger) → EXECUTE
+(caller callable, `guarded` refuses never-issued, altered or used contexts;
+consumption recorded either way) → OBSERVE (when vitals; strict flag) →
+AUDIT (unconditional outcome; 34-check verifier; hash-chained receipts;
+kernel snapshot; CCC recording explicit).
 
-| Stage | Implementation | Participation | Authority actually exercised |
-|---|---|---|---|
-| SOURCE | a "sentinel artifact": any object with `artifact_id`, `content`, `metadata.{origin_status,authority_status,epistemic_status,parent_artifact_ids}` (sentinel_perceive_adapter.py:53). sentinel_os is never imported; the type is duck-typed | participates | OBSERVE (claims origin/authority/epistemic status; nothing verifies the claim) |
-| PRESERVE | Governance_Gateway admission (gateway_admission_adapter.py `govern_admitted`) seals the artifact and declares scope; Conservation Kernel registers the input artifact as a root (perceive_conservation_adapter.py:198) | Gateway: manual (caller-side entry); Kernel: participates | GATE (gateway), AUDIT (kernel root registration) |
-| INTERPRET | PERCEIVE policy gates via `SentinelPerceiveAdapter.evaluate_through_perceive` (perceive_consolidated.py). Gates are ADVISORY by default (`PolicyEnforcementConfig.enforce_export_controls=False`); violations travel as `advisory_violations` | participates | INTERPRET + RECOMMEND (advisory) or GATE (when enforce flags set) |
-| SCREEN | AUGUR behavioural screen, veto-only (governance_orchestrator.py:246) | opt-in | GATE (refuse-only) |
-| CONTAIN | fortress-kernel containment (governance_orchestrator.py:310) | opt-in | GATE (refuse-only) |
-| GATE/AUTHORIZE | Conservation Kernel `submit` of a decision artifact with a FunctionalContract (perceive_conservation_adapter.py:110-220) producing `ConservationDecision`; then `ConservationGSA815Adapter.approve_execution` mints `ExecutionApproval` + `ExecutionContext` with chained commitments | participates | AUTHORIZE |
-| EXECUTE | `gsa815_operation_func(execution_context)`: a caller-supplied callable (governance_orchestrator.py:521). GSA-815 the repository is not imported; "GSA-815" is a label in the context's producer field | participates, but the executor is outside the system | EXECUTE (unconstrained) |
-| OBSERVE | `observe_engine.evaluate(vitals_snapshot)` (observe_consolidated.py), only when vitals are supplied | conditional | OBSERVE |
-| AUDIT | `OutcomeContext` + `forensic_proof` (gsa815_observe_adapter.py), only when OBSERVE ran; `governance_chain.verify_result` re-derives 29 checks on the way out. CCC recording (`OrchestratorCCCAdapter.record`) is manual and called by no production code path. Nothing is persisted: the record is the returned dict | partial | AUDIT (in-memory only) |
-
-Commitment chain: request (root) → PERCEIVE decision (its own ledger) →
-conservation_audit_hash → approval → execution context → outcome. Each link is
-`compute_state_commitment(parent, state)` over the fields in
-governance_chain.{request_state, approval_state, execution_context_state,
-outcome_state}. Timestamps are NOT in any commitment; `execution_id` is not in
-the execution-context commitment.
+Contract 1.1.0: `event_time` committed, `ingested_at` recorded,
+`execution_id` committed, approval self-describing, canonical result hash.
+Processing timestamps stay outside the commitments by design and are covered
+by the receipt and ledger entry hashes.
 
 ## REPOSITORY STATUS
 
-| repo | role | status |
+| repo | role | branch / state |
 |---|---|---|
-| observe-perceive | the spine (gate) | ACTIVE, 1.1.0, 529 tests |
-| conservation_kernel | constitutional hub | ACTIVE dependency, 0.1.0 |
-| Governance_Gateway | admission/sealing | ACTIVE, 0.1.0 |
-| ghost_tools | assurance tooling | ACTIVE, 0.5.2 |
-| CCC | recurrence/audit ledger | FROZEN optional pack; semantic recurrence under audit |
-| AUGUR | behavioural screen | FROZEN optional pack |
-| fortress-kernel | containment | FROZEN optional pack |
-| sentinel_os | custody ledger, Postgres-backed | FROZEN; never imported by the spine |
-| GSA-815 | nominal executor | FROZEN; never imported by the spine |
-| ANVIL | hash-chained execution lineage kernel (single file) | NOT in the 18-repo audit; candidate EXECUTE/AUDIT record layer; under audit |
-| GRAPH | consolidated architecture documents | reference only |
-| VANGUARD | retired, flattened | IRRELEVANT |
-| TBCA, CITADEL | archived transcripts | IRRELEVANT |
-| nine archived repos | see docs/audit | IRRELEVANT |
+| observe-perceive | the spine | claude/prompt-red-blue-team-sj9a31; 1.2.0; 589 passed / 5 skipped (all packs), 494 / 63 (kernel only) |
+| conservation_kernel | constitutional hub | mission/close-the-system; 0.2.0; 67 passed. Spine pins the branch until tagged |
+| Governance_Gateway | admission / sealing | main; 0.1.0; CI green |
+| ghost_tools | assurance | mission/close-the-system; 0.5.2 + baseline integrity; 167 passed |
+| CCC | recurrence ledger | mission/close-the-system (frozen repo, hardening branch); 142 passed, 1 xfailed |
+| AUGUR, fortress-kernel | opt-in stages | FROZEN |
+| sentinel_os, GSA-815 | never imported | FROZEN |
+| ANVIL | candidate lineage layer | not integrated; not needed by the closure |
+| GRAPH, VANGUARD, TBCA, CITADEL, archived repos | irrelevant | |
 
-## DISCOVERED GAPS (running list; severity per mission priority order)
+## DISCOVERED GAPS
 
-1. CONSTITUTIONAL BYPASS. The executor is a caller-supplied callable that
-   receives an `ExecutionContext` and nothing obliges it to verify anything.
-   `ExecutionContext`/`ExecutionApproval` are plain mutable dataclasses with
-   public constructors and a public `compute_state_commitment`; a hand-built
-   context is indistinguishable from an issued one on the executor side.
-   Nothing records that a context was issued, so nothing can refuse a
-   context that was not.
-2. CONSTITUTIONAL BYPASS / REPLAY. A context can be executed any number of
-   times; there is no single-use or issuance ledger.
-3. PROVENANCE BREAK. When OBSERVE does not run (no vitals), no
-   `OutcomeContext` is created: the execution result is uncommitted and the
-   record can never be `audit_chain_valid`. An executed action then has no
-   verifiable outcome.
-4. PROVENANCE BREAK / PERSISTENCE. Nothing persists the record. CCC recording
-   is manual. A process exit loses every explanation.
-5. TEMPORAL. Every timestamp is processing time (`datetime.now`); no event
-   time is carried from the source artifact; timestamps are outside every
-   commitment, so `time.monotonic` verifies ordering of values a caller can
-   rewrite.
-6. IDENTITY. `execution_id` is absent from the execution-context commitment.
-7. AUTHORITY CONFUSION (intentional, documented). PERCEIVE gates advisory by
-   default; scope and vitals checks are opt-in strict.
-8. Pending: CCC semantic recurrence, Conservation Kernel epistemic
-   transformations, ghost baseline (audits in flight).
+Fourteen gaps G1-G14, all closed or documented: see the gap matrix in
+docs/closure/ARCHITECTURE_CLOSURE_REPORT.md section 4.
 
-## ACTIVE HYPOTHESES
+## ATTACKS PERFORMED
 
-- H1: a forged ExecutionContext executes via any real executor (gap 1).
-- H2: the same context executes twice (gap 2).
-- H3: rewriting `governance_request.timestamp` after the fact leaves
-  `verify_result` valid (gap 5).
-- H4: registering a root artifact named `decision-<id>` in the kernel makes
-  `conservation.in_kernel_ledger` pass without a submit (verifier check is
-  reconstruct-succeeds only).
-
-## ATTACKS PERFORMED (all confirmed before repair, all refused after; see GOVERNANCE_BYPASS_REPORT.md)
-
-Spine: H1 forged ExecutionContext executes; H2 issued context executes twice;
-H3 request timestamp backdated, verify_result valid; H3b outcome future-dated;
-H3c execution_id relabelled on a no-OBSERVE record; H4 root registered as
-`decision-<id>` passes kernel membership; result dict str(dict) hash order
-after JSON round trip. Kernel: forged root with dangling refs; self-declared
-HUMAN actor; wildcard evidence; born-canonical on unrelated authorization;
-verified-then-erased; propositions=() on the spine path. CCC: event dates
-lost on reload; non-numeric similarity crashes recording; unsorted provider
-makes nearest the weakest; provider failure leaves no trace; semantic index
-not rebuilt on load. ghost_tools: committed baselines inert (137/137); scan
-of nothing exits 0; MINOR entry suppresses CRITICAL; corrupt baseline exits
-1; --accept --json emits prose.
+Spine 12, kernel 6, CCC 5, ghost_tools 5, all measured before and after
+repair; second-order attacks on each repair. Post-repair run in the shipped
+configuration: 11 attacks, 0 effects written, every refusal recorded.
+docs/closure/GOVERNANCE_BYPASS_REPORT.md.
 
 ## REPAIRS PERFORMED
 
-observe-perceive (branch claude/prompt-red-blue-team-sj9a31, commits
-116f642, a836a4c, 622644e): execution_guard.py (ExecutionLedger,
-authorize_execution, guarded); orchestrator issues/consumes, refuses
-reissue, unconditional outcome, receipts; contract 1.1.0 (event_time,
-ingested_at, execution_id committed, self-describing approval);
-verify_result hardened (derived-by-transformation membership, outcome
-present/committed, execution_status); governance_record.py (to/from record,
-record_hash, ReceiptLog, verify_record); adapter hands the kernel real
-propositions with conservative mapping; dead sentinel importer removed.
-conservation_kernel (branch mission/close-the-system, c39d781, e5814cd):
-root admission, born-authoritative/canonical rule, trusted_humans,
-wildcard scope, kept reports, snapshot/from_snapshot with re-verification.
-CCC (mission/close-the-system, 6b194db): event dates on load, provider
-validation and ordering, index rebuild on load, failure audit event.
-ghost_tools (mission/close-the-system, b761da4): portable stored paths,
-stale entries reported, escalation surfaces, nothing-scanned exit 2,
-corrupt baseline exit 2, --accept --json.
+observe-perceive: execution_guard (ledger, authorize, guarded);
+governance_record (record, verify_record, ReceiptLog); contract 1.1.0;
+verifier hardening; adapter hands the kernel real propositions; scope
+binding to the seal; unconditional outcome; PERCEIVE crash guard; receipt
+degradation; temporal anomalies; vertical slice; kernel-only install clean.
+conservation_kernel: root admission, born-authoritative rule, trusted
+humans, scoped wildcard, kept reports, snapshot/restore with re-verification.
+CCC: event dates on load, provider validation and ordering, index rebuild,
+failure audit event. ghost_tools: portable baselines, stale entries,
+escalation, exit codes, JSON accept.
 
 ## TEST RESULTS
 
-observe-perceive 565 passed / 5 skipped (was 529); conservation_kernel 67
-(was 52); CCC 142 + 1 xfail (was 134); ghost_tools 167 (was 159). ruff
-clean on all four.
+observe-perceive 589 passed / 5 skipped / 3 subtests (was 529);
+kernel-only clean clone 494 / 63 (was 3 collection errors, 24 failures);
+conservation_kernel 67 (was 52); CCC 142 + 1 xfail (was 134); ghost_tools
+167 (was 159). ruff clean everywhere.
 
-## UNRESOLVED RISKS
+## UNRESOLVED RISKS (ranked)
 
-- The executor boundary is outside the library; enforcement there is by
-  contract, not by code, until an execution guard exists.
+R1/R4 unkeyed commitments, unsigned files; R2 unguarded executors; R6
+cross-process replay without shared files; R7 receipt failure after the
+action; R3 PERCEIVE ledger not persisted; R5 advisory defaults; R8 source
+clock is a claim; R9 CCC recording explicit; R10 OBSERVE clinical regime.
 
 ## NEXT HIGHEST-VALUE ACTION
 
-Run H1-H4 as scripts; if confirmed, build the execution guard with an
-issuance ledger (in-memory + append-only file), make the outcome context
-unconditional, commit execution_id and event/ingestion time, and add a
-durable record format with a from-record verifier.
+1. Merge the four branches; tag conservation_kernel 0.2.0 and move the
+   spine's pin from the branch to the tag.
+2. Close R1: key the commitments (HMAC or signature) with the key held
+   outside the process, at the adapter boundary; sign ledger entries,
+   receipts and kernel snapshots with the same key.
+3. Make `guarded` the only documented executor path (R2) and add a
+   pre-execution receipt probe (R7).
