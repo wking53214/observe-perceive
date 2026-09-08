@@ -10,7 +10,7 @@ spine's suite if the other side changes that surface.
 
 | Repo | Version | Import (from observe-perceive) | Calls made | Resolution | Break test |
 |---|---|---|---|---|---|
-| conservation_kernel | 0.2.0 | `ConservationKernel`, `Artifact`, `Actor`, `ActorKind`, `Proposition`, `FunctionalContract`, `DeclaredChange`, enums (`EpistemicStatus`, `Origin`, `AuthorityStatus`, `ChangeKind`), `errors.InvalidArtifact`, `errors.LedgerError` | `register_root`, `submit`, `reconstruct`, `register_manifest`, `save`, `ConservationKernel.load` | declared in pyproject (`conservation-kernel @ git+...@5b388f1`, the 0.2.0 merge commit), installed package | test_conservation_boundary (7), test_chain_closure (6), test_vertical_slice (5) |
+| conservation_kernel | 0.2.0 | `ConservationKernel`, `Artifact`, `Actor`, `ActorKind`, `Proposition`, `FunctionalContract`, `DeclaredChange`, enums (`EpistemicStatus`, `Origin`, `AuthorityStatus`, `ChangeKind`), `errors.InvalidArtifact`, `errors.LedgerError` | `register_root`, `submit`, `reconstruct`, `register_manifest`, `save`, `ConservationKernel.load` | declared in pyproject (`conservation-kernel @ git+...@v0.2.0`), installed package | test_conservation_boundary (7), test_chain_closure (6), test_vertical_slice (5) |
 
 Contract the spine relies on (verified by test_conservation_boundary):
 `register_root` refuses an artifact whose propositions are born canonical or
@@ -22,7 +22,7 @@ returns the transformation chain the verifier checks membership against
 and the request artifact among the roots); `save`/`load` re-verify every
 artifact on restore and raise `SnapshotIntegrityError` on any alteration.
 
-The kernel PR (#4) squash-merged 2026-09-08 as commit 5b388f1; the spine pins that commit. A `v0.2.0` tag on it still needs creating from the GitHub UI (the session's git proxy refuses tag pushes).
+The kernel PR (#4) squash-merged 2026-09-08 as commit 5b388f1, tagged `v0.2.0`; the spine pins the tag.
 
 ## Optional packs (extras `chain` and `fortress`)
 
