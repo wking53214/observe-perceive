@@ -158,6 +158,7 @@ class GatewayAdmissionAdapter:
         operation_func=None,
         context: Optional[Dict[str, Any]] = None,
         require_execute_scope: bool = True,
+        vitals_snapshot=None,
     ) -> dict:
         """Admit an artifact at the Gateway, then run the chain on it.
 
@@ -195,6 +196,10 @@ class GatewayAdmissionAdapter:
         merged.setdefault("gateway_scope", admission.scope)
         merged.setdefault("gateway_admitted", True)
 
+        # `vitals_snapshot` is threaded through so the admitted path can reach
+        # OBSERVE. It could not before: every production caller entered the
+        # chain here and none could supply vitals, so OBSERVE never ran on an
+        # admitted artifact and the record said so with observe_enforced=False.
         result = orchestrator.orchestrate_request(
             chain_artifact,
             operation_type,
@@ -202,6 +207,7 @@ class GatewayAdmissionAdapter:
                 "status": "recorded",
                 "artifact_id": getattr(chain_artifact, "artifact_id", None),
             }),
+            vitals_snapshot=vitals_snapshot,
             context=merged,
         )
         result["admission"] = admission
