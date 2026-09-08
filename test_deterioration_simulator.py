@@ -1,8 +1,22 @@
 """Tests for the deterioration simulator (clinical validation)."""
 
+import os
 import unittest
 
 from deterioration_simulator import DeteriorationSimulator, SCENARIOS
+
+
+def _known_gap(testcase, message):
+    """A known clinical detection gap.
+
+    By default it is recorded as a skip with the gap named, which is what the
+    suite has always done. That default hides five missed detections behind a
+    green run. Set OBSERVE_STRICT_CLINICAL=1 to fail on them instead -- for a
+    deployment gate, or to see the real detection record.
+    """
+    if os.environ.get("OBSERVE_STRICT_CLINICAL"):
+        testcase.fail(f"known clinical gap (OBSERVE_STRICT_CLINICAL set): {message}")
+    testcase.skipTest(message)
 
 
 class TestDeteriorationSimulator(unittest.TestCase):
@@ -31,7 +45,8 @@ class TestDeteriorationSimulator(unittest.TestCase):
         result = self.sim.run_scenario(scenario)
         if not result.in_tolerance:
             # Document the failure for pediatrician review
-            self.skipTest(
+            _known_gap(
+                self,
                 f"Viral fever thresholds need tuning: {result.notes}. "
                 "Requires pediatrician input on RR/temp escalation point."
             )
@@ -43,7 +58,8 @@ class TestDeteriorationSimulator(unittest.TestCase):
         scenario = next(s for s in SCENARIOS if s.name == "gradual_hypoxia_child")
         result = self.sim.run_scenario(scenario)
         if not result.in_tolerance:
-            self.skipTest(
+            _known_gap(
+                self,
                 f"Gradual hypoxia detection is late: {result.notes}. "
                 "Consider enabling Kalman trajectory for improved drift detection."
             )
@@ -55,7 +71,8 @@ class TestDeteriorationSimulator(unittest.TestCase):
         scenario = next(s for s in SCENARIOS if s.name == "reactive_airway_toddler")
         result = self.sim.run_scenario(scenario)
         if not result.in_tolerance:
-            self.skipTest(
+            _known_gap(
+                self,
                 f"Reactive airway pattern not detected: {result.notes}. "
                 "Requires rule enhancement or machine-learned pattern detection."
             )

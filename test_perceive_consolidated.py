@@ -74,8 +74,14 @@ class TestRuleModificationPolicy(unittest.TestCase):
         self.assertTrue(any("Temporal lock" in v for v in violations))
 
     def test_safety_critical_requires_three_approvals(self):
+        # Two approvals are refused AND three are accepted. Asserting only the
+        # refusal passed with the threshold set to 100: the test could not tell
+        # "three required" from "never allowed".
         approved, violations = RuleModificationPolicy.can_modify("safety_critical", 2, 100)
         self.assertFalse(approved)
+        self.assertTrue(any("2/3" in v for v in violations), violations)
+        approved, violations = RuleModificationPolicy.can_modify("safety_critical", 3, 100)
+        self.assertTrue(approved, violations)
 
     def test_valid_modification_approved(self):
         approved, violations = RuleModificationPolicy.can_modify("critical", 2, 25)
