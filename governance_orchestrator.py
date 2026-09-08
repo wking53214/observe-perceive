@@ -397,7 +397,8 @@ class GovernanceOrchestrator:
                 perceive_decision,
                 governance_request.artifact_id,
                 governance_request.artifact_content,
-                governance_request.artifact_hash
+                governance_request.artifact_hash,
+                request=governance_request,
             )
             logger.info(f"[Orchestrator] Conservation verified: {conservation_decision.verified}")
         except Exception as e:

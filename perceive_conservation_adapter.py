@@ -25,20 +25,23 @@ def _import_conservation():
             ConservationKernel, Artifact, TransformationRecord, Actor, ActorKind,
             DeclaredChange, Dimension, TransitionKind,
         )
-        from conservation_kernel.errors import LedgerError
+        from conservation_kernel.errors import InvalidArtifact, LedgerError
         return (ConservationKernel, Artifact, TransformationRecord, Actor, ActorKind,
-                DeclaredChange, Dimension, TransitionKind, LedgerError)
+                DeclaredChange, Dimension, TransitionKind, LedgerError, InvalidArtifact)
     except ModuleNotFoundError:
-        # A stand-in that no exception can ever be an instance of, so the
-        # `except LedgerError` below is inert rather than a NameError when
+        # Stand-ins that no exception can ever be an instance of, so the
+        # `except` clauses below are inert rather than a NameError when
         # the kernel is absent.
         class _NoLedgerError(Exception):
             pass
-        return (None,) * 8 + (_NoLedgerError,)
+
+        class _NoInvalidArtifact(Exception):
+            pass
+        return (None,) * 8 + (_NoLedgerError, _NoInvalidArtifact)
 
 
 (ConservationKernel, Artifact, TransformationRecord, Actor, ActorKind,
- DeclaredChange, Dimension, TransitionKind, LedgerError) = _import_conservation()
+ DeclaredChange, Dimension, TransitionKind, LedgerError, InvalidArtifact) = _import_conservation()
 
 
 class ConservationRefusal(Exception):
@@ -58,12 +61,108 @@ class PerceiveConservationAdapter:
         """Initialize with Conservation Kernel instance."""
         self.kernel = kernel
 
+    # --- the spine's vocabulary, mapped onto the kernel's ------------------
+    #
+    # Measured 2026-09-08: both artifacts handed to the kernel carried
+    # `propositions=()`, so every proposition-level dimension of the
+    # constitution (origin, authority, epistemic status, evidence,
+    # canonicality, lineage) was a loop over nothing. The kernel reported
+    # eleven dimensions checked; on this path it had adjudicated content
+    # digests and a declared derivation. The request's epistemic claims never
+    # reached it.
+    #
+    # The mappings below are deliberately conservative. An unknown epistemic
+    # word becomes UNKNOWN, an unknown origin becomes MACHINE_ORIGINATED, and
+    # a request's `authority` string -- a role label such as CLINICIAN, not
+    # an authorization event -- never becomes kernel authority by itself. The
+    # raw words are kept in the proposition's metadata as `declared_*`, so a
+    # reader sees both what was claimed and what the kernel was told. Only an
+    # explicit `authorization_refs` list in the request context makes a
+    # proposition HUMAN_AUTHORIZED, and then the kernel's root admission
+    # demands that those references exist and are about that proposition.
+    EPISTEMIC = {
+        "FACT": "FACT", "OBSERVATION": "OBSERVATION", "EXPLICIT": "OBSERVATION",
+        "INFERRED": "INFERENCE", "INFERENCE": "INFERENCE", "ESTIMATED": "ESTIMATED",
+        "ASSUMPTION": "ASSUMPTION", "RECOMMENDATION": "RECOMMENDATION", "DECISION": "DECISION",
+        "UNKNOWN": "UNKNOWN", "CONFLICTED": "CONFLICTED", "SIMULATED": "SIMULATED",
+    }
+    HUMAN_ORIGINS = {"HUMAN", "CLINICIAN", "PHYSICIAN", "NURSE", "OPERATOR", "USER", "REVIEWER", "HUMAN_ORIGINATED"}
+    EXTERNAL_ORIGINS = {"EXTERNAL", "EXTERNAL_ORIGINATED", "THIRD_PARTY"}
+
+    @classmethod
+    def input_proposition(cls, artifact_id: str, content: str, request=None):
+        """The kernel's view of the artifact PERCEIVE ruled on."""
+        from conservation_kernel import Proposition
+        declared_epistemic = str(getattr(request, "epistemic_status", "UNKNOWN") or "UNKNOWN").upper()
+        declared_origin = str(getattr(request, "origin", "UNKNOWN") or "UNKNOWN").upper()
+        declared_authority = str(getattr(request, "authority", "NONE") or "NONE").upper()
+        context = dict(getattr(request, "context", None) or {})
+        authorization_refs = tuple(str(ref) for ref in (context.get("authorization_refs") or ()))
+
+        epistemic = cls.EPISTEMIC.get(declared_epistemic, "UNKNOWN")
+        if declared_origin in cls.HUMAN_ORIGINS:
+            origin = "HUMAN_ORIGINATED"
+        elif declared_origin in cls.EXTERNAL_ORIGINS:
+            origin = "EXTERNAL_ORIGINATED"
+        else:
+            origin = "MACHINE_ORIGINATED"
+        authority = "HUMAN_AUTHORIZED" if authorization_refs else "NONE"
+        return Proposition(
+            proposition_id=f"p-{artifact_id}",
+            text=content,
+            epistemic_status=epistemic,
+            origin=origin,
+            authority=authority,
+            authorization_refs=authorization_refs,
+            source_refs=(artifact_id,),
+            derivation_method="source-declared" if epistemic in ("ESTIMATED", "SIMULATED") else None,
+            metadata={
+                "declared_epistemic_status": declared_epistemic,
+                "declared_origin": declared_origin,
+                "declared_authority": declared_authority,
+                "mapped_by": "observe-perceive.PerceiveConservationAdapter",
+            },
+        )
+
+    @staticmethod
+    def decision_proposition(governance_decision: GovernanceDecision, input_prop, input_artifact_id: str):
+        """PERCEIVE's decision as a proposition the kernel can constrain.
+
+        Born DECISION, machine-originated, with NO authority: PERCEIVE
+        recommends and permits; it does not authorize execution. Any later
+        transformation that tries to raise this proposition's authority must
+        carry an authorization the kernel can check.
+        """
+        from conservation_kernel import Proposition
+        return Proposition(
+            proposition_id=f"p-decision-{governance_decision.decision_id}",
+            text=(
+                f"PERCEIVE {governance_decision.approval.value} for request "
+                f"{governance_decision.request_id} across gates "
+                f"{', '.join(governance_decision.applied_gates) or 'none'}"
+            ),
+            epistemic_status="DECISION",
+            origin="MACHINE_ORIGINATED",
+            authority="NONE",
+            parent_proposition_ids=(input_prop.proposition_id,),
+            source_refs=(input_artifact_id,),
+            derivation_method="perceive-policy-gates",
+            metadata={
+                "approval": governance_decision.approval.value,
+                "violations": list(governance_decision.violations or []),
+                "advisory_violations": list(getattr(governance_decision, "advisory_violations", None) or []),
+                "policy_version": governance_decision.policy_version,
+                "unanimous_consensus": bool(governance_decision.unanimous_consensus),
+            },
+        )
+
     def verify_perceive_decision(
         self,
         governance_decision: GovernanceDecision,
         input_artifact_id: str,
         input_artifact_content: str,
-        input_artifact_hash: str
+        input_artifact_hash: str,
+        request=None,
     ) -> ConservationDecision:
         """
         Verify PERCEIVE decision through Conservation Kernel.
@@ -114,20 +213,26 @@ PERCEIVE Governance Decision:
 
         # The input artifact, as the Conservation Kernel understands it. This
         # is the thing Sentinel produced and PERCEIVE ruled on.
+        input_prop = self.input_proposition(input_artifact_id, input_artifact_content, request)
         input_artifact = Artifact(
             artifact_id=input_artifact_id,
             content=input_artifact_content,
-            propositions=(),
+            propositions=(input_prop,),
             producer=Actor(actor_id="Sentinel", kind=ActorKind.SYSTEM),
         )
 
         # The decision artifact is a *derivation* of the input, not a free
         # standing object: parent_artifact_ids and the version bump are what
         # let the kernel reconstruct the lineage later.
+        decision_prop = self.decision_proposition(governance_decision, input_prop, input_artifact_id)
         decision_artifact = Artifact(
             artifact_id=f"decision-{governance_decision.decision_id}",
             content=decision_content,
-            propositions=(),
+            # The input proposition travels unchanged -- any change to its
+            # origin, authority or epistemic status here would be an
+            # undeclared transition the kernel refuses -- and the decision is
+            # a new proposition derived from it.
+            propositions=(input_prop, decision_prop),
             producer=perceive_actor,
             parent_artifact_ids=(input_artifact_id,),
             version=input_artifact.version + 1,
@@ -169,13 +274,25 @@ PERCEIVE Governance Decision:
         # The hashes come from the artifacts' own digests. That is the point of
         # the record: the kernel re-derives them and refuses if what was
         # declared does not match what was actually submitted.
+        # The new decision proposition is a declared LINEAGE change: the
+        # kernel observes a proposition that was absent and is now present,
+        # and refuses it as UNDECLARED_CHANGE unless the record claims it.
+        lineage_change = DeclaredChange(
+            subject_id=decision_prop.proposition_id,
+            dimension=Dimension.LINEAGE,
+            from_value="absent",
+            to_value="present",
+            reason="PERCEIVE's decision, derived from the artifact's proposition",
+            transition_kind=TransitionKind.DERIVATION,
+        )
+
         transformation_record = TransformationRecord(
             transformation_id=f"perceive-verify-{governance_decision.decision_id}",
             input_artifact_ids=(input_artifact_id,),
             output_artifact_id=decision_artifact.artifact_id,
             transformer=perceive_actor,
             transformation_type="GOVERNANCE_EVALUATION",
-            declared_changes=(content_change,),
+            declared_changes=(content_change, lineage_change),
             input_hashes=(input_artifact.artifact_digest,),
             output_hash=decision_artifact.artifact_digest,
             reason=(
@@ -205,6 +322,11 @@ PERCEIVE Governance Decision:
             raise ConservationRefusal(
                 f"Conservation Kernel ledger refused the transformation: {e}"
             ) from e
+        except InvalidArtifact as e:
+            # The kernel's own vocabulary refused the claim before any ledger
+            # was reached (for example, human-adopted output with no
+            # authorization). A refusal, not a crash.
+            raise ConservationRefusal(f"Conservation Kernel refused the artifact: {e}") from e
 
         # If Kernel rejects, fail closed
         if not verification_result.accepted:
