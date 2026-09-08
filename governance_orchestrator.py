@@ -11,6 +11,10 @@ Central orchestrator that routes requests through:
 """
 
 import logging
+from datetime import datetime, timezone
+
+from governance_contracts import CONTRACT_VERSION
+from governance_chain import verify_result
 
 logger = logging.getLogger("GovernanceOrchestrator")
 
@@ -23,7 +27,8 @@ class GovernanceOrchestrator:
                  simulation_screen: bool = False, simulation_seed: int = 42,
                  require_declared_scope: bool = False,
                  require_vitals: bool = False,
-                 raise_on_stage_error: bool = False):
+                 raise_on_stage_error: bool = False,
+                 raise_on_execution_error: bool = False):
         """
         Initialize orchestrator with all governance systems.
 
@@ -76,6 +81,12 @@ class GovernanceOrchestrator:
         self.require_declared_scope = require_declared_scope
         self.require_vitals = require_vitals
         self.raise_on_stage_error = raise_on_stage_error
+        # The execution stage (Phase 5) used to call the caller's function
+        # unguarded: an exception there left NO record at all, after
+        # Conservation had verified and execution had been approved. Now a
+        # failure is a recorded state, EXECUTION_FAILED, with the approval and
+        # context that preceded it. Opt in to raising instead.
+        self.raise_on_execution_error = raise_on_execution_error
         self.perceive = perceive
         self.conservation_kernel = conservation_kernel
         self.observe_engine = observe_engine
@@ -109,6 +120,55 @@ class GovernanceOrchestrator:
             from augur_screen_adapter import AugurScreenAdapter
             self.simulation_screen = AugurScreenAdapter(seed=simulation_seed)
 
+    def _verify_on_the_way_out(self, result: dict, forensic_proof) -> dict:
+        """Recompute the whole chain before handing the record over.
+
+        `audit_chain_valid` used to mean "six fields are non-empty". It now
+        means every commitment link recomputes, the artifact hash matches the
+        content, every id agrees across records, time runs forward, and the
+        decision is in both kernels' ledgers -- AND the chain reached an
+        outcome. The per-check detail travels in `chain_verification`.
+        """
+        verification = verify_result(result, kernel=self.conservation_kernel, perceive=self.perceive)
+        result["chain_verification"] = verification.as_dict()
+        result["audit_chain_valid"] = verification.valid and verification.complete
+        if forensic_proof is not None:
+            forensic_proof["chain_valid"] = result["audit_chain_valid"]
+            forensic_proof["chain_verification"] = result["chain_verification"]
+        if not verification.valid:
+            logger.error(
+                "[Orchestrator] Chain verification FAILED: "
+                + ", ".join(c.name for c in verification.failed)
+            )
+        return result
+
+    def _stamp(self, result: dict, governance_request=None) -> dict:
+        """Attach the handoff record and the request to every result.
+
+        A downstream reader must be able to tell what it received, from whom,
+        under what contract version and authority, and with which strict
+        flags in force -- without reaching back into this process. And the
+        request must travel with the record: a decision without the request
+        it decided cannot be reconstructed from the record alone.
+        """
+        result.setdefault("governance_request", governance_request)
+        result.setdefault("handoff", {
+            "producer": "observe-perceive.GovernanceOrchestrator",
+            "contract_version": CONTRACT_VERSION,
+            "issued_at": datetime.now(timezone.utc).isoformat(),
+            "authority": getattr(governance_request, "authority", None),
+            "epistemic_status": getattr(governance_request, "epistemic_status", None),
+            "origin": getattr(governance_request, "origin", None),
+            "request_state_commitment": getattr(governance_request, "state_commitment", None),
+            "strict": {
+                "require_declared_scope": self.require_declared_scope,
+                "require_vitals": self.require_vitals,
+                "raise_on_stage_error": self.raise_on_stage_error,
+                "raise_on_execution_error": self.raise_on_execution_error,
+            },
+        })
+        return result
+
     def orchestrate_request(
         self,
         sentinel_artifact,
@@ -139,6 +199,26 @@ class GovernanceOrchestrator:
         Returns:
             Complete governance decision with audit chain
         """
+        # A missing or malformed artifact used to raise AttributeError from
+        # deep inside Phase 1. It is a request the chain could not read, and
+        # the record should say so rather than the stack trace.
+        missing = [
+            name for name in ("artifact_id", "content", "metadata")
+            if not hasattr(sentinel_artifact, name)
+        ]
+        if sentinel_artifact is None or missing:
+            reason = (
+                "no artifact supplied" if sentinel_artifact is None
+                else f"artifact lacks required attribute(s): {', '.join(missing)}"
+            )
+            logger.error(f"[Orchestrator] Invalid request: {reason}")
+            return self._stamp({
+                "status": "INVALID_REQUEST",
+                "reason": reason,
+                "governance_decision": None,
+                "audit_chain": None,
+            })
+
         logger.info(f"[Orchestrator] Starting governance flow for {sentinel_artifact.artifact_id}")
 
         # PHASE 1: Convert Sentinel artifact to PERCEIVE request
@@ -165,20 +245,43 @@ class GovernanceOrchestrator:
         # coverage.
         screen_result = None
         if self.simulation_screen:
-            screen_result = self.simulation_screen.screen_request(context)
+            try:
+                screen_result = self.simulation_screen.screen_request(context)
+            except Exception as e:
+                # The screen can only refuse, never approve. A screen that
+                # crashed did neither; letting the request through would treat
+                # "could not evaluate" as "no objection", so it refuses, and
+                # the record says it was a crash, not a verdict.
+                logger.warning(
+                    "[Orchestrator] Simulation screen did not run to a verdict -- "
+                    f"it raised {type(e).__name__}: {e}. Recording REJECTED with "
+                    "stage_refused=False."
+                )
+                if self.raise_on_stage_error:
+                    raise
+                return self._stamp({
+                    "status": "REJECTED",
+                    "reason": f"Simulation screen did not run to a verdict: {type(e).__name__}: {e}",
+                    "refused_by": None,
+                    "stage_refused": False,
+                    "stage_error": f"{type(e).__name__}: {e}",
+                    "simulation_screen": None,
+                    "governance_decision": None,
+                    "audit_chain": None,
+                }, governance_request)
             if screen_result.screened:
                 logger.info(f"[Orchestrator] Phase 1b: simulation screen -- {screen_result.reason}")
             else:
                 logger.info(f"[Orchestrator] Phase 1b: simulation screen abstained -- {screen_result.reason}")
             if not screen_result.proceed:
                 logger.error("[Orchestrator] Simulation screen refused: halting before PERCEIVE")
-                return {
+                return self._stamp({
                     "status": "REJECTED",
                     "reason": f"Simulation screen refused: {screen_result.reason}",
                     "simulation_screen": screen_result,
                     "governance_decision": None,
                     "audit_chain": None,
-                }
+                }, governance_request)
 
         # PHASE 2: PERCEIVE evaluation
         #
@@ -219,7 +322,7 @@ class GovernanceOrchestrator:
                 # Fail closed. A containment refusal stops the chain here --
                 # nothing downstream gets to re-approve what FORTRESS refused.
                 logger.error("[Orchestrator] FORTRESS refused: halting before Conservation Kernel")
-                return {
+                return self._stamp({
                     "status": "REJECTED",
                     "reason": (
                         f"FORTRESS containment refused (distortion "
@@ -228,7 +331,7 @@ class GovernanceOrchestrator:
                     "governance_decision": perceive_decision,
                     "fortress_result": fortress_result,
                     "audit_chain": None,
-                }
+                }, governance_request)
 
         # PHASE 3: Conservation Kernel verification
         logger.info("[Orchestrator] Phase 3: Conservation Kernel verification")
@@ -258,7 +361,7 @@ class GovernanceOrchestrator:
                 if self.raise_on_stage_error:
                     raise
             logger.error(f"[Orchestrator] Conservation Kernel rejected: {e}")
-            return {
+            return self._stamp({
                 "status": "REJECTED",
                 "reason": f"Conservation Kernel rejected decision: {e}",
                 "governance_decision": perceive_decision,
@@ -267,7 +370,7 @@ class GovernanceOrchestrator:
                 "stage_error": None if refused else f"{type(e).__name__}: {e}",
                 "conservation_enforced": refused,
                 "audit_chain": None,
-            }
+            }, governance_request)
 
         # PHASE 4: GSA-815 execution approval
         logger.info("[Orchestrator] Phase 4: GSA-815 execution approval")
@@ -277,7 +380,11 @@ class GovernanceOrchestrator:
                 governance_request.artifact_id,
                 governance_request.artifact_hash,
                 sentinel_artifact.metadata.origin_status.value if hasattr(sentinel_artifact.metadata.origin_status, 'value') else "Sentinel",
-                governance_request.lineage
+                governance_request.lineage,
+                # A caller replaying a canonical scenario fixes the execution
+                # id so every commitment downstream is reproducible. Absent,
+                # the adapter mints one.
+                execution_id=context.get("execution_id"),
             )
             execution_context = self.conservation_adapter.create_execution_context(
                 execution_approval,
@@ -314,7 +421,7 @@ class GovernanceOrchestrator:
                 if self.raise_on_stage_error:
                     raise
             logger.error(f"[Orchestrator] Execution rejected: {e}")
-            return {
+            return self._stamp({
                 "status": "REJECTED",
                 "reason": str(e),
                 "governance_decision": perceive_decision,
@@ -324,7 +431,7 @@ class GovernanceOrchestrator:
                 "stage_error": None if refused else f"{type(e).__name__}: {e}",
                 "conservation_enforced": True,
                 "audit_chain": None,
-            }
+            }, governance_request)
 
         # PHASE 5: Execute GSA-815 operation
         #
@@ -351,7 +458,7 @@ class GovernanceOrchestrator:
                     "[Orchestrator] Refusing execution: no gateway scope declared "
                     "and require_declared_scope is on"
                 )
-                return {
+                return self._stamp({
                     "status": "REJECTED",
                     "reason": "no gateway scope declared; execution requires one",
                     "governance_decision": perceive_decision,
@@ -359,7 +466,7 @@ class GovernanceOrchestrator:
                     "execution_approval": execution_approval,
                     "scope_enforced": False,
                     "audit_chain": None,
-                }
+                }, governance_request)
             logger.warning(
                 "[Orchestrator] No gateway scope declared -- executing WITHOUT a "
                 "scope check. Pass context['gateway_scope'], or construct the "
@@ -370,7 +477,7 @@ class GovernanceOrchestrator:
             logger.error(
                 f"[Orchestrator] Refusing execution: artifact scope is {declared_scope}, not EXECUTE"
             )
-            return {
+            return self._stamp({
                 "status": "REJECTED",
                 "reason": (
                     f"artifact scope {declared_scope} does not permit execution"
@@ -380,7 +487,7 @@ class GovernanceOrchestrator:
                 "execution_approval": execution_approval,
                 "scope_enforced": True,
                 "audit_chain": None,
-            }
+            }, governance_request)
 
         # OBSERVE (Phase 6) runs only when vitals are supplied. Like the
         # scope check above, the skip used to be a log line and nothing else:
@@ -392,7 +499,7 @@ class GovernanceOrchestrator:
                 logger.error(
                     "[Orchestrator] Refusing execution: no vitals supplied and require_vitals is on"
                 )
-                return {
+                return self._stamp({
                     "status": "REJECTED",
                     "reason": "no vitals supplied; OBSERVE monitoring requires them",
                     "governance_decision": perceive_decision,
@@ -401,7 +508,7 @@ class GovernanceOrchestrator:
                     "scope_enforced": declared_scope is not None,
                     "observe_enforced": False,
                     "audit_chain": None,
-                }
+                }, governance_request)
             logger.warning(
                 "[Orchestrator] No vitals supplied -- OBSERVE will NOT run and no "
                 "forensic proof will be produced. Pass vitals_snapshot, or construct "
@@ -409,15 +516,65 @@ class GovernanceOrchestrator:
             )
 
         logger.info("[Orchestrator] Phase 5: GSA-815 execution")
-        gsa815_result = gsa815_operation_func(execution_context)
-        logger.info(f"[Orchestrator] GSA-815 result: {gsa815_result}")
+        executed_at = {"started": datetime.now(timezone.utc).isoformat(), "finished": None}
+        try:
+            gsa815_result = gsa815_operation_func(execution_context)
+        except Exception as e:
+            executed_at["finished"] = datetime.now(timezone.utc).isoformat()
+            logger.error(f"[Orchestrator] Execution FAILED: {type(e).__name__}: {e}")
+            if self.raise_on_execution_error:
+                raise
+            # Everything that led here is kept: the action was approved and
+            # attempted, and the record must show both, or a failed action
+            # is indistinguishable from one that was never approved.
+            failed = self._stamp({
+                "status": "EXECUTION_FAILED",
+                "reason": f"execution raised {type(e).__name__}: {e}",
+                "execution_status": "failed",
+                "execution_error": f"{type(e).__name__}: {e}",
+                "executed_at": executed_at,
+                "scope_enforced": declared_scope is not None,
+                "declared_scope": declared_scope,
+                "governance_decision": perceive_decision,
+                "simulation_screen": screen_result,
+                "fortress_result": fortress_result,
+                "conservation_decision": conservation_decision,
+                "execution_approval": execution_approval,
+                "execution_context": execution_context,
+                "gsa815_result": None,
+                "observe_verdict": None,
+                "observe_enforced": False,
+                "audit_chain": None,
+                "audit_chain_valid": False,
+            }, governance_request)
+            return self._verify_on_the_way_out(failed, None)
+        executed_at["finished"] = datetime.now(timezone.utc).isoformat()
+        # The callable may report a partial execution explicitly by returning
+        # a mapping with status "partial". Anything else that returned is
+        # "completed" from the chain's point of view; the chain does not guess.
+        execution_status = (
+            "partial"
+            if isinstance(gsa815_result, dict) and str(gsa815_result.get("status", "")).lower() == "partial"
+            else "completed"
+        )
+        logger.info(f"[Orchestrator] GSA-815 result ({execution_status}): {gsa815_result}")
 
         # PHASE 6: OBSERVE monitoring
         logger.info("[Orchestrator] Phase 6: OBSERVE clinical monitoring")
         observe_verdict = None
+        observe_error = None
         if vitals_snapshot:
-            observe_verdict = self.observe_engine.evaluate(vitals_snapshot)
-            logger.info(f"[Orchestrator] OBSERVE verdict: regime={observe_verdict.regime.value}")
+            # The action has already run. Whatever happens here must not lose
+            # the record of it, so an OBSERVE failure is recorded beside the
+            # execution rather than raised over it.
+            try:
+                if self.observe_engine is None:
+                    raise RuntimeError("no OBSERVE engine configured")
+                observe_verdict = self.observe_engine.evaluate(vitals_snapshot)
+                logger.info(f"[Orchestrator] OBSERVE verdict: regime={observe_verdict.regime.value}")
+            except Exception as e:
+                observe_error = f"{type(e).__name__}: {e}"
+                logger.error(f"[Orchestrator] OBSERVE did not produce a verdict: {observe_error}")
         else:
             logger.info("[Orchestrator] No vitals provided, OBSERVE evaluation skipped (warned above)")
 
@@ -436,11 +593,14 @@ class GovernanceOrchestrator:
 
         # Return complete result
         logger.info("[Orchestrator] Governance flow complete")
-        return {
+        result = self._stamp({
             "status": "APPROVED_AND_EXECUTED",
             "scope_enforced": declared_scope is not None,
             "declared_scope": declared_scope,
             "observe_enforced": observe_verdict is not None,
+            "observe_error": observe_error,
+            "execution_status": execution_status,
+            "executed_at": executed_at,
             "advisory_violations": list(getattr(perceive_decision, "advisory_violations", None) or []),
             "governance_decision": perceive_decision,
             "simulation_screen": screen_result,
@@ -452,5 +612,11 @@ class GovernanceOrchestrator:
             "observe_verdict": observe_verdict,
             "outcome_context": outcome_context,
             "forensic_proof": forensic_proof,
-            "audit_chain_valid": forensic_proof.get("chain_valid", False) if forensic_proof else False,
-        }
+            # Every refusal path carries `audit_chain`; the success path used
+            # not to, so the one key a reader could count on was missing from
+            # the one record that mattered. It is the forensic proof, or None
+            # when OBSERVE did not run and there is no outcome to prove.
+            "audit_chain": forensic_proof,
+            "audit_chain_valid": False,
+        }, governance_request)
+        return self._verify_on_the_way_out(result, forensic_proof)

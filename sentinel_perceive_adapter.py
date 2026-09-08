@@ -92,20 +92,14 @@ class SentinelPerceiveAdapter:
             context=context,
             timestamp=datetime.now(timezone.utc)
         )
+        # The state this commitment covers is defined once, in
+        # governance_chain.request_state, and shared with the verifier: a
+        # commitment only means something if the checker recomputes it over
+        # exactly the fields the producer used.
+        from governance_chain import request_state
         request.state_commitment = compute_state_commitment(
             parent_commitment=None,
-            state={
-                "request_id": request.request_id,
-                "request_type": request.request_type.value if hasattr(request.request_type, "value") else str(request.request_type),
-                "artifact_id": request.artifact_id,
-                "artifact_hash": request.artifact_hash,
-                "producer": request.producer,
-                "origin": request.origin,
-                "authority": request.authority,
-                "epistemic_status": request.epistemic_status,
-                "lineage": request.lineage,
-                "context": request.context,
-            },
+            state=request_state(request),
         )
         return request
 

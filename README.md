@@ -643,3 +643,37 @@ The pediatric sepsis implementation is the current representative example throug
 # Central Proposition
 
 > **OBSERVE establishes what can be established about the state of a system. PERCEIVE interprets that state within context and governance. The separation creates an explicit boundary between observation, meaning, authority, and action.**
+
+---
+
+# Why did the system do that?
+
+One reproducible scenario through the real governed action gate, then one
+deliberate corruption of the record, which the chain must catch. It exercises
+the actual components: Gateway admission and sealing, the AUGUR screen,
+PERCEIVE, the Conservation Kernel, execution, OBSERVE, and the chain verifier.
+
+From a clean environment:
+
+```bash
+git clone https://github.com/wking53214/observe-perceive
+git clone https://github.com/wking53214/Governance_Gateway   # admission and sealing (step 1)
+git clone https://github.com/wking53214/AUGUR                # simulation screen (step 6)
+python3 -m pip install -r observe-perceive/requirements.txt
+python3 -m pip install "git+https://github.com/wking53214/Conservation_Kernel"
+cd observe-perceive
+python3 demo_why.py                    # corrupts the recorded outcome
+python3 demo_why.py --corrupt approval # or: source, authority, timestamp
+```
+
+Exit status 0 means the corruption was detected. Without the two optional
+checkouts the demo says which step it could not run and does not pretend it
+did. `python3 -m pytest test_demo_why.py` runs every corruption as a test.
+
+What the record carries afterwards: every stage's decision object, the
+request it decided, a `handoff` block (producer, contract version, authority,
+epistemic status, strict flags), and `chain_verification`, which re-derives
+every state commitment, checks the artifact hash against the content, checks
+every identifier across records, checks that time runs forward, and checks
+that the decision is in both kernels' ledgers. `audit_chain_valid` is true
+only when all of that holds and the chain reached an outcome.

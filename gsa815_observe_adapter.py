@@ -62,7 +62,10 @@ class GSA815ObserveAdapter:
 
         return OutcomeContext(
             execution_id=execution_context.execution_id,
-            governance_decision_id=execution_context.approval.request_id,
+            # The approval's request_id is the EXECUTION id; the decision the
+            # outcome belongs to is the conservation decision id. Recording
+            # the execution id under a decision-id field mislabelled the link.
+            governance_decision_id=execution_context.approval.conservation_decision_id,
             conservation_decision_id=execution_context.approval.conservation_decision_id,
             governance_audit_hash=execution_context.approval.governance_audit_hash,
             conservation_audit_hash=execution_context.approval.conservation_audit_hash,
@@ -78,7 +81,12 @@ class GSA815ObserveAdapter:
     @staticmethod
     def verify_governance_chain(outcome_context: OutcomeContext) -> bool:
         """
-        Verify the complete governance chain is linked.
+        Check that the outcome context is LINKED: every audit field is present.
+
+        This is a presence check and nothing more. It recomputes no hash. The
+        real verification, which re-derives every commitment and checks the
+        ledgers, is `governance_chain.verify_result`, and it is what the
+        orchestrator's `audit_chain_valid` now reports.
 
         Args:
             outcome_context: The outcome context
