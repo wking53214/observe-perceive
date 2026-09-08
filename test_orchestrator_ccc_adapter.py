@@ -15,12 +15,16 @@ escalates either. The excerpt content is the whole ballgame, so it is tested
 directly rather than only through outcomes.
 """
 
+import os
 import sys
 from datetime import datetime, timezone
 
 import pytest
 
-sys.path.insert(0, "/home/wking53214/CCC")
+# CCC resolves as a sibling checkout (../CCC), the same way the adapter under
+# test resolves it. A hard-coded home path here made this file pass on exactly
+# one machine.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "CCC"))
 
 from orchestrator_ccc_adapter import OrchestratorCCCAdapter  # noqa: E402
 
