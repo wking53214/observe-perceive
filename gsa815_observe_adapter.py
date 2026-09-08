@@ -18,7 +18,8 @@ class GSA815ObserveAdapter:
     def create_outcome_context(
         execution_context: ExecutionContext,
         gsa815_result: dict,
-        observe_verdict: FusedVerdict
+        observe_verdict: "FusedVerdict | None",
+        execution_status: str = "completed",
     ) -> OutcomeContext:
         """
         Create outcome context linking governance and clinical decisions.
@@ -31,9 +32,14 @@ class GSA815ObserveAdapter:
         Returns:
             OutcomeContext for monitoring and audit
         """
+        # 1.1.0: the outcome exists whether or not OBSERVE ran. Before this,
+        # an execution nobody observed left its result uncommitted: the
+        # record said APPROVED_AND_EXECUTED and nothing could verify what
+        # was executed. `observe_ran` says which case this is.
+        regime = observe_verdict.regime.value if observe_verdict is not None else "no-observe"
         result_artifact_id = f"outcome-{execution_context.execution_id}"
         result_artifact_hash = GSA815ObserveAdapter._compute_artifact_hash(
-            f"{gsa815_result}:{observe_verdict.regime.value}"
+            f"{gsa815_result}:{regime}"
         )
 
         # Create complete lineage including governance decisions
@@ -43,12 +49,17 @@ class GSA815ObserveAdapter:
 
         outcome = {
             "gsa815_result": gsa815_result,
-            "observe_regime": observe_verdict.regime.value,
-            "observe_risk_score": observe_verdict.risk_score,
-            "observe_confidence": observe_verdict.confidence,
-            "observe_audit_hash": observe_verdict.audit_hash,
-            "escalation_required": observe_verdict.escalation_required,
+            "execution_status": execution_status,
+            "observe_ran": observe_verdict is not None,
         }
+        if observe_verdict is not None:
+            outcome.update({
+                "observe_regime": observe_verdict.regime.value,
+                "observe_risk_score": observe_verdict.risk_score,
+                "observe_confidence": observe_verdict.confidence,
+                "observe_audit_hash": observe_verdict.audit_hash,
+                "escalation_required": observe_verdict.escalation_required,
+            })
         state_commitment = compute_state_commitment(
             parent_commitment=execution_context.state_commitment or execution_context.approval.state_commitment,
             state={
@@ -71,7 +82,7 @@ class GSA815ObserveAdapter:
             conservation_audit_hash=execution_context.approval.conservation_audit_hash,
             result_artifact_id=result_artifact_id,
             result_artifact_hash=result_artifact_hash,
-            producer="OBSERVE",
+            producer="OBSERVE" if observe_verdict is not None else "GSA-815",
             lineage=complete_lineage,
             outcome=outcome,
             state_commitment=state_commitment,

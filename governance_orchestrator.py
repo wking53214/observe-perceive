@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 from governance_contracts import CONTRACT_VERSION
 from governance_chain import verify_result
+from execution_guard import ExecutionLedger, ExecutionRefusal as LedgerRefusal
 
 logger = logging.getLogger("GovernanceOrchestrator")
 
@@ -28,7 +29,8 @@ class GovernanceOrchestrator:
                  require_declared_scope: bool = False,
                  require_vitals: bool = False,
                  raise_on_stage_error: bool = False,
-                 raise_on_execution_error: bool = False):
+                 raise_on_execution_error: bool = False,
+                 execution_ledger: "ExecutionLedger | None" = None):
         """
         Initialize orchestrator with all governance systems.
 
@@ -87,6 +89,15 @@ class GovernanceOrchestrator:
         # failure is a recorded state, EXECUTION_FAILED, with the approval and
         # context that preceded it. Opt in to raising instead.
         self.raise_on_execution_error = raise_on_execution_error
+        # Every execution context this orchestrator issues is recorded here
+        # before the executor sees it, and marked consumed after. An executor
+        # wrapped with `execution_guard.guarded(func, ledger)` refuses a
+        # context that is not in this ledger, was altered since issuance, or
+        # was consumed before -- measured 2026-09-08, all three executed
+        # without it. In memory by default; pass ExecutionLedger(path) for a
+        # ledger that survives the process, so a replay after restart is
+        # still a replay.
+        self.execution_ledger = execution_ledger if execution_ledger is not None else ExecutionLedger()
         self.perceive = perceive
         self.conservation_kernel = conservation_kernel
         self.observe_engine = observe_engine
@@ -142,6 +153,32 @@ class GovernanceOrchestrator:
             )
         return result
 
+    def _consume(self, execution_context, gsa815_result, execution_status: str) -> dict:
+        """Mark the issued context consumed, once.
+
+        A guarded executor consumes it at the moment of authorization and
+        attaches the authorization to its result; the orchestrator then only
+        records what happened. An unguarded executor leaves consumption to
+        the orchestrator, after the fact, so the ledger still shows one use
+        per issuance, and the record says which of the two it was.
+        """
+        attached = gsa815_result.get("_authorization") if isinstance(gsa815_result, dict) else None
+        already = self.execution_ledger.consumed(execution_context.execution_id)
+        if already is not None:
+            return {
+                "consumed_by": already.get("consumer"),
+                "ledger_entry_hash": already.get("hash"),
+                "authorized_at": already.get("recorded_at"),
+                "guard": attached,
+            }
+        entry = self.execution_ledger.consume(execution_context, consumer="orchestrator", outcome=execution_status)
+        return {
+            "consumed_by": "orchestrator",
+            "ledger_entry_hash": entry["hash"],
+            "authorized_at": entry["recorded_at"],
+            "guard": None,
+        }
+
     def _stamp(self, result: dict, governance_request=None) -> dict:
         """Attach the handoff record and the request to every result.
 
@@ -166,6 +203,7 @@ class GovernanceOrchestrator:
                 "raise_on_stage_error": self.raise_on_stage_error,
                 "raise_on_execution_error": self.raise_on_execution_error,
             },
+            "execution_ledger": str(self.execution_ledger.path) if self.execution_ledger.path else "in-memory",
         })
         return result
 
@@ -393,12 +431,18 @@ class GovernanceOrchestrator:
                 "GSA-815",
                 governance_request.lineage
             )
-            logger.info("[Orchestrator] GSA-815 execution approved")
+            # Issue it. A context that is not in the ledger is one nobody
+            # may execute; an execution id already issued is a replay and is
+            # refused here, before anything downstream can act on it.
+            self.execution_ledger.issue(execution_context)
+            logger.info("[Orchestrator] GSA-815 execution approved and issued")
         except Exception as e:
             from conservation_gsa815_adapter import ExecutionRefusal
             from governance_contracts import GovernanceApproval
-            refused = isinstance(e, ExecutionRefusal)
-            if refused:
+            refused = isinstance(e, (ExecutionRefusal, LedgerRefusal))
+            if isinstance(e, LedgerRefusal):
+                refused_by = "execution_ledger"
+            elif refused:
                 # The approval gate refuses when the decision it was handed is
                 # not an approval -- and that decision is PERCEIVE's. A
                 # PERCEIVE refusal reaches this point with the Conservation
@@ -526,7 +570,12 @@ class GovernanceOrchestrator:
                 raise
             # Everything that led here is kept: the action was approved and
             # attempted, and the record must show both, or a failed action
-            # is indistinguishable from one that was never approved.
+            # is indistinguishable from one that was never approved. The
+            # context is consumed either way: a failed attempt does not
+            # leave an approval that can be tried again.
+            execution_authorization = self._consume(execution_context, None, "failed")
+            outcome_context = self.gsa815_adapter.create_outcome_context(
+                execution_context, None, None, execution_status="failed")
             failed = self._stamp({
                 "status": "EXECUTION_FAILED",
                 "reason": f"execution raised {type(e).__name__}: {e}",
@@ -541,9 +590,11 @@ class GovernanceOrchestrator:
                 "conservation_decision": conservation_decision,
                 "execution_approval": execution_approval,
                 "execution_context": execution_context,
+                "execution_authorization": execution_authorization,
                 "gsa815_result": None,
                 "observe_verdict": None,
                 "observe_enforced": False,
+                "outcome_context": outcome_context,
                 "audit_chain": None,
                 "audit_chain_valid": False,
             }, governance_request)
@@ -558,6 +609,7 @@ class GovernanceOrchestrator:
             else "completed"
         )
         logger.info(f"[Orchestrator] GSA-815 result ({execution_status}): {gsa815_result}")
+        execution_authorization = self._consume(execution_context, gsa815_result, execution_status)
 
         # PHASE 6: OBSERVE monitoring
         logger.info("[Orchestrator] Phase 6: OBSERVE clinical monitoring")
@@ -579,17 +631,18 @@ class GovernanceOrchestrator:
             logger.info("[Orchestrator] No vitals provided, OBSERVE evaluation skipped (warned above)")
 
         # PHASE 7: Link audit chains
+        #
+        # The outcome is created whether or not OBSERVE ran: the execution's
+        # result is committed either way. The forensic proof, which asserts
+        # an observed outcome, exists only when there was one.
         logger.info("[Orchestrator] Phase 7: Linking audit chains")
-        if observe_verdict:
-            outcome_context = self.gsa815_adapter.create_outcome_context(
-                execution_context,
-                gsa815_result,
-                observe_verdict
-            )
-            forensic_proof = self.gsa815_adapter.create_forensic_proof(outcome_context)
-        else:
-            outcome_context = None
-            forensic_proof = None
+        outcome_context = self.gsa815_adapter.create_outcome_context(
+            execution_context,
+            gsa815_result,
+            observe_verdict,
+            execution_status=execution_status,
+        )
+        forensic_proof = self.gsa815_adapter.create_forensic_proof(outcome_context) if observe_verdict else None
 
         # Return complete result
         logger.info("[Orchestrator] Governance flow complete")
@@ -608,6 +661,7 @@ class GovernanceOrchestrator:
             "conservation_decision": conservation_decision,
             "execution_approval": execution_approval,
             "execution_context": execution_context,
+            "execution_authorization": execution_authorization,
             "gsa815_result": gsa815_result,
             "observe_verdict": observe_verdict,
             "outcome_context": outcome_context,

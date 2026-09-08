@@ -209,10 +209,14 @@ def test_14_an_approval_built_by_hand_verifies_structurally_but_not_against_the_
     )
     approval = ConservationGSA815Adapter.approve_execution(conservation, "forged", request.artifact_hash, "SENTINEL", [], execution_id="exec-forged")
     context = ConservationGSA815Adapter.create_execution_context(approval, "forged", request.artifact_hash, "GSA-815", [])
+    # 1.1.0: an executed record must carry an outcome, so the forgery forges
+    # one too. It stays internally consistent; only the ledgers can tell.
+    from gsa815_observe_adapter import GSA815ObserveAdapter
+    outcome = GSA815ObserveAdapter.create_outcome_context(context, {"status": "done"}, None)
     forged = {
         "status": "APPROVED_AND_EXECUTED", "governance_request": request, "governance_decision": decision,
         "conservation_decision": conservation, "execution_approval": approval, "execution_context": context,
-        "outcome_context": None, "gsa815_result": {"status": "done"},
+        "outcome_context": outcome, "gsa815_result": {"status": "done"}, "execution_status": "completed",
     }
     structural = verify_result(forged)
     assert structural.valid, structural.as_dict()["failed"]  # the forgery is internally consistent
