@@ -15,6 +15,12 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from enum import Enum
 
+# Version of the request/decision/result contract this module and the
+# orchestrator speak. Carried in every result's `handoff` block so a consumer
+# can tell what it received. Bump on any change to the dataclasses below or
+# to the result keys the orchestrator promises on every path.
+CONTRACT_VERSION = "1.0.0"
+
 
 def _canonicalize_commitment_value(value: Any) -> Any:
     """Convert nested inputs into a stable, JSON-serializable representation."""
