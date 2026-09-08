@@ -30,7 +30,9 @@ The naming convention in the prompt: a "Cat" is one component, a "Voltron" is th
 | **TOUCHSTONE** | None | "A specimen corpus. Not a system." | | | | | | | | **NOT COMMERCIALLY RELEVANT**; possibly test data for ghost_tools |
 | **GEMS** (10 tests; transport untested) | UNKNOWN | UNKNOWN | | | | | | | | **CONSULTING ENABLER** at most; README calls it a "reconstruction baseline" |
 
-Net: two product candidates with a plausible market (Governance Spine, ghost_tools), one regulated-industry candidate with the least evidence (sentinel_os ledger), one piece of infrastructure everything depends on (Conservation Kernel), and thirteen features, demos, or personal projects.
+Net: two product candidates with a plausible market (Governance Spine, ghost_tools), one regulated-industry candidate with the least evidence (sentinel_os ledger), one piece of infrastructure everything depends on (Conservation Kernel), and fourteen features, demos, or personal projects, of which five are optional packs or the later ledger stage worth keeping in reach.
+
+**Status 2026-09-08.** Nine repositories were archived on GitHub the same day: ATS, ecology, TOUCHSTONE, OBSERVE, GEMS, innovation_os, Triad-42, TIE, HERALD. Five are kept but frozen for the 90 days: fortress-kernel, AUGUR, CCC (optional packs) and sentinel_os, GSA-815 (the ledger stage). Four are active: observe-perceive, conservation_kernel, Governance_Gateway, ghost_tools.
 
 ---
 
@@ -266,7 +268,7 @@ Real today: none. Plausible: architectural stance, integration, governance, know
 10. **What is proprietary?** Nothing patented or secret; repositories are public on GitHub. The proprietary asset is the founder's understanding of failure modes.
 11. **What has been validated?** Technically: the gate runs end to end; the hub passes alone; the audit's B-probes find real defects. Commercially: nothing. Zero evidence of a customer, pilot, or letter of intent.
 12. **What remains hypothetical?** Every customer, price, and outcome claim in this memo.
-13. **Why is the architecture so large?** Because it grew as an exploration; 18 repositories where 4 code edges exist. Thirteen components are features or personal projects (Part 16). This is a liability in diligence.
+13. **Why is the architecture so large?** Because it grew as an exploration; 18 repositories where 4 code edges exist. Fourteen components are features, later stages, or personal projects (Part 16); nine are now archived and five frozen. The remaining liability in diligence is the five frozen repos, which need a visible reason.
 14. **How much is production quality?** Little. No versions in six repos, no dependency manifest in two, tracked audit logs that grow on every test run, a suite that crashes pytest from the root in GSA-815, a snapshot repo (OBSERVE) that cannot import its own copy. The hub and five singletons are clean.
 15. **How much was AI-generated?** Substantial; commit trailers credit Claude models across the stack. UNKNOWN as a percentage. Investors will ask about maintainability and licensing of AI-written code.
 16. **Can another team understand it?** Partly. Commit messages are unusually good; the orchestrator is one 344-line function; adapters are duck-typed; no public API documented. Two weeks for a senior engineer, my estimate.
@@ -293,7 +295,7 @@ The strongest case against investing, then each argument tested.
 | 8 | The clinical application is the emotional center and it does not work | Five known misses recorded as skips; no validation study | **SERIOUS** if it stays in the pitch; **WEAK** if it is repositioned as a demonstration domain |
 | 9 | Market size is unknown; "execution governance" is not a budget line | True; no analyst category, no budget line | **SERIOUS** |
 | 10 | Everything is public on GitHub; there is nothing proprietary | True; the code is open; the moat would have to be distribution and auditor acceptance | **WEAK** as a kill (many companies build on open code), **SERIOUS** as a moat question |
-| 11 | Thirteen of eighteen components are irrelevant and signal lack of focus | Confirmed in Part 16 | **ADDRESSABLE** by archiving them before any raise |
+| 11 | Fourteen of eighteen components are outside the wedge and signal lack of focus | Confirmed in Part 16; nine archived and five frozen on 2026-09-08 | **ADDRESSED** for the nine; the five frozen need a README banner |
 | 12 | The provenance of the ecology corpus creates legal exposure | 872M of harvested source with no license manifest, one file matching a private-key pattern | **ADDRESSABLE**: exclude it from the company entirely |
 | 13 | No pricing, no economic equation with real inputs | Confirmed | **SERIOUS**, resolved only by discovery |
 | 14 | Timing is late; guardrail startups already raised in 2024 and 2025 | Partly true for content guardrails; execution-evidence is less crowded | **WEAK** |
@@ -370,7 +372,7 @@ This experiment tests pain (they let it into the path), capability (it stays the
 
 | Activity | Objective | Owner | Output | Success | Eng | Customer | Investor evidence |
 |---|---|---|---|---|---|---|---|
-| Archive thirteen non-wedge repos; move OBSERVE clinical work to a "reference application" label | Focus | Founder | A four-repo company (spine, Conservation, Gateway, ghost_tools) | Diligence sees four repos | No | No | Yes |
+| Archive the nine non-wedge repos (done 2026-09-08); freeze the five optional-pack and ledger repos with a README banner naming the reason | Focus | Founder | A four-repo company (spine, Conservation, Gateway, ghost_tools) plus five visibly frozen | Diligence sees four active repos and five frozen with a reason | No | No | Yes |
 | Gate as a service: typed schema, strict-by-config, receipts to Postgres | Deployable wedge | Founder + first engineer | Container, API, one adapter | Runs from a clean clone in ten minutes | Yes | No | Yes |
 | Production hygiene on the four repos: manifests, versions, untrack audit logs, CI from a clean clone | Credibility | Engineer | Green CI with no siblings | Audit C1 rubric passes | Yes | No | Yes |
 | Rewrite the pitch: kill the eight-stage diagram; sell the pair | Honesty | Founder | One-page thesis matching Part 18 | No claim above its evidence level | No | No | Yes |
@@ -443,7 +445,7 @@ This experiment tests pain (they let it into the path), capability (it stays the
 
 **THE RISKS.** One: no customer has ever been observed. Two: a single founder with AI co-authors is the whole engineering organisation. Three: hyperscalers bundle honest execution records and the category collapses into a feature. Four: the pitch keeps the eight-stage chain and the sepsis engine, and diligence finds what this audit found. Five: the first customers make it a consulting business and the adapters never become configuration.
 
-**THE NEXT 90 DAYS.** Archive thirteen repositories; ship the gate as a service that runs from a clean clone; twenty discovery interviews; three free assurance scans; one paid thirty-day pilot in the execution path; one auditor shown one receipt.
+**THE NEXT 90 DAYS.** Archive nine repositories (done) and freeze five; ship the gate as a service that runs from a clean clone; twenty discovery interviews; three free assurance scans; one paid thirty-day pilot in the execution path; one auditor shown one receipt.
 
 **INVESTMENT VERDICT: PROMISING BUT TOO EARLY.**
 

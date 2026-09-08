@@ -39,13 +39,14 @@ h2 small{font-family:var(--mono);font-size:12px;font-weight:400;color:var(--slat
 .foot{margin-top:40px;color:var(--slate);font-size:13px;border-top:1px solid var(--line);padding-top:12px;max-width:70ch}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
-<script id="state" type="application/json">{"items":{},"updated":null}</script>
+<script id="state" type="application/json">{"items": {"archive": {"done": true, "at": 1788853748451, "note": "9 repos archived with gh repo archive, 2026-09-08"}}, "updated": 1788853748451}</script>
 <main id="root"></main>
 <script id="app">
 (function(){
 var PLAN=[
  {id:"p1",title:"Days 1 to 30: proof and packaging",items:[
-  {id:"archive",t:"Archive the thirteen non-wedge repositories; relabel the OBSERVE clinical work as a reference application",obj:"Focus: a four-repo company (spine, Conservation Kernel, Governance_Gateway, ghost_tools)",owner:"Founder",out:"Archived repos, one README naming the four",ok:"Diligence sees four repositories",eng:false,cust:false,inv:true},
+  {id:"archive",t:"Archive the nine non-wedge repositories: ATS, ecology, TOUCHSTONE, OBSERVE, GEMS, innovation_os, Triad-42, TIE, HERALD",obj:"Focus: a four-repo company (spine, Conservation Kernel, Governance_Gateway, ghost_tools)",owner:"Founder",out:"Nine archived repos",ok:"Diligence sees four active repositories",eng:false,cust:false,inv:true},
+  {id:"freeze",t:"Freeze the five kept repos with a README banner naming the reason: fortress-kernel, AUGUR, CCC (optional packs), sentinel_os, GSA-815 (ledger stage)",obj:"Keep sellable code visible without inviting work on it",owner:"Founder",out:"Five README banners; fortress-kernel patch pushed first",ok:"Each frozen repo says what it is and why it is frozen",eng:false,cust:false,inv:true},
   {id:"service",t:"Ship the gate as a service: typed request and decision schema, strict mode by configuration, receipts to Postgres, one adapter",obj:"A deployable wedge instead of a library",owner:"Founder + first engineer",out:"Container, API, one agent-framework adapter",ok:"Runs from a clean clone in ten minutes",eng:true,cust:false,inv:true},
   {id:"hygiene",t:"Production hygiene on the four repos: dependency manifests, version numbers, untrack the audit logs, CI from a clean clone",obj:"Credibility in diligence",owner:"Engineer",out:"Green CI with no sibling checkouts",ok:"Every row of the audit's sellable-alone rubric passes",eng:true,cust:false,inv:true},
   {id:"pitch",t:"Rewrite the pitch: retire the eight-stage chain diagram, sell the pair",obj:"No claim above its evidence level",owner:"Founder",out:"One-page thesis",ok:"Every claim carries its evidence-ladder level",eng:false,cust:false,inv:true},
@@ -63,7 +64,7 @@ var PLAN=[
   {id:"memo",t:"Re-score the investor memo with the evidence ladder updated",obj:"Fundraise readiness",owner:"Founder",out:"Updated memo",ok:"At least three claims move up two levels",eng:false,cust:false,inv:true}
  ]}
 ];
-var DONT=["The pediatric sepsis engine","sentinel_os or GSA-815 beyond archiving or a dependency manifest","HERALD, TIE, innovation_os, ATS, ecology, GEMS, TOUCHSTONE","Any new chain stage","Any marketplace or data-monetization design","A new chain diagram"];
+var DONT=["The pediatric sepsis engine","sentinel_os or GSA-815 beyond a freeze banner or a dependency manifest","fortress-kernel, AUGUR or CCC beyond a freeze banner","Anything in the nine archived repositories","Any new chain stage","Any marketplace or data-monetization design","A new chain diagram"];
 var SHELL_START='<title>Gate to Pilot in 90 Days</title>\n';
 function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
 function readState(){try{return JSON.parse(document.getElementById("state").textContent)||{items:{}}}catch(e){return {items:{}}}}
@@ -75,7 +76,7 @@ function fmt(ts){if(!ts)return"";var d=new Date(ts);return d.toISOString().slice
 function render(){
  var done=count(), pct=Math.round(100*done/total);
  var h='<div class="eyebrow">Company-building plan from the 2026-09-08 commercial red team</div><h1>Gate to Pilot in 90 Days</h1>'+
- '<p class="lede">Twelve activities in three phases, ending with a paid pilot of the governed action gate in one real agent’s execution path. Ticking a box saves it for everyone who opens this page.</p>'+
+ '<p class="lede">Thirteen activities in three phases, ending with a paid pilot of the governed action gate in one real agent’s execution path. Ticking a box saves it for everyone who opens this page.</p>'+
  '<div class="bar"><div><div class="n">'+done+' of '+total+'</div><div class="l">activities done</div><div class="track"><i style="width:'+pct+'%"></i></div></div>'+
  '<div class="status">'+(state.updated?'last change '+esc(fmt(state.updated)):'no changes yet')+(readOnly?'<div class="ro">read-only view</div>':'')+'</div></div>';
  PLAN.forEach(function(p){
