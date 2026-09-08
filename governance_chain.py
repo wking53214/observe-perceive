@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from governance_contracts import CONTRACT_VERSION, compute_state_commitment
+from governance_contracts import canonical_repr, CONTRACT_VERSION, compute_state_commitment
 
 
 @dataclass
@@ -78,6 +78,9 @@ def request_state(request) -> Dict[str, Any]:
         "epistemic_status": request.epistemic_status,
         "lineage": request.lineage,
         "context": request.context,
+        # 1.1.0: event time is part of what the request is. Absent on
+        # requests made before 1.1.0 and on sources that state no time.
+        "event_time": getattr(request, "event_time", None),
     }
 
 
@@ -100,6 +103,10 @@ def execution_context_state(execution_context) -> Dict[str, Any]:
         "artifact_hash": execution_context.artifact_hash,
         "lineage": execution_context.lineage,
         "producer": execution_context.producer,
+        # 1.1.0: the execution's identity is committed. Before this a context
+        # could be re-labelled with another execution id after issuance and
+        # still verify whenever OBSERVE had not run.
+        "execution_id": execution_context.execution_id,
     }
 
 
@@ -204,9 +211,22 @@ def verify_result(result: Dict[str, Any], kernel=None, perceive=None) -> ChainVe
         if kernel is not None:
             decision_artifact_id = f"decision-{decision.decision_id}"
             try:
-                kernel.reconstruct(decision_artifact_id)
-                in_ledger = True
-                detail = f"{decision_artifact_id} reconstructs from the kernel ledger"
+                reconstruction = kernel.reconstruct(decision_artifact_id)
+                # Reconstructing is not enough: a ROOT registered under the
+                # decision's id reconstructs too, and that is exactly what a
+                # forged membership looks like (measured 2026-09-08). A decision
+                # the kernel actually made is DERIVED, by a transformation,
+                # from the request's artifact.
+                derived = bool(reconstruction.transformation_ids_in_order)
+                from_request = request.artifact_id in reconstruction.root_artifact_ids
+                in_ledger = derived and from_request
+                detail = (
+                    f"{decision_artifact_id} derives by transformation from root {request.artifact_id}"
+                    if in_ledger else
+                    f"{decision_artifact_id} is in the kernel ledger but not as a decision derived from "
+                    f"{request.artifact_id} (transformations={len(reconstruction.transformation_ids_in_order)}, "
+                    f"roots={list(reconstruction.root_artifact_ids)})"
+                )
             except Exception as e:  # the kernel raises its own error family for unknown ids
                 in_ledger = False
                 detail = f"{decision_artifact_id} not in kernel ledger: {type(e).__name__}"
@@ -219,6 +239,13 @@ def verify_result(result: Dict[str, Any], kernel=None, perceive=None) -> ChainVe
         check("approval.conservation_decision_id", approval.conservation_decision_id == conservation.governance_decision_id, "approval names the conservation decision")
         check("approval.receipt", approval.conservation_receipt_id == conservation.conservation_receipt_id, "approval carries the conservation receipt")
         check("approval.parent_hash", approval.conservation_audit_hash == conservation.conservation_audit_hash, "approval is chained to the conservation audit hash")
+        if getattr(approval, "artifact_id", ""):
+            check(
+                "approval.names_request_artifact",
+                approval.artifact_id == request.artifact_id and approval.artifact_hash == request.artifact_hash
+                and approval.producer == request.producer and list(approval.lineage) == list(request.lineage),
+                "the approval names the request's artifact, producer and lineage",
+            )
         recomputed = compute_state_commitment(
             conservation.conservation_audit_hash,
             approval_state(approval, request.artifact_id, request.artifact_hash, request.producer, request.lineage),
@@ -235,7 +262,14 @@ def verify_result(result: Dict[str, Any], kernel=None, perceive=None) -> ChainVe
         check("execution_context.state_commitment", execution_context.state_commitment == recomputed, "execution context commitment recomputes")
 
     # --- outcome -------------------------------------------------------------------
-    complete = outcome is not None
+    # 1.1.0: every executed result carries an outcome, so the execution's
+    # result is committed whether or not OBSERVE ran. `complete` keeps its
+    # meaning -- the chain reached an OBSERVED outcome -- so an executed
+    # action nobody observed is verifiable but not complete.
+    if executed:
+        check("outcome.present", outcome is not None, "an executed result must carry an outcome")
+    observed = outcome is not None and bool((outcome.outcome or {}).get("observe_ran", "observe_regime" in (outcome.outcome or {})))
+    complete = observed
     if outcome is not None and execution_context is not None and approval is not None:
         check("outcome.execution_id", outcome.execution_id == execution_context.execution_id, "outcome names the execution")
         check("outcome.decision_id", outcome.governance_decision_id == approval.conservation_decision_id, "outcome names the decision, not the execution")
@@ -247,10 +281,14 @@ def verify_result(result: Dict[str, Any], kernel=None, perceive=None) -> ChainVe
         check("outcome.state_commitment", outcome.state_commitment == recomputed, "outcome commitment recomputes")
         gsa = result.get("gsa815_result")
         verdict = result.get("observe_verdict")
+        regime = verdict.regime.value if verdict is not None else "no-observe"
+        expected_result_hash = hashlib.sha256(f"{canonical_repr(gsa)}:{regime}".encode()).hexdigest()
+        check("outcome.result_artifact_hash", outcome.result_artifact_hash == expected_result_hash, "result artifact hash matches the recorded execution result and verdict")
         if verdict is not None:
-            expected_result_hash = hashlib.sha256(f"{gsa}:{verdict.regime.value}".encode()).hexdigest()
-            check("outcome.result_artifact_hash", outcome.result_artifact_hash == expected_result_hash, "result artifact hash matches the recorded execution result and verdict")
             check("outcome.matches_verdict", outcome.outcome.get("observe_audit_hash") == verdict.audit_hash and outcome.outcome.get("observe_regime") == verdict.regime.value, "outcome records the verdict that was observed")
+        recorded_status = result.get("execution_status")
+        if recorded_status is not None and "execution_status" in (outcome.outcome or {}):
+            check("outcome.execution_status", outcome.outcome.get("execution_status") == recorded_status, "outcome records the execution status the result reports")
 
     # --- time runs forward --------------------------------------------------------
     executed_at = result.get("executed_at") or {}

@@ -101,7 +101,7 @@ def _import_augur():
         sys.path.insert(0, path)
     try:
         from augur import Augur, SimulationConfig
-    except ModuleNotFoundError:
+    except ImportError:            # absent, partial or shadowed: all "not available"
         return None, None
     return Augur, SimulationConfig
 

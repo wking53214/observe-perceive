@@ -29,11 +29,15 @@ try:
         SimulationOutcome,
         UNSTABLE_REGIMES,
     )
+    import augur_screen_adapter as _adapter
+    # The adapter imports without the pack and refuses at construction; the
+    # sentinel is what says whether AUGUR itself resolved.
+    fortress_available = _adapter.Augur is not None
 except ImportError:  # pragma: no cover
     fortress_available = False
 
 pytestmark = pytest.mark.skipif(
-    not fortress_available, reason="FORTRESS checkout not available"
+    not fortress_available, reason="AUGUR checkout not available"
 )
 
 

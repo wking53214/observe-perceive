@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "observe-perceive"
-version = "1.1.0"
+version = "1.2.0"
 description = "The governed action gate: admission, screen, policy gates, Conservation Kernel approval, execution, observation, record, with a verifiable hash chain over all of it."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,7 +12,11 @@ license = { text = "MIT" }
 # The orchestrator calls the Conservation Kernel unconditionally (Phase 3),
 # so it is a hard dependency, declared here rather than found as a sibling.
 dependencies = [
-  "conservation-kernel @ git+https://github.com/wking53214/conservation_kernel",
+  # 0.2.0 (root admission, snapshot restore) is required by the boundary
+  # this package now holds; pinned to the immutable commit that the 0.2.0
+  # release (PR #4, squash-merged 2026-09-08) landed as. A tag would be
+  # friendlier; the commit cannot be moved.
+  "conservation-kernel @ git+https://github.com/wking53214/conservation_kernel@5b388f105ac33a9b9b48f368b5a3c070a15ca492",
 ]
 
 [project.optional-dependencies]
@@ -35,11 +39,12 @@ py-modules = [
   "adversarial_sensor_faults", "augur_screen_adapter", "capacity_planning",
   "clinical_governance_system", "compliance_exporters",
   "conservation_gsa815_adapter", "demo_why", "deterioration_simulator",
+  "execution_guard",
   "fda_510k_checklist", "fortress_perceive_adapter", "gateway_admission_adapter",
   "gems_governance_adapter", "governance_chain", "governance_contracts",
-  "governance_orchestrator", "gsa815_observe_adapter", "herald_governance_adapter",
+  "governance_orchestrator", "governance_record", "gsa815_observe_adapter", "herald_governance_adapter",
   "innovation_governance_adapter", "kalman_trajectory", "observe_consolidated",
   "orchestrator_ccc_adapter", "perceive_conservation_adapter",
   "perceive_consolidated", "reserve_control", "sentinel_perceive_adapter",
-  "tie_governance_adapter",
+  "tie_governance_adapter", "vertical_slice",
 ]

@@ -89,7 +89,8 @@ def test_advisory_denial_is_visible_on_an_approved_record(orchestrator):
 # --- prediction failure ------------------------------------------------------------------
 
 def test_a_crashing_screen_refuses_and_says_it_crashed(perceive, kernel, monkeypatch):
-    pytest.importorskip("augur_screen_adapter")
+    if pytest.importorskip("augur_screen_adapter").Augur is None:
+        pytest.skip("AUGUR checkout not available")
     orchestrator = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), simulation_screen=True)
 
     def crash(context):

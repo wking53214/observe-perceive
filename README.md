@@ -17,6 +17,14 @@ The entrypoint is `GovernanceOrchestrator` in `governance_orchestrator.py`;
 returns, and `test_chain_adversarial.py` is the sixteen attacks that
 verification must reject.
 
+## Closure reports
+
+The CLOSE THE SYSTEM pass (2026-09-08) is documented in `docs/closure/`:
+architecture closure, governance bypasses, provenance closure, failure
+semantics and the cross-repository integration matrix. The hand-off state
+is `CLAUDE_ARCHITECTURE_STATE.md`. Run `python vertical_slice.py` for one
+governed action explained after a restart.
+
 ## Governed Observation and Interpretation System
 
 OBSERVE/PERCEIVE is a governed observation-and-interpretation architecture that separates the detection and assessment of system state from the policy-governed interpretation and authorization of responses to that state.

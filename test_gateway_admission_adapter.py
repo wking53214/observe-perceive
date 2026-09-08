@@ -282,13 +282,15 @@ def test_strict_mode_still_allows_a_properly_scoped_request():
         require_declared_scope=True,
     )
 
+    # 1.1.0: "properly scoped" means sealed. A bare claim is refused in
+    # strict mode (see test_scope_binding.py); a sealed admission backs it.
     result = strict.orchestrate_request(
         _chain_artifact(), "escalate",
         lambda ctx: {"status": "executed"},
-        context={"patient_id": "P001", "gateway_scope": "EXECUTE"},
+        context={"patient_id": "P001", "gateway_scope": "EXECUTE", "gateway_admission": _sealed(execute=True)},
     )
     assert result["status"] == "APPROVED_AND_EXECUTED", result.get("reason")
-    assert result["scope_enforced"] is True
+    assert result["scope_enforced"] is True and result["scope_sealed"] is True
 
 
 # ---------------------------------------------------------------------------

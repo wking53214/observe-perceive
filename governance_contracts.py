@@ -19,7 +19,7 @@ from enum import Enum
 # orchestrator speak. Carried in every result's `handoff` block so a consumer
 # can tell what it received. Bump on any change to the dataclasses below or
 # to the result keys the orchestrator promises on every path.
-CONTRACT_VERSION = "1.0.0"
+CONTRACT_VERSION = "1.1.0"
 
 
 def _canonicalize_commitment_value(value: Any) -> Any:
@@ -38,6 +38,17 @@ def _canonicalize_commitment_value(value: Any) -> Any:
             for v in sorted(value, key=lambda item: json.dumps(_canonicalize_commitment_value(item), sort_keys=True, separators=(",", ":"), default=str))
         ]
     return str(value)
+
+
+def canonical_repr(value: Any) -> str:
+    """A stable string for hashing arbitrary result payloads.
+
+    `str(dict)` depends on insertion order, so a result that was written
+    with sorted keys and read back no longer hashed to what the outcome
+    committed (measured 2026-09-08 on the first receipt read from disk).
+    """
+    return json.dumps(_canonicalize_commitment_value(value), sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, default=str)
 
 
 def compute_state_commitment(parent_commitment: Optional[str], state: Dict[str, Any]) -> str:
@@ -84,6 +95,15 @@ class GovernanceRequest:
     context: Dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     state_commitment: str = ""
+    # 1.1.0: EVENT time is when the thing the artifact describes happened,
+    # taken from the source artifact when it says; it is part of what the
+    # request IS and is covered by the request commitment. INGESTION time is
+    # when this process first saw the artifact; it is a fact about the
+    # process, recorded but not committed, so a canonical scenario replays to
+    # the same request commitment. `timestamp` (processing time) predates
+    # both and is kept for compatibility.
+    event_time: Optional[str] = None
+    ingested_at: Optional[str] = None
 
 
 @dataclass
@@ -129,6 +149,13 @@ class ExecutionApproval:
     conservation_audit_hash: str
     state_commitment: str = ""
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # 1.1.0: the approval names what it approved. Its commitment always
+    # covered these; before this they lived only on the request, so an
+    # executor holding the approval could not re-derive it.
+    artifact_id: str = ""
+    artifact_hash: str = ""
+    producer: str = ""
+    lineage: List[str] = field(default_factory=list)
 
 
 @dataclass

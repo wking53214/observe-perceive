@@ -1,5 +1,44 @@
 # CHANGELOG — OBSERVE / PERCEIVE hardening pass
 
+## 1.2.0 (2026-09-08) — CLOSE THE SYSTEM
+
+The execution boundary is now enforced, the record is durable, and the
+whole chain is explained after a restart. Reports in `docs/closure/`.
+
+- `execution_guard.py`: an append-only, hash-chained `ExecutionLedger`; the
+  orchestrator issues every `ExecutionContext` into it; `authorize_execution`
+  recomputes the structure, matches the issuance field by field and marks
+  single use; `guarded(func, ledger, kernel=)` wraps any executor. A forged,
+  altered or replayed context is refused before the effect, also after a
+  restart, and the refusal is ledgered.
+- `governance_record.py`: `to_record` / `from_record` / `verify_record`,
+  `record_hash` over a canonical form, `ReceiptLog` (hash-chained JSONL of
+  every result); any alteration refuses to load.
+- Contract 1.1.0: `event_time` (committed) and `ingested_at` (recorded) on
+  the request; `execution_id` in the execution-context commitment;
+  self-describing `ExecutionApproval`; `canonical_repr` for result hashing.
+- Verifier: kernel membership requires a derived-by-transformation chain
+  with the request among the roots; outcome present and committed
+  unconditionally (including EXECUTION_FAILED); `execution_status`;
+  `approval.names_request_artifact`. 34 checks.
+- Conservation boundary: the adapter hands the kernel real propositions
+  with a conservative mapping; the decision is born DECISION / MACHINE /
+  NONE with a declared LINEAGE change. Requires conservation_kernel 0.2.0.
+- Scope binding: a passed Gateway admission is verified (integrity, scope,
+  artifact); `scope_sealed` and the admission summary are recorded;
+  `require_declared_scope=True` refuses a bare claim.
+- Failure semantics: a PERCEIVE crash is a recorded refusal; a receipt
+  write failure after the action degrades explicitly (`receipt_error`);
+  temporal anomalies recorded on every result.
+- `vertical_slice.py`: one governed action through the real code, explained
+  backwards from its effect after a restart, replayed three ways and refused
+  three ways.
+- Release: a kernel-only clean clone installs, imports and tests (494
+  passed, 63 skipped); optional-pack tests skip on the pack, not the adapter.
+
+Tests: 589 passed, 5 skipped (was 529). Attacks measured before and after
+repair: 12 on the spine; see `docs/closure/GOVERNANCE_BYPASS_REPORT.md`.
+
 ## 1.1.0 (2026-09-08)
 
 Production hygiene from the 90-day plan. `pyproject.toml` replaces
