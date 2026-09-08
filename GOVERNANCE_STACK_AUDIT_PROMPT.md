@@ -275,11 +275,19 @@ each still holds; do not re-report any of them:**
 | ddca375 | TIE adapter restated a coverage gap TIE already declared           |
 | 717c2e2 | 510(k) checklist items marked ready with no test behind them       |
 | 3ff4569 | three-approvals test could not tell 3 from 100; five clinical missed detections filed as skips (now `OBSERVE_STRICT_CLINICAL=1` fails) |
+| PR #18  | `audit_chain_valid` was a presence check (now `governance_chain.verify_result`, 29 checks incl. both ledgers); execution failure and OBSERVE failure left no record (now `EXECUTION_FAILED`, `observe_error`); Conservation never compared `artifact_hash` to content (now refuses); result lacked the request and any handoff (now `governance_request`, `handoff`); Gateway path could not reach OBSERVE; outcome mislabelled the decision id; audit logs untracked; inert `env` block removed; hard-coded home path removed |
 
-The last ten are what the first pass of this audit found in one repo in one
-day. Expect the same density elsewhere. The full first-pass result, all
-parts, is `docs/audit/AUDIT_REPORT_2026-09-08.md` on main: read it before
-running so you extend it rather than repeat it.
+The last eleven rows are what the first pass and the repair mission found in
+one repo in one day. Expect the same density elsewhere. Read
+`docs/audit/AUDIT_REPORT_2026-09-08.md` and `docs/audit/REPAIR_REPORT.md`
+before running so you extend them rather than repeat them.
+
+**Verification tooling now exists.** `governance_chain.verify_result(result,
+kernel, perceive)` re-derives every commitment in a chain result and checks
+both ledgers; `test_chain_adversarial.py` is the sixteen-attack suite;
+`demo_why.py --corrupt <element>` exits non-zero if a corruption is accepted.
+Use them for B2 on the spine instead of re-deriving by hand, and extend the
+attack list rather than restating it.
 
 ### B3 — tests that mutate the repository
 
