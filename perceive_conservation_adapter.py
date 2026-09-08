@@ -80,6 +80,19 @@ class PerceiveConservationAdapter:
         Raises:
             Exception if Kernel rejects the decision
         """
+        # The request carries a hash of the content it was built from. The
+        # kernel re-derives digests from the content it is handed, but nothing
+        # compared the two, so content altered after hashing sailed through
+        # with the stale hash still attached to every downstream record. This
+        # is the constitutional boundary; the comparison belongs here.
+        expected_hash = hashlib.sha256(input_artifact_content.encode()).hexdigest()
+        if input_artifact_hash != expected_hash:
+            raise ConservationRefusal(
+                "artifact hash mismatch: the request carries "
+                f"{input_artifact_hash[:12]}... but the content digests to "
+                f"{expected_hash[:12]}...; the content changed after it was hashed"
+            )
+
         # Create Conservation Kernel Artifact for the decision
         decision_content = f"""
 PERCEIVE Governance Decision:

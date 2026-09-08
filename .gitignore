@@ -16,3 +16,8 @@ build/
 .idea/
 venv/
 env/
+
+# HMAC audit logs written by AUGUR and fortress-kernel during test runs.
+# They are run artifacts, not fixtures; nothing reads them back.
+augur_audit.log
+fortress_audit.log
