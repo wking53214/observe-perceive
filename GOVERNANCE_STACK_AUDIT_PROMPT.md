@@ -466,7 +466,10 @@ final summary. Run `ruff check .` before every push (see traps).
 - **innovation_os**: local `main` tracks the stale `origin/master`. Any
   ahead/behind readout is wrong unless measured against `origin/main`.
 - **Archived and read-only on GitHub, pushes will 403**: `Gemini_History`,
-  `TAKEOUT`, `synapsis`. These are not in the audit; do not write to them.
+  `TAKEOUT`, `synapsis`, and since 2026-09-08 nine stack repos: `ATS`,
+  `ecology`, `TOUCHSTONE`, `OBSERVE`, `GEMS`, `innovation_os`, `Triad-42`,
+  `TIE`, `HERALD`. Audit the nine read-only (Parts A to C still apply);
+  Part D commits go only to the nine remaining writable repos.
 - `git rev-list --not --remotes` compares against remote *branches only*. Always
   add `--tags`, or every commit hanging off a pushed tag reads as unpushed.
 - Running the same artifact twice through the chain is a **replay**, and the
