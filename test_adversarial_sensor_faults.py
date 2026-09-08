@@ -1,8 +1,22 @@
 """Tests for the adversarial sensor-fault suite (robustness validation)."""
 
+import os
 import unittest
 
 from adversarial_sensor_faults import AdversarialSensorTestSuite, FAULT_CASES
+
+
+def _known_gap(testcase, message):
+    """A known clinical detection gap.
+
+    By default it is recorded as a skip with the gap named, which is what the
+    suite has always done. That default hides five missed detections behind a
+    green run. Set OBSERVE_STRICT_CLINICAL=1 to fail on them instead -- for a
+    deployment gate, or to see the real detection record.
+    """
+    if os.environ.get("OBSERVE_STRICT_CLINICAL"):
+        testcase.fail(f"known clinical gap (OBSERVE_STRICT_CLINICAL set): {message}")
+    testcase.skipTest(message)
 
 
 class TestAdversarialSensorFaults(unittest.TestCase):
@@ -37,7 +51,8 @@ class TestAdversarialSensorFaults(unittest.TestCase):
             case = next(c for c in FAULT_CASES if c.name == case_name)
             result = self.suite.evaluate_fault_case(case)
             if result.safety_verdict != "safe":
-                self.skipTest(
+                _known_gap(
+                self,
                     f"Stuck sensor detection gap: {case_name} — {result.notes}. "
                     "Kalman or adversarial engine enhancement recommended."
                 )
@@ -67,7 +82,8 @@ class TestAdversarialSensorFaults(unittest.TestCase):
         results = self.suite.run_all()
         risky_count = sum(1 for r in results.values() if r.safety_verdict == "risky")
         if risky_count > 1:
-            self.skipTest(
+            _known_gap(
+                self,
                 f"Too many risky sensor-fault cases ({risky_count}). "
                 "Address before production deployment."
             )
