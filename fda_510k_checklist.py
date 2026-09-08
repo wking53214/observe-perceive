@@ -12,10 +12,20 @@ Use this before FDA meetings or regulatory filings. Each item maps to:
   - Sign-off responsibility
 
 STATUS CODES:
-  ✅ = Ready (evidence in code, tests pass)
-  ⏳ = In progress (code exists, needs validation data)
+  ✅ = Ready: the evidence cited exists in this repository AND the item names
+       at least one test, under "tests", that exists and runs in CI. A ✅ with
+       no runnable test is not allowed; test_fda_510k_checklist.py enforces it.
+  ⏳ = In progress (code exists, needs validation data or a formal artifact)
   ❌ = Not yet done (architectural change needed)
   🔄 = Deferred (Phase 2+)
+
+AUDIT NOTE (2026-09-07): an external audit found eleven items marked ✅ with
+no test behind any of them, two citing README_CONSOLIDATED.md, which does
+not exist in this repository, and one citing "241 tests verify" where the
+verifying tests were never named. Every ✅ below now names its tests, and
+five items were downgraded to ⏳ because the evidence did not support
+"ready". This file is exported by compliance_exporters.py, so what it says
+is what a reviewer sees.
 
 ---
 """
@@ -28,10 +38,12 @@ CHECKLIST = {
     "I. DEVICE CLASSIFICATION & INTENDED USE": {
         "I.1": {
             "requirement": "Intended use statement (pediatric early-warning, NOT treatment recommendation)",
-            "status": "✅",
-            "evidence": "README_CONSOLIDATED.md, clinical_governance_system.py docstring",
+            "status": "⏳",
+            "evidence": "README.md (pediatric sepsis monitoring named as the representative application), clinical_governance_system.py docstring",
             "sign_off": "Product owner",
-            "notes": "System provides risk assessment + escalation routing. Physician retains all clinical decisions.",
+            "notes": "System provides risk assessment + escalation routing. Physician retains all clinical decisions. "
+                     "Downgraded 2026-09-07: the README describes an architecture with a representative application; "
+                     "no formal intended-use statement in regulatory form exists yet.",
         },
         "I.2": {
             "requirement": "Predicate device identification (or 505(b)(2) equivalence argument)",
@@ -58,22 +70,26 @@ CHECKLIST = {
         },
         "II.2": {
             "requirement": "Sensitivity analysis (impact of missing inputs, sensor faults)",
-            "status": "✅",
-            "evidence": "adversarial_sensor_faults.py (6/11 safe on faults); validate_vitals() handles NaN/Inf",
+            "status": "⏳",
+            "evidence": "adversarial_sensor_faults.py (6/11 fault cases safe); validate_vitals() handles NaN/Inf. "
+                        "test_adversarial_sensor_faults.py converts the 5 unsafe cases into pytest skips, so the suite "
+                        "cannot fail on them -- downgraded 2026-09-07 until those cases pass or are asserted.",
             "sign_off": "QA + Clinical team",
             "notes": "NaN/Inf → WARNING escalation (safe default). Stuck sensors flagged as gaps (Phase 2: Kalman + adversarial engine).",
         },
         "II.3": {
             "requirement": "Failure modes & mitigation (what if network down, sensor fail, governance crash?)",
             "status": "✅",
-            "evidence": "OBSERVE: data-integrity faults; PERCEIVE: fail-open (escalation proceeds); README hazard analysis",
+            "evidence": "OBSERVE: data-integrity faults (validate_vitals, sanitize_context); PERCEIVE: governance failure fails open for escalation (clinical_governance_system.py); RED_TEAM_REPORT.md",
+            "tests": ["test_clinical_governance_system.py::test_governance_exception_fails_open_for_escalation", "test_context_sanitization.py"],
             "sign_off": "Risk management + FMEA lead",
             "notes": "Single-point failures: PERCEIVE crash (fail-open to approval). Multi-point: network + sensor + governance (documented risk).",
         },
         "II.4": {
             "requirement": "Determinism & reproducibility (FDA expects bit-for-bit reproducibility on identical inputs)",
             "status": "✅",
-            "evidence": "decision_fingerprint reproducible; audit_hash differs (timestamped, by design); 241 tests verify",
+            "evidence": "decision_fingerprint reproducible; audit_hash differs (timestamped, by design)",
+            "tests": ["test_integration_consolidated.py::test_first_call_is_deterministic", "test_compliance_exporters.py::test_determinism_attestation_present", "test_governance_orchestrator_basic.py::test_state_commitment_is_deterministic"],
             "sign_off": "QA + Engineering",
             "notes": "Decisions are deterministic. Audit chains include timestamps (tamper-evidence intent). Documented in CHANGELOG.md.",
         },
@@ -81,6 +97,7 @@ CHECKLIST = {
             "requirement": "Edge cases (extreme values, missing data, ambiguous decisions)",
             "status": "✅",
             "evidence": "VITALS_PHYSICAL_BOUNDS; abstention logic; BayesianFusion excludes abstainers; hard-rule bypass on syndrome",
+            "tests": ["test_context_sanitization.py", "test_observe_consolidated.py::test_all_abstained_degenerate_fallback"],
             "sign_off": "QA",
             "notes": "Out-of-range vitals handled. Missing data → abstain or low confidence. Fusion weights only present engines.",
         },
@@ -95,8 +112,10 @@ CHECKLIST = {
         },
         "III.2": {
             "requirement": "Cybersecurity (tamper-detection, access control, encryption in transit)",
-            "status": "✅",
-            "evidence": "SHA256-chained audit (tamper-evident); HIPAA exporters require salt (encryption ready); no hardcoded secrets",
+            "status": "⏳",
+            "evidence": "SHA256-chained audit (tamper-evident, tested); HIPAA exporters require a runtime salt; no hardcoded secrets (pattern sweep 2026-09-07: 0 hits). "
+                        "Access control and encryption in transit are not implemented in this codebase -- downgraded 2026-09-07.",
+            "tests": ["test_observe_consolidated.py::test_tamper_detection", "test_perceive_consolidated.py::test_chain_integrity_valid", "test_compliance_exporters.py::test_missing_salt_raises"],
             "sign_off": "Security architect",
             "notes": "Single-node (NCH): no network auth needed. Multi-node (Phase 2): DGK needs key management.",
         },
@@ -104,6 +123,7 @@ CHECKLIST = {
             "requirement": "De-identification (HIPAA safe harbor or expert determination)",
             "status": "✅",
             "evidence": "pseudonymize_patient_id with runtime salt; HIPAA/GDPR exporters; no hardcoded identifiers",
+            "tests": ["test_compliance_exporters.py::test_pseudonym_does_not_contain_raw_id", "test_compliance_exporters.py::test_pseudonym_salt_changes_output", "test_compliance_exporters.py::test_missing_salt_raises"],
             "sign_off": "Privacy officer + Compliance",
             "notes": "Salt is required runtime arg. No default keys. GDPR exporter includes data-subject-rights paths.",
         },
@@ -111,6 +131,7 @@ CHECKLIST = {
             "requirement": "Audit trail (immutable logs of all decisions and policy changes)",
             "status": "✅",
             "evidence": "ImmutableAuditLedger (OBSERVE); audit entries in PERCEIVE; SHA256-chained; verify_integrity() works",
+            "tests": ["test_observe_consolidated.py::test_chain_integrity_valid_after_appends", "test_observe_consolidated.py::test_tamper_detection", "test_perceive_consolidated.py::test_chain_integrity_valid", "test_governance_orchestrator.py::test_audit_chain_linking"],
             "sign_off": "Compliance + IT security",
             "notes": "In-memory only (Phase 1). Persistence needed for production (PostgreSQL + replication recommended).",
         },
@@ -119,14 +140,16 @@ CHECKLIST = {
         "IV.1": {
             "requirement": "Unit test coverage (high-risk algorithms)",
             "status": "✅",
-            "evidence": "241 tests (OBSERVE engines, PERCEIVE gates, fusion, audit); 100+ tests for core adapters",
+            "evidence": "Unit suites for OBSERVE engines, PERCEIVE gates, fusion and audit; adapter suites per seam. Count: python -m pytest --co -q",
+            "tests": ["test_observe_consolidated.py", "test_perceive_consolidated.py", "test_kalman_trajectory.py", "test_reserve_control.py", "test_capacity_planning.py"],
             "sign_off": "QA",
             "notes": "Coverage gaps: physiological_reserve axis-by-axis (added post-hoc). Kalman test coverage adequate.",
         },
         "IV.2": {
             "requirement": "Integration testing (end-to-end OBSERVE → PERCEIVE → audit)",
             "status": "✅",
-            "evidence": "test_integration_consolidated.py (15 tests); determinism verified; governance fail-open tested",
+            "evidence": "test_integration_consolidated.py (6 tests) and test_governance_orchestrator.py (end-to-end chain, needs the sibling checkouts CI provides); determinism verified; governance fail-open tested",
+            "tests": ["test_integration_consolidated.py", "test_governance_orchestrator.py::test_complete_approval_flow", "test_clinical_governance_system.py::test_governance_exception_fails_open_for_escalation"],
             "sign_off": "QA",
             "notes": "Tests cover single-node path fully. Multi-node DGK needs separate integration tests (Phase 2).",
         },
@@ -149,7 +172,7 @@ CHECKLIST = {
         "V.1": {
             "requirement": "Device description (what is it, how does it work, predicate equivalence)",
             "status": "⏳",
-            "evidence": "README_CONSOLIDATED.md, architecture diagram (needed), clinical_governance_system.py",
+            "evidence": "README.md, GOVERNANCE_ORCHESTRATION.md, architecture diagram (needed), clinical_governance_system.py",
             "sign_off": "Regulatory affairs",
             "notes": "README covers architecture. Need formal 510(k) device description document (~5 pages).",
         },
@@ -192,8 +215,8 @@ CHECKLIST = {
     "VI. MANUFACTURING & POST-MARKET": {
         "VI.1": {
             "requirement": "Software version control & configuration management",
-            "status": "✅",
-            "evidence": "Git repo, version tags in manifest, pytest.ini pins test files",
+            "status": "⏳",
+            "evidence": "Git repo with CI on every push; setup.py version 1.0.0; CHANGELOG.md. No release tags exist and pytest.ini does not pin test files -- downgraded 2026-09-07.",
             "sign_off": "IT",
             "notes": "Current: local development only. Need CI/CD pipeline + release tagging (Phase 2).",
         },
