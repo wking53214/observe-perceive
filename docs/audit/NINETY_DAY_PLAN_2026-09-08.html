@@ -1,0 +1,132 @@
+<title>Gate to Pilot in 90 Days</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{--paper:#F5F6F4;--ink:#1C232B;--slate:#5D6874;--line:#D6DAD7;--well:#EBEEEA;--yes:#1E7F70;--yes-soft:#DDEFEA;--no:#B2502C;--no-soft:#F3E2D9;--warn:#A5780E;--warn-soft:#F4EBD2;--mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;--sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;--disp:"Archivo","IBM Plex Sans",system-ui,sans-serif}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#12171C;--ink:#E4E8EB;--slate:#9AA5B0;--line:#2C353E;--well:#1B2229;--yes:#3FB09E;--yes-soft:#16332E;--no:#E07A55;--no-soft:#3A241B;--warn:#D8A33A;--warn-soft:#3A2F14}}
+:root[data-theme="dark"]{--paper:#12171C;--ink:#E4E8EB;--slate:#9AA5B0;--line:#2C353E;--well:#1B2229;--yes:#3FB09E;--yes-soft:#16332E;--no:#E07A55;--no-soft:#3A241B;--warn:#D8A33A;--warn-soft:#3A2F14}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;margin:0}
+main{max-width:960px;margin:0 auto;padding:36px 24px 72px}
+h1,h2,h3{font-family:var(--disp);text-wrap:balance;margin:0}
+h1{font-size:32px;font-weight:700;letter-spacing:-.01em;line-height:1.1}
+h2{font-size:19px;font-weight:600;margin-top:40px;padding-top:12px;border-top:2px solid var(--ink);display:flex;align-items:baseline;gap:12px}
+h2 small{font-family:var(--mono);font-size:12px;font-weight:400;color:var(--slate);letter-spacing:.04em}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--slate);margin-bottom:8px}
+.lede{max-width:64ch;color:var(--slate);margin:10px 0 0}
+.bar{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:end;margin-top:22px;padding:14px 16px;border:1px solid var(--line);background:var(--well)}
+.bar .n{font-family:var(--disp);font-size:28px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+.bar .l{font-size:13px;color:var(--slate);margin-top:4px}
+.track{height:6px;background:var(--line);margin-top:10px;overflow:hidden}
+.track i{display:block;height:100%;background:var(--yes);width:0}
+.status{font-family:var(--mono);font-size:11.5px;color:var(--slate);text-align:right}
+.item{display:grid;grid-template-columns:26px 1fr;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
+.item.done .t{text-decoration:line-through;text-decoration-color:var(--slate);color:var(--slate)}
+.item input[type=checkbox]{width:18px;height:18px;margin:3px 0 0;accent-color:var(--yes);cursor:pointer}
+.item input[type=checkbox]:focus-visible{outline:2px solid var(--yes);outline-offset:2px}
+.t{font-family:var(--disp);font-weight:600;font-size:15px}
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:4px 18px;margin-top:6px;font-size:13px}
+.meta b{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);font-weight:500;display:block}
+.flags{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.f{font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;padding:2px 7px;border-radius:2px;background:var(--well);color:var(--slate)}
+.f.on{background:var(--yes-soft);color:var(--yes)}
+.note{margin-top:8px;display:flex;gap:8px;align-items:center}
+.note input{flex:1;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--line);background:var(--paper);color:var(--ink)}
+.note input:focus-visible{outline:2px solid var(--yes);outline-offset:1px}
+.when{font-family:var(--mono);font-size:11px;color:var(--slate);white-space:nowrap}
+.dont{margin-top:14px;padding:14px 16px;border:1px solid var(--no);background:var(--no-soft)}
+.dont h3{color:var(--no);font-size:14px;margin-bottom:6px}
+.dont ul{margin:0;padding-left:20px;font-size:14px}
+.ro{font-family:var(--mono);font-size:12px;color:var(--warn);margin-top:8px}
+.foot{margin-top:40px;color:var(--slate);font-size:13px;border-top:1px solid var(--line);padding-top:12px;max-width:70ch}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+<script id="state" type="application/json">{"items":{},"updated":null}</script>
+<main id="root"></main>
+<script id="app">
+(function(){
+var PLAN=[
+ {id:"p1",title:"Days 1 to 30: proof and packaging",items:[
+  {id:"archive",t:"Archive the thirteen non-wedge repositories; relabel the OBSERVE clinical work as a reference application",obj:"Focus: a four-repo company (spine, Conservation Kernel, Governance_Gateway, ghost_tools)",owner:"Founder",out:"Archived repos, one README naming the four",ok:"Diligence sees four repositories",eng:false,cust:false,inv:true},
+  {id:"service",t:"Ship the gate as a service: typed request and decision schema, strict mode by configuration, receipts to Postgres, one adapter",obj:"A deployable wedge instead of a library",owner:"Founder + first engineer",out:"Container, API, one agent-framework adapter",ok:"Runs from a clean clone in ten minutes",eng:true,cust:false,inv:true},
+  {id:"hygiene",t:"Production hygiene on the four repos: dependency manifests, version numbers, untrack the audit logs, CI from a clean clone",obj:"Credibility in diligence",owner:"Engineer",out:"Green CI with no sibling checkouts",ok:"Every row of the audit's sellable-alone rubric passes",eng:true,cust:false,inv:true},
+  {id:"pitch",t:"Rewrite the pitch: retire the eight-stage chain diagram, sell the pair",obj:"No claim above its evidence level",owner:"Founder",out:"One-page thesis",ok:"Every claim carries its evidence-ladder level",eng:false,cust:false,inv:true},
+  {id:"discovery",t:"Twenty discovery interviews with platform and security leads running acting agents",obj:"Measure the pain instead of asserting it",owner:"Founder",out:"Incident frequency, workaround cost, named budget owners",ok:"Three say they would pilot",eng:false,cust:true,inv:true}
+ ]},
+ {id:"p2",title:"Days 31 to 60: customer validation",items:[
+  {id:"scans",t:"Free assurance scans of three prospects' agent codebases with ghost_tools and the mutation protocol",obj:"Open the door with the thing that works today",owner:"Founder",out:"Three findings reports",ok:"One confirmed vacuous check per prospect; one converts to a gate pilot",eng:true,cust:true,inv:true},
+  {id:"pilot1",t:"Run the thirty-day experiment with the first design partner: shadow mode week one, strict from week two, nominal fee paid before day one",obj:"Test pain, capability and willingness to pay at once",owner:"Founder + engineer",out:"Thirty days of receipts and refusals; one real event reconstructed from receipts alone",ok:"Fee paid; gate still in the path at day 30; at least one correct refusal; partner names a budget and a second agent",eng:true,cust:true,inv:true},
+  {id:"auditor",t:"Show one receipt to one external auditor or examiner",obj:"Test the governance-moat hypothesis",owner:"Founder",out:"Written reaction",ok:"They name the control the receipt would satisfy",eng:false,cust:true,inv:true}
+ ]},
+ {id:"p3",title:"Days 61 to 90: paid-pilot preparation",items:[
+  {id:"pilots23",t:"Second and third pilots, priced",obj:"Repeatability",owner:"Founder",out:"Two signed pilot agreements",ok:"Both pay before start",eng:false,cust:true,inv:true},
+  {id:"config",t:"Adapters as configuration for the two most common agent frameworks",obj:"Escape the consulting trap",owner:"Engineer",out:"Config-driven adapters",ok:"A new pilot integrates in under a week",eng:true,cust:false,inv:true},
+  {id:"pricing",t:"Propose the annual number to pilot one",obj:"Validate the pricing hypothesis",owner:"Founder",out:"Their reaction and counter",ok:"A number accepted in principle",eng:false,cust:true,inv:true},
+  {id:"memo",t:"Re-score the investor memo with the evidence ladder updated",obj:"Fundraise readiness",owner:"Founder",out:"Updated memo",ok:"At least three claims move up two levels",eng:false,cust:false,inv:true}
+ ]}
+];
+var DONT=["The pediatric sepsis engine","sentinel_os or GSA-815 beyond archiving or a dependency manifest","HERALD, TIE, innovation_os, ATS, ecology, GEMS, TOUCHSTONE","Any new chain stage","Any marketplace or data-monetization design","A new chain diagram"];
+var SHELL_START='<title>Gate to Pilot in 90 Days</title>\n';
+function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+function readState(){try{return JSON.parse(document.getElementById("state").textContent)||{items:{}}}catch(e){return {items:{}}}}
+var state=readState(); state.items=state.items||{};
+var total=PLAN.reduce(function(n,p){return n+p.items.length},0);
+var artifactNs=null, readOnly=false, pending=null;
+function count(){return Object.keys(state.items).filter(function(k){return state.items[k].done}).length}
+function fmt(ts){if(!ts)return"";var d=new Date(ts);return d.toISOString().slice(0,10)}
+function render(){
+ var done=count(), pct=Math.round(100*done/total);
+ var h='<div class="eyebrow">Company-building plan from the 2026-09-08 commercial red team</div><h1>Gate to Pilot in 90 Days</h1>'+
+ '<p class="lede">Twelve activities in three phases, ending with a paid pilot of the governed action gate in one real agent’s execution path. Ticking a box saves it for everyone who opens this page.</p>'+
+ '<div class="bar"><div><div class="n">'+done+' of '+total+'</div><div class="l">activities done</div><div class="track"><i style="width:'+pct+'%"></i></div></div>'+
+ '<div class="status">'+(state.updated?'last change '+esc(fmt(state.updated)):'no changes yet')+(readOnly?'<div class="ro">read-only view</div>':'')+'</div></div>';
+ PLAN.forEach(function(p){
+  var pd=p.items.filter(function(it){return state.items[it.id]&&state.items[it.id].done}).length;
+  h+='<h2>'+esc(p.title)+'<small>'+pd+' / '+p.items.length+'</small></h2>';
+  p.items.forEach(function(it){
+   var s=state.items[it.id]||{};
+   h+='<div class="item'+(s.done?' done':'')+'"><input type="checkbox" data-id="'+it.id+'"'+(s.done?' checked':'')+(readOnly?' disabled':'')+' aria-label="'+esc(it.t)+'">'+
+   '<div><div class="t">'+esc(it.t)+'</div><div class="meta"><div><b>Objective</b>'+esc(it.obj)+'</div><div><b>Owner</b>'+esc(it.owner)+'</div><div><b>Output</b>'+esc(it.out)+'</div><div><b>Success</b>'+esc(it.ok)+'</div></div>'+
+   '<div class="flags"><span class="f'+(it.eng?' on':'')+'">engineering</span><span class="f'+(it.cust?' on':'')+'">customer</span><span class="f'+(it.inv?' on':'')+'">investor evidence</span></div>'+
+   '<div class="note"><input type="text" data-note="'+it.id+'" placeholder="Note or evidence link" value="'+esc(s.note)+'"'+(readOnly?' disabled':'')+'><span class="when">'+(s.done&&s.at?'done '+esc(fmt(s.at)):'')+'</span></div></div></div>';
+  });
+ });
+ h+='<div class="dont"><h3>Not in these 90 days</h3><ul>'+DONT.map(function(d){return'<li>'+esc(d)+'</li>'}).join('')+'</ul></div>';
+ h+='<div class="foot">Source: docs/audit/COMMERCIAL_RED_TEAM_2026-09-08.md, Part 35, on observe-perceive main. The experiment in the middle phase is the one that decides whether to raise, pivot, or stop.</div>';
+ document.getElementById("root").innerHTML=h;
+}
+function buildDoc(){
+ var link=document.querySelector('link[rel="stylesheet"]'); var style=document.querySelector('style');
+ var app=document.getElementById("app").textContent.replace(/<\/script/g,'<\\/script');
+ return '<!doctype html>\n<html>\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n'+SHELL_START+
+  (link?link.outerHTML+'\n':'')+'<style>'+(style?style.textContent:'')+'</style>\n</head>\n<body>\n'+
+  '<script id="state" type="application/json">'+JSON.stringify(state).replace(/<\//g,'<\\/')+'<\/script>\n'+
+  '<main id="root"></main>\n<script id="app">'+app+'<\/script>\n</body>\n</html>\n';
+}
+function schedulePublish(){
+ if(pending)clearTimeout(pending);
+ pending=setTimeout(function(){pending=null;publish()},600);
+}
+function publish(){
+ if(!artifactNs||readOnly)return;
+ artifactNs.publish(buildDoc()).catch(function(err){
+  var code=err&&err.code;
+  if(code==="not_writer"||code==="not_granted"){readOnly=true;render();}
+  else if(code==="upstream_error"){setTimeout(function(){artifactNs.publish(buildDoc()).catch(function(){})},400+Math.random()*600);}
+  /* conflict: every view reloads to the winner; nothing to do */
+ });
+}
+document.getElementById("root").addEventListener("change",function(e){
+ var cb=e.target;
+ if(cb.matches('input[type=checkbox][data-id]')){
+  var id=cb.getAttribute("data-id"); var s=state.items[id]||(state.items[id]={});
+  s.done=cb.checked; s.at=cb.checked?Date.now():null; state.updated=Date.now(); render(); schedulePublish();
+ } else if(cb.matches('input[data-note]')){
+  var nid=cb.getAttribute("data-note"); var ns=state.items[nid]||(state.items[nid]={});
+  ns.note=cb.value.slice(0,300); state.updated=Date.now(); schedulePublish();
+ }
+});
+render();
+if(window.claude&&window.claude.use){
+ window.claude.use("artifact").then(function(ns){artifactNs=ns;if(!ns){readOnly=true;render();}});
+} else {readOnly=true;render();}
+})();
+</script>
