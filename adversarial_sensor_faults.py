@@ -217,7 +217,18 @@ class AdversarialSensorTestSuite:
 
         for hour, (hr, o2, rr, temp) in enumerate(case.vitals_sequence):
             vitals = VitalsSnapshot(
-                patient_id=f"FAULT_{case.name}_{hour}",
+                # ONE PATIENT, ONE IDENTITY, FOR THE WHOLE TIMELINE.
+                # This used to append the hour, which handed the engine a
+                # brand-new patient on every reading. Everything stateful
+                # then became untestable by construction: the Kalman
+                # trajectory tracker sat in warm-up on 100% of readings
+                # (measured: 0 of 10, 0 of 13, 0 of 8 across the three
+                # deterioration scenarios), and per-patient dwell and
+                # hysteresis never engaged. A trend detector handed a fresh
+                # patient each hour cannot detect a trend, and a stuck-sensor
+                # detector cannot notice that readings are not changing when
+                # no two readings belong to the same patient.
+                patient_id=f"FAULT_{case.name}",
                 timestamp=self.base_time + timedelta(hours=hour),
                 heart_rate=hr,
                 oxygen_saturation=o2,

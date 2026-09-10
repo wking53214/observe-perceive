@@ -720,6 +720,43 @@ class TestFusionAbstentionAndSyndrome(unittest.TestCase):
         self.assertIn("abstained", rationale)
         self.assertGreaterEqual(risk, 0.9)  # syndrome floor pins to detected severity
 
+    def test_abstainers_cannot_dilute_when_no_syndrome_floor_is_present(self):
+        """The one above passes with the abstention filter DELETED.
+
+        Its detection carries a DANGEROUS_PATTERN tag, so the syndrome floor
+        pins risk to 0.9 whether or not abstainers were excluded, and the
+        rationale names abstainers either way because that list is built from
+        every output rather than the fused subset. Found by mutation on
+        2026-09-10: removing `if not o.abstained` left all 87 tests green.
+
+        Here nothing else can hold the risk up. One real detection at 0.70
+        with three "no data" abstentions: excluded, fusion sees 0.70; included,
+        confidence-weighted averaging drags it to ~0.35 -- a critical child
+        reported as mid-caution.
+        """
+        outputs = [
+            self._ro("heuristic", 0.70, 0.9),
+            self._ro("trajectory", 0.0, 0.3, ["no data"], abstained=True),
+            self._ro("drift", 0.0, 0.3, ["no data"], abstained=True),
+            self._ro("physiological_reserve", 0.0, 0.3, ["no data"], abstained=True),
+        ]
+        risk, _, probs, rationale = BayesianFusion.fuse(outputs)
+        self.assertNotIn("syndrome floor", rationale)
+        self.assertAlmostEqual(risk, 0.70, places=6)
+        self.assertGreater(risk, 0.5)
+
+    def test_every_abstainer_falls_back_to_the_full_set(self):
+        """The degenerate case the source calls out: if ALL engines abstain
+        there is nothing to fuse over, so it falls back rather than dividing
+        by zero or silently reporting 0.0 as a real assessment."""
+        outputs = [
+            self._ro("trajectory", 0.4, 0.3, ["no data"], abstained=True),
+            self._ro("drift", 0.4, 0.3, ["no data"], abstained=True),
+        ]
+        risk, _, _, rationale = BayesianFusion.fuse(outputs)
+        self.assertAlmostEqual(risk, 0.4, places=6)
+        self.assertIn("abstained", rationale)
+
     def test_syndrome_floor_pins_risk(self):
         """A dangerous pattern at 0.9 cannot be averaged below 0.9."""
         outputs = [
