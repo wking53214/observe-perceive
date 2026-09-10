@@ -291,7 +291,6 @@ class TestTrajectoryIsGenericOverChannels(unittest.TestCase):
 
     def test_the_tracker_abstains_during_warmup_in_any_domain(self):
         from industrial_cassette import AssetReading
-        from datetime import timedelta
         base = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
         engine = self._engine()
         v = engine.evaluate(AssetReading("PUMP-W", base, 2.0, 55.0, 3.0))

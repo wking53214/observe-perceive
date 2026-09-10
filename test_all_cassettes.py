@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 
 from cassette import REQUIRED, conformance_failures, label
-from installed_cassettes import INSTALLED, MINIMUM_DOMAINS, InstalledCassette, verify_registry
+from installed_cassettes import INSTALLED, InstalledCassette, verify_registry
 from observe_consolidated import ObserveClinicalEngine
 
 IDS = [e.name for e in INSTALLED]
