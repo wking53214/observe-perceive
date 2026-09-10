@@ -1,22 +1,9 @@
 """Tests for the deterioration simulator (clinical validation)."""
 
-import os
 import unittest
 
+from clinical_gaps import known_gap as _known_gap
 from deterioration_simulator import DeteriorationSimulator, SCENARIOS
-
-
-def _known_gap(testcase, message):
-    """A known clinical detection gap.
-
-    By default it is recorded as a skip with the gap named, which is what the
-    suite has always done. That default hides five missed detections behind a
-    green run. Set OBSERVE_STRICT_CLINICAL=1 to fail on them instead -- for a
-    deployment gate, or to see the real detection record.
-    """
-    if os.environ.get("OBSERVE_STRICT_CLINICAL"):
-        testcase.fail(f"known clinical gap (OBSERVE_STRICT_CLINICAL set): {message}")
-    testcase.skipTest(message)
 
 
 class TestDeteriorationSimulator(unittest.TestCase):
@@ -52,15 +39,21 @@ class TestDeteriorationSimulator(unittest.TestCase):
             )
 
     def test_gradual_hypoxia_detection(self):
-        """Gradual hypoxia (FAIL case): detected but late (hour 11 vs expected 8±2).
-        Indicates drift detection needs improvement (Kalman can help).
+        """Gradual hypoxia (FAIL case): not detected at all.
+
+        This docstring used to read "detected but late (hour 11 vs expected
+        8±2)". Hour 11 was an artifact of the harness giving every reading a
+        new patient id; for one patient across one timeline the engine never
+        escalates. Corrected 2026-09-10 along with the identity fix -- a
+        missed detection recorded as a late one is the more dangerous of the
+        two errors to leave in a clinical record.
         """
         scenario = next(s for s in SCENARIOS if s.name == "gradual_hypoxia_child")
         result = self.sim.run_scenario(scenario)
         if not result.in_tolerance:
             _known_gap(
                 self,
-                f"Gradual hypoxia detection is late: {result.notes}. "
+                f"Gradual hypoxia not detected: {result.notes}. "
                 "Consider enabling Kalman trajectory for improved drift detection."
             )
 
