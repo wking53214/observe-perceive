@@ -50,3 +50,15 @@ explicitly and says so. Nothing swallows an exception into a success.
 - F8 and F15 are advisory by default and strict by flag. That is a design
   choice recorded in the handoff (`handoff.strict`), so a reader of any
   record can tell which regime produced it. DOCUMENT.
+
+## 1.3.0 additions
+
+| # | Boundary / failure | What happens | Action occurs? | Recorded as | Test |
+|---|---|---|---|---|---|
+| F10' | Receipt store unreachable before execution | Probe fails: REJECTED `refused_by="receipt_store"`, nothing issued. The old F10 row now applies only to a disk that fills between the probe and the write | No | REJECTED | test_authenticated_boundary: unreachable_receipt_store |
+| F20' | Same artifact in two processes sharing the ledger file | Second issuance refused by the execution ledger before the action | Once | REJECTED | test_authenticated_boundary: two_ledger_objects |
+| F23 | Ledger, receipt log or snapshot unsigned or signed by another key, opened with a key | Refuses to load (`LedgerAuthenticityError`, `RecordAuthenticityError`, `SnapshotAuthenticityError`) | n/a | refusal to load | test_authenticated_boundary, kernel test_signing |
+| F24 | Event time attestation invalid | Advisory: recorded in `temporal_anomalies`, executes. Strict: REJECTED `refused_by="source_attestation"` | profile-dependent | anomaly or REJECTED | test_authenticated_boundary: bad_attestation, strict_refuses |
+| F25 | PERCEIVE advised a violation | Advisory: recorded, executes. Strict: REJECTED `refused_by="perceive"` with PERCEIVE's finding | profile-dependent | REJECTED + advisory_violations | test_authenticated_boundary: strict_enforces |
+| F26 | PERCEIVE's persisted ledger tampered | Refuses to open (`AuditLedgerIntegrityError`) | n/a | refusal to load | test_authenticated_boundary: tampered_perceive_ledger |
+| F27 | Executor already guarded by the caller | Not wrapped twice; the caller's guard consumes, the orchestrator records it | Once | execution_authorization.guard | test_execution_guard |

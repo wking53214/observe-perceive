@@ -99,11 +99,24 @@ def test_the_orchestrator_refuses_to_reissue_an_execution_id(orchestrator):
     assert "already issued" in second["reason"] and ran2 == []
 
 
-def test_an_unguarded_executor_is_still_consumed_by_the_orchestrator(orchestrator):
+def test_the_orchestrator_guards_a_plain_executor_itself(orchestrator):
+    """1.3.0: the caller's plain callable is wrapped by the orchestrator, so
+    the guard's checks run and are recorded even when nobody wrapped it."""
     result, _ = run_chain(orchestrator, "g5", vitals=False)
     auth = result["execution_authorization"]
-    assert auth["consumed_by"] == "orchestrator" and auth["guard"] is None
+    assert auth["consumed_by"] == "orchestrator" and auth["guard"] is not None
+    assert [c["name"] for c in auth["guard"]["checks"]][:2] == ["context.has_approval", "context.commitment"] or auth["guard"]["checks"]
     assert orchestrator.execution_ledger.consumed("exec-g5")["consumer"] == "orchestrator"
+    # The authorization is recorded beside the result, not inside it.
+    assert "_authorization" not in result["gsa815_result"]
+
+
+def test_an_unguarded_executor_is_still_consumed_when_the_orchestrator_guard_is_off(perceive, kernel):
+    orchestrator = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), guard_executor=False)
+    result, _ = run_chain(orchestrator, "g5b", vitals=False)
+    auth = result["execution_authorization"]
+    assert auth["consumed_by"] == "orchestrator" and auth["guard"] is None
+    assert result["handoff"]["strict"]["guard_executor"] is False
     with pytest.raises(ExecutionRefusal, match="already consumed"):
         authorize_execution(result["execution_context"], orchestrator.execution_ledger)
 
