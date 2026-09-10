@@ -12,7 +12,7 @@ import itertools
 import unittest
 from datetime import datetime, timezone
 
-from cassette import Cassette, conformance_failures, require_cassette
+from cassette import REQUIRED, Cassette, conformance_failures, require_cassette
 from observe_consolidated import ObserveClinicalEngine, RiskOutput, VitalsSnapshot, regime_distribution
 from pediatric_cassette import HARD_RULE_ENGINE, HARD_RULE_RISK, PediatricCassette
 
@@ -33,13 +33,19 @@ class TestConformance(unittest.TestCase):
 
     def test_conformance_names_every_missing_piece_at_once(self):
         """A cassette that fails on its fourth evaluation is worse than one
-        rejected at load, so every problem is reported together."""
+        rejected at load, so every problem is reported together.
+
+        Derived from REQUIRED rather than a hardcoded count: adding a
+        question to the contract should not need this test edited, but a
+        checker that silently stopped reporting one still fails here.
+        """
         class Empty:
             pass
         problems = conformance_failures(Empty())
-        self.assertEqual(len(problems), 9)
-        self.assertTrue(any("subject_id" in p for p in problems))
-        self.assertTrue(any("hard_rule_fired" in p for p in problems))
+        named = {member for member in REQUIRED
+                 if any(repr(member) in p for p in problems)}
+        self.assertEqual(named, set(REQUIRED))
+        self.assertEqual(len(problems), len(REQUIRED))
 
     def test_a_non_callable_member_is_rejected(self):
         c = PediatricCassette()
@@ -205,3 +211,143 @@ class TestASecondIndustryRunsOnTheSameCore(unittest.TestCase):
         engine.evaluate(self._reading(asset_id="PUMP-B"))
         self.assertIn("PUMP-A", engine._patient_entropy)
         self.assertIn("PUMP-B", engine._patient_entropy)
+
+
+class TestTheTrustBoundaryIsDomainDriven(unittest.TestCase):
+    """What is physically impossible is a domain fact, so the sanitizer
+    must use the cassette's tables, not a clinical one."""
+
+    def test_pediatric_bounds_still_apply_by_default(self):
+        from observe_consolidated import sanitize_context
+        clean, notes = sanitize_context({"age_months": 12, "previous_o2": 200.0})
+        self.assertEqual(clean, {"age_months": 12})
+        self.assertTrue(any("previous_o2" in n for n in notes))
+
+    def test_an_industrial_cassette_gets_industrial_bounds(self):
+        """rpm 45000 is impossible for this machine class and must be
+        dropped; previous_o2 is meaningless here and must simply pass
+        through as an unrecognised key rather than being range-checked
+        against a child's oxygen saturation."""
+        from observe_consolidated import sanitize_context
+        from example_industrial_cassette import IndustrialCassette
+        cas = IndustrialCassette()
+        clean, notes = sanitize_context(
+            {"rpm": 45000.0, "ambient_temp_c": 22.0, "previous_o2": 200.0},
+            cas.context_bounds(), cas.context_list_bounds())
+        self.assertNotIn("rpm", clean)
+        self.assertEqual(clean["ambient_temp_c"], 22.0)
+        self.assertEqual(clean["previous_o2"], 200.0)
+        self.assertTrue(any("rpm" in n for n in notes))
+
+    def test_list_bounds_filter_elements_rather_than_dropping_the_key(self):
+        from observe_consolidated import sanitize_context
+        from example_industrial_cassette import IndustrialCassette
+        cas = IndustrialCassette()
+        clean, notes = sanitize_context(
+            {"recent_vibration": [2.0, -5.0, 3.0, float("inf")]},
+            cas.context_bounds(), cas.context_list_bounds())
+        self.assertEqual(clean["recent_vibration"], [2.0, 3.0])
+        self.assertTrue(any("filtered 2" in n for n in notes))
+
+    def test_the_engine_passes_its_own_cassettes_tables(self):
+        """End to end: an out-of-range rpm reaching the real engine is
+        dropped by the industrial bounds, which the core never knew."""
+        from example_industrial_cassette import AssetReading, IndustrialCassette
+        engine = ObserveClinicalEngine(cassette=IndustrialCassette())
+        obs = AssetReading("PUMP-Z", datetime.now(timezone.utc), 2.0, 50.0, 3.0,
+                           context={"rpm": 45000.0})
+        engine.evaluate(obs)  # must not raise, and must not trust the value
+
+
+class TestTrajectoryIsGenericOverChannels(unittest.TestCase):
+    """The Kalman tracker took four named vitals. It now takes whatever
+    channels a cassette declares -- three here, with different names,
+    different units and a different bad direction."""
+
+    def _engine(self):
+        from example_industrial_cassette import IndustrialCassette
+        return ObserveClinicalEngine(cassette=IndustrialCassette(), enable_kalman=True)
+
+    def test_a_degrading_bearing_is_caught_before_it_crosses_the_hard_rule(self):
+        """Vibration climbing 0.9 mm/s per hour is caught at 4.7 mm/s --
+        below the ISO 10816 unacceptable line of 7.1. That is the whole
+        point of a trajectory: the trend arrives before the threshold."""
+        from example_industrial_cassette import AssetReading
+        from datetime import timedelta
+        base = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+        engine = self._engine()
+        velocity_seen = []
+        for i in range(6):
+            v = engine.evaluate(AssetReading(
+                "PUMP-K", base + timedelta(hours=i),
+                vibration_mm_s=2.0 + i * 0.9,
+                bearing_temp_c=55.0 + i * 3.0,
+                oil_pressure_bar=3.0 - i * 0.35))
+            velocity_seen += [r for r in v.triggered_rules
+                              if "KALMAN_VELOCITY: vibration_mm_s" in r]
+            if i == 3:
+                self.assertLess(2.0 + i * 0.9, 7.1, "must still be under the hard rule")
+                self.assertTrue(velocity_seen, "trend should be reported before the threshold")
+
+    def test_the_tracker_abstains_during_warmup_in_any_domain(self):
+        from example_industrial_cassette import AssetReading
+        from datetime import timedelta
+        base = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+        engine = self._engine()
+        v = engine.evaluate(AssetReading("PUMP-W", base, 2.0, 55.0, 3.0))
+        self.assertTrue(any("warming up" in r for r in v.triggered_rules))
+
+    def test_a_reading_missing_a_declared_channel_is_refused_loudly(self):
+        """channels() and channel_model() must agree. Silently tracking
+        three of four channels would degrade the filter invisibly."""
+        from kalman_trajectory import PatientKalmanTracker
+        tr = PatientKalmanTracker()
+        with self.assertRaises(KeyError) as ctx:
+            tr.update(values={"heart_rate": 100.0}, timestamp=datetime.now(timezone.utc))
+        self.assertIn("must agree", str(ctx.exception))
+
+    def test_the_pediatric_model_is_derived_not_restated(self):
+        """The neutral model is built FROM the original tables, so the
+        clinical numbers cannot drift away from the ones in use."""
+        from kalman_trajectory import _CHANNEL_TUNING, _VELOCITY_RULES, _PEDIATRIC_CHANNEL_MODEL
+        self.assertEqual(set(_PEDIATRIC_CHANNEL_MODEL), set(_CHANNEL_TUNING))
+        m = _PEDIATRIC_CHANNEL_MODEL["oxygen_saturation"]
+        self.assertEqual(m.measurement_noise, _CHANNEL_TUNING["oxygen_saturation"]["r"])
+        self.assertEqual(m.adverse_direction, _VELOCITY_RULES["oxygen_saturation"][0])
+
+
+class TestTheDomainOwnsItsVocabulary(unittest.TestCase):
+    """Audit labels go into an append-only, hash-chained ledger. A refactor
+    does not get to rename a governed vocabulary, and a second domain does
+    not get to inherit the first one's words."""
+
+    def test_the_clinical_ledger_vocabulary_is_unchanged(self):
+        """Byte-identical to what the ledger already contains. If this
+        fails, historical entries have become unmatchable."""
+        from pediatric_cassette import PediatricCassette
+        labels = PediatricCassette().labels()
+        self.assertEqual(labels["record_kind"], "clinical_assessment")
+        self.assertEqual(labels["safety_bypass"], "CLINICAL_SAFETY_BYPASS")
+
+    def test_the_clinical_engine_still_emits_its_own_words(self):
+        engine = ObserveClinicalEngine()
+        v = engine.evaluate(_v(oxygen_saturation=85.0, heart_rate=155,
+                               context={"age_months": 24, "force_heavy": True}))
+        self.assertTrue(any("CLINICAL_SAFETY_BYPASS" in r for r in v.triggered_rules))
+
+    def test_another_domain_gets_its_own_words(self):
+        from example_industrial_cassette import AssetReading, IndustrialCassette
+        engine = ObserveClinicalEngine(cassette=IndustrialCassette())
+        v = engine.evaluate(AssetReading("PUMP-1", datetime.now(timezone.utc), 9.4, 98.0, 0.6))
+        self.assertTrue(any("EQUIPMENT_SAFETY_BYPASS" in r for r in v.triggered_rules))
+        self.assertFalse(any("CLINICAL" in r for r in v.triggered_rules))
+
+    def test_a_domain_that_says_nothing_gets_neutral_words(self):
+        """A cassette with no opinion must not inherit pediatrics."""
+        from cassette import DEFAULT_LABELS, label
+        class Quiet:
+            def labels(self):
+                return {}
+        self.assertEqual(label(Quiet(), "safety_bypass"), "SAFETY_BYPASS")
+        self.assertEqual(label(Quiet(), "record_kind"), "assessment")
+        self.assertNotIn("CLINICAL", " ".join(DEFAULT_LABELS.values()))

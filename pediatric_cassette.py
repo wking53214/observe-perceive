@@ -13,7 +13,11 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+from cassette import ChannelModel
+from kalman_trajectory import _PEDIATRIC_CHANNEL_MODEL
+
 from observe_consolidated import (
+    _NUMERIC_CONTEXT_LIST_BOUNDS,
     _NUMERIC_CONTEXT_SCALAR_BOUNDS,
     _has_physiological_telemetry,
     ObserveClinicalEngine,
@@ -50,6 +54,9 @@ class PediatricCassette:
 
     def context_bounds(self) -> Mapping[str, Optional[Tuple[float, float]]]:
         return _NUMERIC_CONTEXT_SCALAR_BOUNDS
+
+    def context_list_bounds(self) -> Mapping[str, Optional[Tuple[float, float]]]:
+        return _NUMERIC_CONTEXT_LIST_BOUNDS
 
     # -- what to run ---------------------------------------------------
     def select_engines(self, obs: Any, recent_entropy: float) -> List[str]:
@@ -101,6 +108,22 @@ class PediatricCassette:
             if out.engine_name == HARD_RULE_ENGINE:
                 return out.risk_score >= HARD_RULE_RISK
         return False
+
+    def labels(self) -> Mapping[str, str]:
+        """The exact strings this domain's ledger already contains.
+
+        Not modernised. The audit ledger is append-only and hash-chained,
+        so renaming a record kind would leave historical entries
+        unmatchable by any query written against the new one. A refactor
+        does not get to rewrite a governed vocabulary.
+        """
+        return {"record_kind": "clinical_assessment",
+                "safety_bypass": "CLINICAL_SAFETY_BYPASS"}
+
+    def channel_model(self) -> Mapping[str, ChannelModel]:
+        """Reused, not restated: the same table the tracker has always
+        used, so the numbers cannot drift apart from the clinical ones."""
+        return _PEDIATRIC_CHANNEL_MODEL
 
     # -- trajectory ------------------------------------------------------
     def channels(self, obs: Any) -> Dict[str, float]:

@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+from cassette import ChannelModel
 from observe_consolidated import RiskOutput, regime_distribution
 
 #: ISO 10816-3 zone boundary for medium machines: above this a machine is
@@ -114,6 +115,9 @@ class IndustrialCassette:
     def context_bounds(self) -> Mapping[str, Optional[Tuple[float, float]]]:
         return {"ambient_temp_c": (-50.0, 80.0), "rpm": (0.0, 30000.0)}
 
+    def context_list_bounds(self) -> Mapping[str, Optional[Tuple[float, float]]]:
+        return {"recent_vibration": (0.0, 100.0)}
+
     def select_engines(self, obs: AssetReading, recent_entropy: float) -> List[str]:
         engines = [HARD_RULE_ENGINE, "thermal"]
         if recent_entropy > 0.6 or obs.context.get("recent_vibration"):
@@ -129,6 +133,23 @@ class IndustrialCassette:
             if out.engine_name == HARD_RULE_ENGINE:
                 return out.risk_score >= HARD_RULE_RISK
         return False
+
+    def labels(self) -> Mapping[str, str]:
+        return {"record_kind": "asset_assessment",
+                "safety_bypass": "EQUIPMENT_SAFETY_BYPASS"}
+
+    def channel_model(self) -> Mapping[str, ChannelModel]:
+        """This domain's instruments. Vibration rising is bad; oil pressure
+        FALLING is bad; bearing temperature is slow-moving and quiet, so it
+        gets far less process noise than a heart rate would."""
+        return {
+            "vibration_mm_s": ChannelModel(0.3, 0.03, 1.0,
+                                           adverse_direction=+1, adverse_rate=0.5, weight=0.25),
+            "bearing_temp_c": ChannelModel(0.05, 0.005, 0.2,
+                                           adverse_direction=+1, adverse_rate=2.0, weight=0.20),
+            "oil_pressure_bar": ChannelModel(0.05, 0.005, 0.1,
+                                             adverse_direction=-1, adverse_rate=0.3, weight=0.25),
+        }
 
     def channels(self, obs: AssetReading) -> Dict[str, float]:
         return {"vibration_mm_s": obs.vibration_mm_s,

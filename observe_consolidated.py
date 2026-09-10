@@ -28,10 +28,11 @@ from collections import OrderedDict
 from dataclasses import dataclass, field, asdict, replace
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Optional, Any, Callable, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 from uuid import uuid4
 import copy
 
+from cassette import label as cassette_label
 from kalman_trajectory import PatientKalmanTracker
 
 logger = logging.getLogger("OBSERVE")
@@ -185,7 +186,11 @@ def _finite_number(x: Any) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
 
 
-def sanitize_context(context: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+def sanitize_context(
+    context: Dict[str, Any],
+    scalar_bounds: Optional[Mapping[str, Optional[Tuple[float, float]]]] = None,
+    list_bounds: Optional[Mapping[str, Optional[Tuple[float, float]]]] = None,
+) -> Tuple[Dict[str, Any], List[str]]:
     """Return a cleaned copy of `context` plus a list of notes about what was
     dropped or coerced.
 
@@ -200,26 +205,34 @@ def sanitize_context(context: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]
     A dropped value makes the engine treat that signal as absent, which it
     already handles, rather than crashing or trusting garbage.
     """
+    # WHAT IS PHYSICALLY IMPOSSIBLE IS DOMAIN KNOWLEDGE. The tables default
+    # to the pediatric ones so every existing caller is unchanged, but the
+    # engine now passes its cassette's. A plant's rpm and a child's heart
+    # rate have nothing to say to each other.
+    if scalar_bounds is None:
+        scalar_bounds = _NUMERIC_CONTEXT_SCALAR_BOUNDS
+    if list_bounds is None:
+        list_bounds = _NUMERIC_CONTEXT_LIST_BOUNDS
     if not isinstance(context, dict):
         return {}, [f"context was {type(context).__name__}, not a dict; replaced with empty"]
 
     cleaned: Dict[str, Any] = {}
     notes: List[str] = []
     for key, val in context.items():
-        if key in _NUMERIC_CONTEXT_SCALAR_BOUNDS:
+        if key in scalar_bounds:
             if not _finite_number(val):
                 notes.append(f"dropped non-numeric context['{key}']={val!r}")
                 continue
-            bounds = _NUMERIC_CONTEXT_SCALAR_BOUNDS[key]
+            bounds = scalar_bounds[key]
             if bounds is not None and not (bounds[0] <= val <= bounds[1]):
                 notes.append(f"dropped out-of-range context['{key}']={val} (bounds {bounds})")
                 continue
             cleaned[key] = val
-        elif key in _NUMERIC_CONTEXT_LIST_BOUNDS:
+        elif key in list_bounds:
             if not isinstance(val, (list, tuple)):
                 notes.append(f"dropped non-list context['{key}']={val!r}")
                 continue
-            bounds = _NUMERIC_CONTEXT_LIST_BOUNDS[key]
+            bounds = list_bounds[key]
             good = [
                 x for x in val
                 if _finite_number(x) and (bounds is None or bounds[0] <= x <= bounds[1])
@@ -1181,7 +1194,8 @@ class ObserveClinicalEngine:
     def _get_kalman(self, patient_id: str) -> "PatientKalmanTracker":
         with self._state_lock:
             if patient_id not in self._patient_kalman:
-                self._patient_kalman[patient_id] = PatientKalmanTracker()
+                self._patient_kalman[patient_id] = PatientKalmanTracker(
+                    self._cassette.channel_model())
             self._patient_kalman.move_to_end(patient_id)
             while len(self._patient_kalman) > self._max_tracked_patients:
                 self._patient_kalman.popitem(last=False)  # drop LRU
@@ -1232,7 +1246,11 @@ class ObserveClinicalEngine:
         # scoring; an out-of-range value subtly skewed it. Sanitize at this
         # boundary so every engine downstream sees only clean numeric context.
         # Dropped values are treated as absent, which the engines already handle.
-        cleaned_context, _context_notes = sanitize_context(vitals.context)
+        cleaned_context, _context_notes = sanitize_context(
+            vitals.context,
+            self._cassette.context_bounds(),
+            self._cassette.context_list_bounds(),
+        )
         if cleaned_context is not vitals.context:
             vitals = replace(vitals, context=cleaned_context)
 
@@ -1244,8 +1262,7 @@ class ObserveClinicalEngine:
         # enabled. Deterministic per patient (sequence-dependent). Abstains during warm-up.
         if self._enable_kalman:
             kr = self._get_kalman(subject).update(
-                vitals.heart_rate, vitals.oxygen_saturation,
-                vitals.respiratory_rate, vitals.temperature, vitals.timestamp,
+                values=self._cassette.channels(vitals), timestamp=vitals.timestamp,
             )
             outputs.append(RiskOutput(
                 "trajectory_kalman", kr["score"], kr["confidence"],
@@ -1291,7 +1308,8 @@ class ObserveClinicalEngine:
                 policy.escalation_locked = True
                 policy.last_escalation_time = vitals.timestamp
             reason = "hard-rule" if hard_rule_fired else "dangerous-syndrome"
-            all_triggered_bypass_note = [f"CLINICAL_SAFETY_BYPASS: {reason} trigger skipped dwell confirmation"]
+            bypass_label = cassette_label(self._cassette, "safety_bypass")
+            all_triggered_bypass_note = [f"{bypass_label}: {reason} trigger skipped dwell confirmation"]
         else:
             final_regime, escalation = policy.evaluate(candidate_regime, vitals.timestamp)
             all_triggered_bypass_note = []
@@ -1321,7 +1339,7 @@ class ObserveClinicalEngine:
         )
 
         audit_hash = self.audit_ledger.append(
-            subject, "clinical_assessment",
+            subject, cassette_label(self._cassette, "record_kind"),
             {**decision_data, "decision_fingerprint": fingerprint},
         )
         verdict.audit_hash = audit_hash
@@ -1348,7 +1366,8 @@ class ObserveClinicalEngine:
             policy.escalation_locked = True
             policy.last_escalation_time = vitals.timestamp
 
-        triggered = ["CLINICAL_SAFETY_BYPASS: data-integrity fault skipped scoring"]
+        triggered = [f'{cassette_label(self._cassette, "safety_bypass")}: '
+                     "data-integrity fault skipped scoring"]
         triggered += [f"DATA_INTEGRITY_FAULT: {f}" for f in faults]
 
         decision_data = {
@@ -1360,7 +1379,7 @@ class ObserveClinicalEngine:
         }
         fingerprint = decision_fingerprint(decision_data)
         audit_hash = self.audit_ledger.append(
-            subject, "clinical_assessment",
+            subject, cassette_label(self._cassette, "record_kind"),
             {**decision_data, "decision_fingerprint": fingerprint},
         )
         logger.warning(f"DATA_INTEGRITY_FAULT: subject={subject} faults={faults}")
