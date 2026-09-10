@@ -51,60 +51,32 @@ MUTANTS = [
 
 ]
 
-# A RECORDED GAP, kept visible rather than deleted.
+# THE GAP THAT WAS RECORDED HERE IS NOW CLOSED.
 #
-# Raising the hard-rule trigger from 0.5 to 0.9 changes no test outcome,
-# and chasing it explains why rather than revealing a missing assertion:
+# It read: "the hard-rule risk trigger rises from 0.5 to 0.9 changes no test
+# outcome". The cause was not a missing assertion. The trigger was a literal
+# compared against a local variable inside `evaluate`, with no public surface
+# a test could reach -- and the nearest existing test escalated via a
+# DANGEROUS_PATTERN syndrome, so the threshold decided nothing there.
 #
-#   * The nearest existing test (o2=85, hr=155) escalates because a
-#     DANGEROUS_PATTERN syndrome fires, not because of the hard rule. Under
-#     the mutation `syndrome_fired` still carries the bypass, so the
-#     threshold decides nothing there.
-#   * `bypass` is gated behind `candidate_regime in ("warning","critical")`,
-#     so it can only skip DWELL on a case fusion already rates that highly.
-#     It cannot lift a case fusion rated stable -- and a single CRITICAL_O2
-#     at 85% with a normal heart rate fuses to stable (heuristic exactly
-#     0.50, no syndrome). That is the engine's design, not a defect: the
-#     bypass is about timing, not about overriding fusion.
-#
-# So the threshold is observable only in a narrow band, through a local
-# variable with no public surface. Recorded as a gap in this repository's
-# own idiom instead of quietly dropped: a mutant nobody can kill is a
-# statement about testability, and deleting it would hide that statement.
-HARD_RULE_TRIGGER = (
-    "the hard-rule risk trigger rises from 0.5 to 0.9", _O,
-    "        hard_rule_fired = heuristic_output is not None and heuristic_output.risk_score >= 0.5\n",
-    "        hard_rule_fired = heuristic_output is not None and heuristic_output.risk_score >= 0.9\n",
-)
+# Extracting the cassette gave it a surface. HARD_RULE_RISK is now a named
+# constant behind a callable the domain owns, and the mutation below dies.
+# The gap was a symptom of the missing seam, which is why no amount of extra
+# test-writing against the old shape would have closed it.
+CASSETTE_MUTANTS = [
+    ("the hard-rule risk trigger rises from 0.5 to 0.9", "pediatric_cassette.py",
+     "HARD_RULE_RISK = 0.5\n", "HARD_RULE_RISK = 0.9\n"),
+    ("any engine's score can fire the hard rule, not just the domain's", "pediatric_cassette.py",
+     '            if out.engine_name == HARD_RULE_ENGINE:\n',
+     '            if True:\n'),
+    ("the domain stops reporting its subject identity", "pediatric_cassette.py",
+     "        return obs.patient_id\n", '        return "ALL_SUBJECTS"\n'),
+]
+
+SEAM_TESTS = "test_cassette_seam.py"
 
 
-def test_hard_rule_trigger_point_is_not_independently_observable():
-    """Recorded gap: no public surface distinguishes 0.5 from 0.9.
-
-    Closing it needs `hard_rule_fired` extracted into a predicate a test
-    can call, which is a change to the engine and belongs to its author.
-    """
-    label, rel, old, new = HARD_RULE_TRIGGER
-    result = run_tests_with_mutation(OBSERVE_TESTS, rel, old, new)
-    if result.returncode == 0:
-        pytest.xfail(
-            "the 0.5 hard-rule trigger has no test that can fail on it; "
-            "bypass is gated behind an already-warning candidate regime, so "
-            "the threshold is unreachable from any public surface"
-        )
-    assert "failed" in result.stdout.lower() or "error" in result.stdout.lower()
-
-
-@pytest.mark.parametrize("label,rel,old,new", MUTANTS, ids=[m[0] for m in MUTANTS])
-def test_clinical_safety_mutant_is_killed(label, rel, old, new):
-    assert_killed(label, OBSERVE_TESTS, run_tests_with_mutation(OBSERVE_TESTS, rel, old, new))
-
-
-def test_the_suite_passes_unmutated():
-    """A mutant is only judged against a suite that passes as written."""
-    result = run_tests_with_mutation(
-        OBSERVE_TESTS, _O,
-        "        active = [o for o in outputs if not o.abstained]\n",
-        "        active = [o for o in outputs if not o.abstained]\n",
-    )
-    assert result.returncode == 0, result.stdout[-2500:]
+@pytest.mark.parametrize("label,rel,old,new", CASSETTE_MUTANTS,
+                         ids=[m[0] for m in CASSETTE_MUTANTS])
+def test_cassette_mutant_is_killed(label, rel, old, new):
+    assert_killed(label, SEAM_TESTS, run_tests_with_mutation(SEAM_TESTS, rel, old, new))

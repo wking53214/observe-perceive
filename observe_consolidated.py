@@ -1137,7 +1137,16 @@ class ObserveClinicalEngine:
         "physiological_reserve": RiskAdaptersPhysiological.physiological_reserve,
     }
 
-    def __init__(self, max_tracked_patients: int = 10000, enable_kalman: bool = False):
+    def __init__(self, max_tracked_patients: int = 10000, enable_kalman: bool = False,
+                 cassette=None):
+        # Deferred import: the cassette imports this module for the engine
+        # table it wraps, so binding it at module scope would be circular.
+        # Defaulting here keeps every existing caller working unchanged while
+        # making the domain replaceable by argument.
+        if cassette is None:
+            from pediatric_cassette import PediatricCassette
+            cassette = PediatricCassette()
+        self._cassette = cassette
         self.audit_ledger = ImmutableAuditLedger()
         self.scheduler = AsyncJobScheduler(num_workers=2)
         self.provisional_store = ProvisionalStore()
@@ -1195,52 +1204,26 @@ class ObserveClinicalEngine:
         return self._patient_policies[patient_id]
 
     def select_engines(self, vitals: VitalsSnapshot) -> List[str]:
-        """Deterministic engine selection based on entropy + explicit triggers."""
-        engines = ["heuristic"]
+        """Which engines to run. The rule is the DOMAIN's, not the core's.
 
-        recent_entropy = self._patient_entropy.get(vitals.patient_id, 0.0)
-        if recent_entropy > 0.6 or vitals.context.get("force_heavy"):
-            engines += ["bayesian", "trajectory", "drift"]
-
-        if "previous_o2" in vitals.context or "previous_hr" in vitals.context:
-            if "trajectory" not in engines:
-                engines.append("trajectory")
-
-        if vitals.context.get("recent_o2_readings"):
-            engines.append("adversarial")
-
-        # FIX(WS2e / red-team R3): behavioral/syndrome analysis must run whenever ANY
-        # syndrome could fire, not only on O2/HR. Septic shock keys on RR>35 + fever;
-        # respiratory distress on RR>45. A child with severe tachypnea + high fever but
-        # borderline O2/HR was previously assessed by the heuristic engine ALONE and never
-        # checked for syndromes. Thresholds match the lowest syndrome cutoffs.
-        # PROVISIONAL — pending pediatrician sign-off (see "intentionally not changed").
-        if (vitals.oxygen_saturation < 92.0 or vitals.heart_rate > 140 or vitals.heart_rate < 90
-                or vitals.respiratory_rate > 35 or vitals.temperature > 38.5):
-            engines.append("behavioral")
-
-        # physiological_reserve runs on the heavy path or when richer telemetry is present
-        if recent_entropy > 0.6 or vitals.context.get("force_heavy") or _has_physiological_telemetry(vitals):
-            engines.append("physiological_reserve")
-
-        seen = set()
-        ordered = []
-        for e in engines:
-            if e not in seen:
-                seen.add(e)
-                ordered.append(e)
-        return ordered
+        Kept as a method because callers and tests use it, but the body now
+        lives in the cassette. Verified equal to the original across a swept
+        input space before the move (test_cassette_seam.py).
+        """
+        entropy = self._patient_entropy.get(self._cassette.subject_id(vitals), 0.0)
+        return self._cassette.select_engines(vitals, entropy)
 
     def evaluate(self, vitals: VitalsSnapshot) -> FusedVerdict:
         """Fast synchronous evaluation: validate → select → run → fuse → policy → audit."""
 
-        policy = self._get_policy(vitals.patient_id)
+        subject = self._cassette.subject_id(vitals)
+        policy = self._get_policy(subject)
 
         # DATA-INTEGRITY GATE (FIX, red-team R1/R2): a non-finite or physically
         # impossible reading is a sensor/data fault, not a clinical state. It must
         # NEVER be scored as 'stable'. Surface it as an immediate WARNING escalation
         # so a human checks the patient/sensor. Deterministic on the (invalid) inputs.
-        faults = validate_vitals(vitals)
+        faults = self._cassette.validate(vitals)
         if faults:
             return self._fault_verdict(vitals, policy, faults)
 
@@ -1254,12 +1237,13 @@ class ObserveClinicalEngine:
             vitals = replace(vitals, context=cleaned_context)
 
         selected = self.select_engines(vitals)
-        outputs = [self.ENGINE_MAP[name](vitals) for name in selected]
+        engines = self._cassette.engines()
+        outputs = [engines[name](vitals) for name in selected]
 
         # OPTIONAL (new learning): stateful Kalman trajectory adapter joins fusion when
         # enabled. Deterministic per patient (sequence-dependent). Abstains during warm-up.
         if self._enable_kalman:
-            kr = self._get_kalman(vitals.patient_id).update(
+            kr = self._get_kalman(subject).update(
                 vitals.heart_rate, vitals.oxygen_saturation,
                 vitals.respiratory_rate, vitals.temperature, vitals.timestamp,
             )
@@ -1272,7 +1256,7 @@ class ObserveClinicalEngine:
 
         fused_risk, entropy, regime_probs, rationale = BayesianFusion.fuse(outputs)
         with self._state_lock:
-            self._patient_entropy[vitals.patient_id] = entropy
+            self._patient_entropy[subject] = entropy
 
         max_regime_name = max(regime_probs, key=regime_probs.get)
         candidate_regime = OperationalRegime(max_regime_name)
@@ -1284,8 +1268,13 @@ class ObserveClinicalEngine:
         # Dwell exists to damp noise-driven thrashing on borderline multi-engine
         # disagreement — but neither a CRITICAL_O2 reading nor a named shock syndrome
         # is noise. Both demand immediate escalation, not a second confirming reading.
-        heuristic_output = next((o for o in outputs if o.engine_name == "heuristic"), None)
-        hard_rule_fired = heuristic_output is not None and heuristic_output.risk_score >= 0.5
+        # WHAT IS NEVER NOISE IS THE DOMAIN'S CALL, NOT THE CORE'S. This was a
+        # literal 0.5 against an engine named "heuristic" -- both facts about
+        # pediatrics, sitting in the core. Worse, it was a local variable, so
+        # no test could put a value into it: mutation on 2026-09-10 showed the
+        # trigger could move 0.5 -> 0.9 with the whole suite still green.
+        # As a cassette method it is callable, and covered in test_cassette_seam.
+        hard_rule_fired = self._cassette.hard_rule_fired(outputs)
         syndrome_fired = any(
             "DANGEROUS_PATTERN:" in r
             for o in outputs for r in o.triggered_rules
@@ -1332,13 +1321,13 @@ class ObserveClinicalEngine:
         )
 
         audit_hash = self.audit_ledger.append(
-            vitals.patient_id, "clinical_assessment",
+            subject, "clinical_assessment",
             {**decision_data, "decision_fingerprint": fingerprint},
         )
         verdict.audit_hash = audit_hash
 
         if escalation:
-            logger.info(f"ESCALATION: patient={vitals.patient_id} regime={final_regime.value} risk={fused_risk:.2f}")
+            logger.info(f"ESCALATION: subject={subject} regime={final_regime.value} risk={fused_risk:.2f}")
 
         return verdict
 
@@ -1350,6 +1339,7 @@ class ObserveClinicalEngine:
         default for a pediatric early-warning system; a quieter sensor-fault channel is
         advisable in production (configurable — see README).
         """
+        subject = self._cassette.subject_id(vitals)
         escalation = policy.current_regime.value in ("stable", "caution")
         policy.current_regime = OperationalRegime.WARNING
         policy.pending_regime = None
@@ -1370,10 +1360,10 @@ class ObserveClinicalEngine:
         }
         fingerprint = decision_fingerprint(decision_data)
         audit_hash = self.audit_ledger.append(
-            vitals.patient_id, "clinical_assessment",
+            subject, "clinical_assessment",
             {**decision_data, "decision_fingerprint": fingerprint},
         )
-        logger.warning(f"DATA_INTEGRITY_FAULT: patient={vitals.patient_id} faults={faults}")
+        logger.warning(f"DATA_INTEGRITY_FAULT: subject={subject} faults={faults}")
         return FusedVerdict(
             risk_score=0.0, regime=OperationalRegime.WARNING, confidence=0.0, entropy=0.0,
             active_engines=[], triggered_rules=triggered, timestamp=datetime.now(timezone.utc),
