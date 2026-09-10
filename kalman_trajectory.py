@@ -37,7 +37,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
+
+from cassette import ChannelModel
 
 
 # Per-channel Kalman tuning: (process noise position, process noise velocity,
@@ -60,6 +62,23 @@ _VELOCITY_RULES = {
 
 _WARMUP_UPDATES = 2          # suppress scoring until this many updates seen
 _MAX_DT_HOURS = 24.0         # clamp implausibly large gaps (avoids variance blow-up)
+
+
+#: The pediatric domain expressed in the neutral ChannelModel shape, built
+#: FROM the two tables above rather than restated, so the numbers cannot
+#: drift apart. A cassette supplies its own; this stays the default so
+#: every existing caller keeps the behaviour it had.
+_PEDIATRIC_CHANNEL_MODEL: Dict[str, ChannelModel] = {
+    name: ChannelModel(
+        process_noise_position=tuning["q_p"],
+        process_noise_velocity=tuning["q_v"],
+        measurement_noise=tuning["r"],
+        adverse_direction=_VELOCITY_RULES.get(name, (0, 0.0, 0.0))[0],
+        adverse_rate=_VELOCITY_RULES.get(name, (0, 0.0, 0.0))[1],
+        weight=_VELOCITY_RULES.get(name, (0, 0.0, 0.0))[2],
+    )
+    for name, tuning in _CHANNEL_TUNING.items()
+}
 
 
 @dataclass
@@ -121,18 +140,52 @@ class PatientKalmanTracker:
     Deterministic: identical (value, timestamp) sequences yield identical outputs.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, channel_model: Optional[Mapping[str, "ChannelModel"]] = None) -> None:
+        """Generic over however many channels a domain declares.
+
+        `channel_model` defaults to the pediatric tables so existing callers
+        are unchanged. Pass a cassette's model and the same filter tracks
+        vibration, bearing temperature and oil pressure with no change here:
+        the maths never knew what it was measuring.
+        """
+        if channel_model is None:
+            channel_model = _PEDIATRIC_CHANNEL_MODEL
+        self._model: Mapping[str, "ChannelModel"] = channel_model
         self._channels: Dict[str, _KalmanChannel] = {
-            name: _KalmanChannel(**_CHANNEL_TUNING[name]) for name in _CHANNEL_TUNING
+            name: _KalmanChannel(q_p=m.process_noise_position,
+                                 q_v=m.process_noise_velocity,
+                                 r=m.measurement_noise)
+            for name, m in channel_model.items()
         }
         self._last_ts: Optional[datetime] = None
         self._n_updates = 0
         self._surprise_window: List[float] = []  # recent mean-innovation z-scores
 
-    def update(self, heart_rate: float, oxygen_saturation: float,
-               respiratory_rate: float, temperature: float,
-               timestamp: datetime) -> Dict[str, object]:
-        """Process one reading; return {score, confidence, triggered, abstained, details}."""
+    def update(self, heart_rate=None, oxygen_saturation=None,
+               respiratory_rate=None, temperature=None,
+               timestamp: Optional[datetime] = None,
+               values: Optional[Mapping[str, float]] = None) -> Dict[str, object]:
+        """Process one reading; return {score, confidence, triggered, abstained, details}.
+
+        Two call shapes. `update(values={...}, timestamp=...)` is the general
+        one, and what the engine now uses via a cassette's channels(). The
+        four positional vitals are kept because the existing clinical tests
+        and callers use them, and a signature change there would have made
+        this a rewrite rather than a generalisation.
+        """
+        if values is None:
+            values = {
+                "heart_rate": heart_rate,
+                "oxygen_saturation": oxygen_saturation,
+                "respiratory_rate": respiratory_rate,
+                "temperature": temperature,
+            }
+        missing = [n for n in self._channels if n not in values]
+        if missing:
+            raise KeyError(
+                f"channel(s) {missing} declared by the model but absent from the "
+                f"reading; channels() and channel_model() must agree"
+            )
         # Derive dt (hours) from the previous reading; clamp implausible gaps.
         if self._last_ts is None:
             dt = 1.0
@@ -142,13 +195,6 @@ class PatientKalmanTracker:
                 dt = 1.0
             dt = min(dt, _MAX_DT_HOURS)
         self._last_ts = timestamp
-
-        values = {
-            "heart_rate": heart_rate,
-            "oxygen_saturation": oxygen_saturation,
-            "respiratory_rate": respiratory_rate,
-            "temperature": temperature,
-        }
 
         triggered: List[str] = []
         score = 0.0
@@ -166,8 +212,10 @@ class PatientKalmanTracker:
                 continue
 
             # Signal 1: sustained velocity (PROVISIONAL thresholds).
-            if name in _VELOCITY_RULES:
-                direction, mag, weight = _VELOCITY_RULES[name]
+            model = self._model.get(name)
+            if model is not None and model.adverse_direction:
+                direction, mag, weight = (model.adverse_direction, model.adverse_rate,
+                                          model.weight)
                 if (direction < 0 and ch.v <= -mag) or (direction > 0 and ch.v >= mag):
                     triggered.append(f"KALMAN_VELOCITY: {name} {ch.v:+.2f}/h (provisional)")
                     score += weight
