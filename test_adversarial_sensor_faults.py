@@ -1,22 +1,9 @@
 """Tests for the adversarial sensor-fault suite (robustness validation)."""
 
-import os
 import unittest
 
 from adversarial_sensor_faults import AdversarialSensorTestSuite, FAULT_CASES
-
-
-def _known_gap(testcase, message):
-    """A known clinical detection gap.
-
-    By default it is recorded as a skip with the gap named, which is what the
-    suite has always done. That default hides five missed detections behind a
-    green run. Set OBSERVE_STRICT_CLINICAL=1 to fail on them instead -- for a
-    deployment gate, or to see the real detection record.
-    """
-    if os.environ.get("OBSERVE_STRICT_CLINICAL"):
-        testcase.fail(f"known clinical gap (OBSERVE_STRICT_CLINICAL set): {message}")
-    testcase.skipTest(message)
+from clinical_gaps import known_gap as _known_gap
 
 
 class TestAdversarialSensorFaults(unittest.TestCase):
