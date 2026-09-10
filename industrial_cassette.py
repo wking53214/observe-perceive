@@ -1,9 +1,23 @@
-"""example_industrial_cassette.py -- rotating equipment, as a cassette.
+"""industrial_cassette.py -- rotating equipment, as a cassette.
 
-NOT a product. This exists to hold the core honest: if the engine can
-escalate a failing pump without one clinical line executing, the seam is
-real. If it cannot, the seam is decoration and this file will say so by
-failing.
+NOT a product, and NOT disposable. This is the second domain, and its
+job is permanent: to hold the core honest. If the engine can escalate a
+failing pump without one clinical line executing, the seam is real. If
+it cannot, the seam is decoration and this file says so by failing.
+
+WHY A SECOND CASSETTE LIVES IN THIS TREE FOREVER
+------------------------------------------------
+One cassette cannot demonstrate that a core is domain-agnostic, because
+a core coupled to its only domain passes every test that domain can
+write. The claim is only checkable with two, running against the same
+core in the same CI invocation.
+
+Keeping this on a branch, or in another repository, would remove exactly
+that property: a core change that breaks it would go green on the main
+line and nobody would learn until someone checked the other place out.
+Measured 2026-09-10 across this library -- three repositories import a
+cassette layer that exists nowhere, 86 findings, because the seam lived
+somewhere no CI could see it.
 
 The domain shares no vocabulary with medicine. Subjects are assets, not
 patients. Readings are vibration, bearing temperature and oil pressure,

@@ -80,3 +80,25 @@ SEAM_TESTS = "test_cassette_seam.py"
                          ids=[m[0] for m in CASSETTE_MUTANTS])
 def test_cassette_mutant_is_killed(label, rel, old, new):
     assert_killed(label, SEAM_TESTS, run_tests_with_mutation(SEAM_TESTS, rel, old, new))
+
+
+# The policy itself, mutated. A registry rule that has never been shown to
+# reject anything is a comment; these prove it rejects.
+REGISTRY_MUTANTS = [
+    ("one domain is enough to claim agnosticism", "installed_cassettes.py",
+     "MINIMUM_DOMAINS = 2\n", "MINIMUM_DOMAINS = 1\n"),
+    ("domains may share an observation type", "installed_cassettes.py",
+     "    types = {type(e.nominal()) for e in entries}\n",
+     "    types = set(range(len(entries)))\n"),
+    ("the industrial domain silently stops being installed", "installed_cassettes.py",
+     "        cassette=IndustrialCassette(),\n",
+     "        cassette=PediatricCassette(),\n"),
+]
+
+REGISTRY_TESTS = "test_all_cassettes.py"
+
+
+@pytest.mark.parametrize("label,rel,old,new", REGISTRY_MUTANTS,
+                         ids=[m[0] for m in REGISTRY_MUTANTS])
+def test_registry_mutant_is_killed(label, rel, old, new):
+    assert_killed(label, REGISTRY_TESTS, run_tests_with_mutation(REGISTRY_TESTS, rel, old, new))

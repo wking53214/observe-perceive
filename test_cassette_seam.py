@@ -164,11 +164,11 @@ class TestASecondIndustryRunsOnTheSameCore(unittest.TestCase):
     """
 
     def _engine(self):
-        from example_industrial_cassette import IndustrialCassette
+        from industrial_cassette import IndustrialCassette
         return ObserveClinicalEngine(cassette=IndustrialCassette())
 
     def _reading(self, **o):
-        from example_industrial_cassette import AssetReading
+        from industrial_cassette import AssetReading
         d = dict(asset_id="PUMP-7", timestamp=datetime.now(timezone.utc),
                  vibration_mm_s=2.1, bearing_temp_c=55.0, oil_pressure_bar=3.2)
         d.update(o)
@@ -229,7 +229,7 @@ class TestTheTrustBoundaryIsDomainDriven(unittest.TestCase):
         through as an unrecognised key rather than being range-checked
         against a child's oxygen saturation."""
         from observe_consolidated import sanitize_context
-        from example_industrial_cassette import IndustrialCassette
+        from industrial_cassette import IndustrialCassette
         cas = IndustrialCassette()
         clean, notes = sanitize_context(
             {"rpm": 45000.0, "ambient_temp_c": 22.0, "previous_o2": 200.0},
@@ -241,7 +241,7 @@ class TestTheTrustBoundaryIsDomainDriven(unittest.TestCase):
 
     def test_list_bounds_filter_elements_rather_than_dropping_the_key(self):
         from observe_consolidated import sanitize_context
-        from example_industrial_cassette import IndustrialCassette
+        from industrial_cassette import IndustrialCassette
         cas = IndustrialCassette()
         clean, notes = sanitize_context(
             {"recent_vibration": [2.0, -5.0, 3.0, float("inf")]},
@@ -252,7 +252,7 @@ class TestTheTrustBoundaryIsDomainDriven(unittest.TestCase):
     def test_the_engine_passes_its_own_cassettes_tables(self):
         """End to end: an out-of-range rpm reaching the real engine is
         dropped by the industrial bounds, which the core never knew."""
-        from example_industrial_cassette import AssetReading, IndustrialCassette
+        from industrial_cassette import AssetReading, IndustrialCassette
         engine = ObserveClinicalEngine(cassette=IndustrialCassette())
         obs = AssetReading("PUMP-Z", datetime.now(timezone.utc), 2.0, 50.0, 3.0,
                            context={"rpm": 45000.0})
@@ -265,14 +265,14 @@ class TestTrajectoryIsGenericOverChannels(unittest.TestCase):
     different units and a different bad direction."""
 
     def _engine(self):
-        from example_industrial_cassette import IndustrialCassette
+        from industrial_cassette import IndustrialCassette
         return ObserveClinicalEngine(cassette=IndustrialCassette(), enable_kalman=True)
 
     def test_a_degrading_bearing_is_caught_before_it_crosses_the_hard_rule(self):
         """Vibration climbing 0.9 mm/s per hour is caught at 4.7 mm/s --
         below the ISO 10816 unacceptable line of 7.1. That is the whole
         point of a trajectory: the trend arrives before the threshold."""
-        from example_industrial_cassette import AssetReading
+        from industrial_cassette import AssetReading
         from datetime import timedelta
         base = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
         engine = self._engine()
@@ -290,7 +290,7 @@ class TestTrajectoryIsGenericOverChannels(unittest.TestCase):
                 self.assertTrue(velocity_seen, "trend should be reported before the threshold")
 
     def test_the_tracker_abstains_during_warmup_in_any_domain(self):
-        from example_industrial_cassette import AssetReading
+        from industrial_cassette import AssetReading
         from datetime import timedelta
         base = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
         engine = self._engine()
@@ -336,7 +336,7 @@ class TestTheDomainOwnsItsVocabulary(unittest.TestCase):
         self.assertTrue(any("CLINICAL_SAFETY_BYPASS" in r for r in v.triggered_rules))
 
     def test_another_domain_gets_its_own_words(self):
-        from example_industrial_cassette import AssetReading, IndustrialCassette
+        from industrial_cassette import AssetReading, IndustrialCassette
         engine = ObserveClinicalEngine(cassette=IndustrialCassette())
         v = engine.evaluate(AssetReading("PUMP-1", datetime.now(timezone.utc), 9.4, 98.0, 0.6))
         self.assertTrue(any("EQUIPMENT_SAFETY_BYPASS" in r for r in v.triggered_rules))
