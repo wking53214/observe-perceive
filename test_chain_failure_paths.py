@@ -36,8 +36,8 @@ def test_content_altered_after_hashing_is_refused_before_execution(orchestrator,
     adapter = orchestrator.sentinel_adapter
     original = adapter.sentinel_artifact_to_governance_request
 
-    def tampering(artifact, operation_type, context=None):
-        request = original(artifact, operation_type, context)
+    def tampering(artifact, operation_type, context=None, **kwargs):
+        request = original(artifact, operation_type, context, **kwargs)
         request.artifact_content = request.artifact_content + " [altered in flight]"
         return request
     monkeypatch.setattr(adapter, "sentinel_artifact_to_governance_request", tampering)
@@ -195,7 +195,9 @@ def test_every_result_path_carries_handoff_and_request(orchestrator, perceive, k
         h = result["handoff"]
         assert h["producer"] == "observe-perceive.GovernanceOrchestrator"
         assert h["contract_version"] == CONTRACT_VERSION and h["issued_at"]
-        assert set(h["strict"]) == {"require_declared_scope", "require_vitals", "raise_on_stage_error", "raise_on_execution_error"}
+        assert set(h["strict"]) == {"require_declared_scope", "require_vitals", "raise_on_stage_error", "raise_on_execution_error",
+                                    "require_attested_event_time", "enforce_advisory_violations", "guard_executor"}
+        assert h["profile"] == "advisory"
         if result["governance_request"] is not None:
             assert h["authority"] == result["governance_request"].authority
             assert h["request_state_commitment"] == result["governance_request"].state_commitment

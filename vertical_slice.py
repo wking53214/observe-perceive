@@ -35,12 +35,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-from conservation_kernel import ConservationKernel
+from conservation_kernel import ConservationKernel, HmacSigner
 from execution_guard import ExecutionLedger, ExecutionRefusal, authorize_execution, guarded
 from governance_orchestrator import GovernanceOrchestrator
 from governance_record import ReceiptLog, from_record, verify_record
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
+from sentinel_perceive_adapter import SentinelPerceiveAdapter
+
+# 1.3.0: the durable boundary is signed. These keys stand in for the two a
+# deployment holds: the deployer's (ledger entries, receipts, kernel
+# snapshot) and the source's (its event-time attestation). They are demo
+# keys in a demo; a deployment supplies its own Signer and never commits it.
+DEPLOYER = HmacSigner(b"demo-deployer-key-0123456789abcdef", key_id="deployer-demo")
+SOURCE = HmacSigner(b"demo-feed-icu-3-key-0123456789abcd", key_id="feed-icu-3")
 
 
 class _Status:
@@ -49,25 +57,28 @@ class _Status:
 
 
 class _Metadata:
-    def __init__(self, origin, authority, epistemic, parents, occurred_at):
+    def __init__(self, origin, authority, epistemic, parents, occurred_at, attestation=None):
         self.origin_status = _Status(origin)
         self.authority_status = _Status(authority)
         self.epistemic_status = _Status(epistemic)
         self.parent_artifact_ids = parents
         self.occurred_at = occurred_at
+        self.event_time_attestation = attestation
 
 
 class FeedArtifact:
     """What a source hands the system: the duck-typed contract the spine reads."""
 
-    def __init__(self, artifact_id: str, content: str, occurred_at: datetime):
+    def __init__(self, artifact_id: str, content: str, occurred_at: datetime, signer=SOURCE):
         self.artifact_id = artifact_id
         self.content = content
-        self.metadata = _Metadata("SENTINEL", "SYSTEM", "INFERRED", ["feed-icu-3"], occurred_at)
+        # The source signs when it says the thing happened, bound to this artifact.
+        attestation = SentinelPerceiveAdapter.attest_event_time(signer, artifact_id, occurred_at.isoformat()) if signer else None
+        self.metadata = _Metadata("SENTINEL", "SYSTEM", "INFERRED", ["feed-icu-3"], occurred_at, attestation)
 
 
-def _perceive() -> PerceiveGovernanceKernel:
-    kernel = PerceiveGovernanceKernel()
+def _perceive(ledger_path=None) -> PerceiveGovernanceKernel:
+    kernel = PerceiveGovernanceKernel(ledger_path=ledger_path)
     kernel.register_manifest(PolicyManifest(manifest_id="slice-manifest", version="1.0.0",
                                             created_at=datetime.now(timezone.utc), policies={}))
     return kernel
@@ -86,6 +97,7 @@ class Paths:
         self.kernel = self.workdir / "kernel.json"
         self.effects = self.workdir / "effects.log"
         self.ccc = self.workdir / "ccc.json"
+        self.perceive = self.workdir / "perceive.jsonl"
 
 
 # ---------------------------------------------------------------- the action
@@ -95,11 +107,12 @@ def run_action(workdir: Path, *, artifact_id: str = "feed-icu-3-0042", execution
     paths = Paths(workdir)
     paths.workdir.mkdir(parents=True, exist_ok=True)
     kernel = ConservationKernel()
-    ledger = ExecutionLedger(paths.executions)
-    receipts = ReceiptLog(paths.receipts)
+    ledger = ExecutionLedger(paths.executions, signer=DEPLOYER)
+    receipts = ReceiptLog(paths.receipts, signer=DEPLOYER)
     orchestrator = GovernanceOrchestrator(
-        _perceive(), kernel, ObserveClinicalEngine(),
-        require_declared_scope=True,          # a scope must be sealed, not claimed
+        _perceive(paths.perceive), kernel, ObserveClinicalEngine(),
+        profile="strict",                     # sealed scope, vitals, attested event time, advised violations enforced
+        source_signers=[SOURCE],              # whose event-time attestations count
         execution_ledger=ledger, receipts=receipts,
     )
 
@@ -132,7 +145,7 @@ def run_action(workdir: Path, *, artifact_id: str = "feed-icu-3-0042", execution
     )
 
     # AUDIT: the kernel's ledger leaves the process too; CCC when present.
-    kernel.save(paths.kernel)
+    kernel.save(paths.kernel, signer=DEPLOYER)
     ccc_recorded = None
     try:
         # The adapter resolves CCC (sibling checkout or installed package)
@@ -153,9 +166,10 @@ def run_action(workdir: Path, *, artifact_id: str = "feed-icu-3-0042", execution
 def explain(workdir: Path, effect_line: Dict[str, Any]) -> Dict[str, Any]:
     """Why did this action happen? Reconstructed from the files alone."""
     paths = Paths(workdir)
-    receipts = ReceiptLog(paths.receipts)                     # refuses a broken chain
-    ledger = ExecutionLedger(paths.executions)                # refuses a broken chain
-    kernel = ConservationKernel.load(paths.kernel)            # re-admits roots, re-verifies transformations
+    receipts = ReceiptLog(paths.receipts, signer=DEPLOYER)    # refuses a broken chain or an unsigned/foreign receipt
+    ledger = ExecutionLedger(paths.executions, signer=DEPLOYER)   # same for the execution ledger
+    kernel = ConservationKernel.load(paths.kernel, signer=DEPLOYER)   # re-admits roots, re-verifies, checks the signature
+    perceive = _perceive(paths.perceive)                       # PERCEIVE's own ledger, reopened
 
     execution_id = effect_line["execution_id"]
     found = receipts.find(execution_id=execution_id)
@@ -168,7 +182,7 @@ def explain(workdir: Path, effect_line: Dict[str, Any]) -> Dict[str, Any]:
     if not found:
         return {"execution_id": execution_id, "explained": False, "steps": steps}
     record = found[0]["record"]
-    verification = verify_record(record, kernel=kernel)
+    verification = verify_record(record, kernel=kernel, perceive=perceive)
     rebuilt = from_record(record)
 
     consumed = ledger.consumed(execution_id)
@@ -188,16 +202,21 @@ def explain(workdir: Path, effect_line: Dict[str, Any]) -> Dict[str, Any]:
     step("GOVERNANCE DECISION", conservation.verified and in_kernel,
          f"kernel decision {conservation.conservation_receipt_id} derives from root {reconstruction.root_artifact_ids} "
          f"by {len(reconstruction.transformation_ids_in_order)} transformation(s); {len(props)} proposition(s) constrained")
-    step("INTERPRETATION", decision.approval.value == "approved",
-         f"PERCEIVE {decision.approval.value}; gates {decision.applied_gates or 'none'}; advisory violations {decision.advisory_violations}")
+    in_perceive = "decision.in_perceive_ledger" not in verification.as_dict()["failed"] and any(
+        c["name"] == "decision.in_perceive_ledger" and not c.get("skipped") for c in verification.as_dict()["checks"])
+    step("INTERPRETATION", decision.approval.value == "approved" and in_perceive,
+         f"PERCEIVE {decision.approval.value}; gates {decision.applied_gates or 'none'}; advisory violations {decision.advisory_violations}; "
+         f"found in PERCEIVE's reopened ledger ({len(perceive.audit_ledger.entries)} entries)")
     request = rebuilt["governance_request"]
     step("EVIDENCE", "request.artifact_hash_matches_content" not in verification.as_dict()["failed"],
          f"content digest {request.artifact_hash[:12]}... matches the content carried in the record")
-    step("SOURCE", request.event_time is not None and record.get("scope_sealed") is True,
-         f"origin {request.origin}, epistemic {request.epistemic_status}, occurred {request.event_time}, "
-         f"ingested {request.ingested_at}; Gateway admission {record.get('gateway_admission')}")
+    step("SOURCE", request.event_time is not None and request.event_time_attested and record.get("scope_sealed") is True,
+         f"origin {request.origin}, epistemic {request.epistemic_status}, occurred {request.event_time} "
+         f"(attested by {request.event_time_key_id}), ingested {request.ingested_at}; Gateway admission {record.get('gateway_admission')}")
     step("RECORD", verification.valid and verification.complete and receipts.entries[0]["receipt"]["record_hash"] == found[0]["receipt"]["record_hash"],
-         f"{len(verification.checks)} checks, failed {verification.as_dict()['failed']}; receipt {found[0]['receipt']['hash'][:12]}... in a chain of {len(receipts.entries)}")
+         f"{len(verification.checks)} checks, failed {verification.as_dict()['failed']}; receipt {found[0]['receipt']['hash'][:12]}... "
+         f"in a chain of {len(receipts.entries)}, signed by {found[0]['receipt'].get('signature', {}).get('key_id')}; "
+         f"ledger and kernel snapshot signed by {DEPLOYER.key_id}; profile {record.get('handoff', {}).get('profile')}")
     outcome = rebuilt["outcome_context"]
     step("OBSERVATION", outcome is not None and outcome.outcome.get("observe_ran") is True,
          f"OBSERVE regime {outcome.outcome.get('observe_regime')}, escalation_required {outcome.outcome.get('escalation_required')}")
@@ -237,9 +256,9 @@ def attack_after_restart(workdir: Path, explained: Dict[str, Any]) -> Dict[str, 
     except ExecutionRefusal as e:
         outcomes["forged_context"] = f"refused: {e}"
     # 3. the whole request again, same execution id, new process
-    orchestrator = GovernanceOrchestrator(_perceive(), ConservationKernel(), ObserveClinicalEngine(),
-                                          require_declared_scope=True, execution_ledger=ledger,
-                                          receipts=ReceiptLog(paths.receipts))
+    orchestrator = GovernanceOrchestrator(_perceive(paths.perceive), ConservationKernel(), ObserveClinicalEngine(),
+                                          profile="strict", source_signers=[SOURCE], execution_ledger=ledger,
+                                          receipts=ReceiptLog(paths.receipts, signer=DEPLOYER))
     from gateway_admission_adapter import GatewayAdmissionAdapter, GatewayEpistemicStatus
     artifact = FeedArtifact("feed-icu-3-0042", "escalate P001: sustained tachycardia, SpO2 91", datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc))
     sealed = GatewayAdmissionAdapter.seal(artifact_id=artifact.artifact_id, payload={"content": artifact.content},

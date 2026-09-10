@@ -9,10 +9,11 @@ import json
 
 import pytest
 
+import gateway_admission_adapter  # noqa: F401  (resolves a sibling Gateway checkout onto sys.path)
 from vertical_slice import Paths, explain, run_action, run_slice
 
 # The slice is real implementations only: it seals at the Gateway, so it
-# needs the Gateway. Importing vertical_slice first lets the adapter resolve
+# needs the Gateway. Importing the admission adapter first lets it resolve
 # a sibling checkout before this check runs.
 pytest.importorskip("governance_gateway.models", reason="Governance_Gateway checkout not available")
 

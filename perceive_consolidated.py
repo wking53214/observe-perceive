@@ -24,6 +24,7 @@ import logging
 import math
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
 from governance_contracts import compute_state_commitment
@@ -576,12 +577,60 @@ class ManifestRegistry:
 # IMMUTABLE AUDIT LEDGER (SHA256 cryptographic chain)
 # ============================================================================
 
-class ImmutableAuditLedger:
-    """Append-only audit trail with SHA256 chaining."""
+class AuditLedgerIntegrityError(Exception):
+    """A persisted PERCEIVE ledger does not recompute. Nothing is loaded."""
 
-    def __init__(self):
+
+class ImmutableAuditLedger:
+    """Append-only audit trail with SHA256 chaining.
+
+    With a `path` (1.3.0) every entry is appended to a JSONL file as it is
+    made and the file is reloaded, chain re-verified, on construction, so
+    `decision.in_perceive_ledger` can be re-checked after a restart. Until
+    then the ledger lived only in this process and the spine's verifier had
+    to skip that check on any record older than the process.
+    """
+
+    def __init__(self, path=None):
         self.entries: List[AuditEntry] = []
         self.chain_head = hashlib.sha256(b"PERCEIVE_GENESIS").hexdigest()
+        self.path = Path(path) if path else None
+        if self.path and self.path.exists():
+            self._load()
+
+    def _load(self) -> None:
+        for line_no, line in enumerate(self.path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            raw = json.loads(line)
+            raw["timestamp"] = datetime.fromisoformat(raw["timestamp"])
+            entry = AuditEntry(**raw)
+            if entry.previous_hash != self.chain_head:
+                raise AuditLedgerIntegrityError(f"{self.path}:{line_no}: previous-hash link broken")
+            if self._hash(entry) != entry.immutable_hash:
+                raise AuditLedgerIntegrityError(f"{self.path}:{line_no}: entry hash does not recompute")
+            self.entries.append(entry)
+            self.chain_head = entry.immutable_hash
+
+    @staticmethod
+    def _hash(entry: "AuditEntry") -> str:
+        entry_dict = {
+            "audit_id": entry.audit_id,
+            "timestamp": entry.timestamp.isoformat(),
+            "evaluated_gates": entry.evaluated_gates,
+            "final_verdict": entry.final_verdict,
+        }
+        combined = entry.previous_hash + hashlib.sha256(json.dumps(entry_dict, sort_keys=True, default=str).encode()).hexdigest()
+        return hashlib.sha256(combined.encode()).hexdigest()
+
+    def _persist(self, entry: "AuditEntry") -> None:
+        if not self.path:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        raw = asdict(entry)
+        raw["timestamp"] = entry.timestamp.isoformat()
+        with self.path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(raw, sort_keys=True, default=str) + "\n")
 
     def append_decision(
         self,
@@ -607,17 +656,11 @@ class ImmutableAuditLedger:
             previous_hash=self.chain_head,
         )
 
-        entry_dict = {
-            "audit_id": entry.audit_id,
-            "timestamp": entry.timestamp.isoformat(),
-            "evaluated_gates": entry.evaluated_gates,
-            "final_verdict": entry.final_verdict,
-        }
-        combined = self.chain_head + hashlib.sha256(json.dumps(entry_dict, sort_keys=True, default=str).encode()).hexdigest()
-        entry.immutable_hash = hashlib.sha256(combined.encode()).hexdigest()
+        entry.immutable_hash = self._hash(entry)
 
         self.chain_head = entry.immutable_hash
         self.entries.append(entry)
+        self._persist(entry)
         return entry
 
     def verify_chain_integrity(self) -> bool:
@@ -873,10 +916,13 @@ class PerceiveGovernanceKernel:
     POLICY_GATES = {"escalation_rate_policy", "data_export_policy", "rule_modification_policy"}
 
     def __init__(self, dgk_gateway: Optional[DGKGateway] = None,
-                 enforcement: Optional[PolicyEnforcementConfig] = None):
+                 enforcement: Optional[PolicyEnforcementConfig] = None,
+                 ledger_path=None):
         self.manifest_registry = ManifestRegistry()
         self.event_store = EventStore()
-        self.audit_ledger = ImmutableAuditLedger()
+        # ledger_path (1.3.0): persist the audit ledger so a decision made
+        # before a restart can still be found in it afterwards.
+        self.audit_ledger = ImmutableAuditLedger(path=ledger_path)
         self.dgk_gateway = dgk_gateway  # Optional multi-node consensus for critical decisions
         self.enforcement = enforcement or PolicyEnforcementConfig()  # WS2a: default advisory
         self.gov_state = GovernanceState()  # WS2a: deterministic rate-limit history

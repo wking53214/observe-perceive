@@ -19,7 +19,7 @@ from enum import Enum
 # orchestrator speak. Carried in every result's `handoff` block so a consumer
 # can tell what it received. Bump on any change to the dataclasses below or
 # to the result keys the orchestrator promises on every path.
-CONTRACT_VERSION = "1.1.0"
+CONTRACT_VERSION = "1.2.0"
 
 
 def _canonicalize_commitment_value(value: Any) -> Any:
@@ -104,6 +104,16 @@ class GovernanceRequest:
     # both and is kept for compatibility.
     event_time: Optional[str] = None
     ingested_at: Optional[str] = None
+    # 1.2.0: whether the source signed its event time with a key the
+    # deployment registered, and which key. Committed: an attested time and
+    # a claimed time are different requests. The signature itself is not
+    # part of the request; the verifier trusts the orchestrator's finding,
+    # which is why the finding names the key.
+    event_time_attested: bool = False
+    event_time_key_id: Optional[str] = None
+    # Recorded, not committed: why an attestation that was present did not
+    # verify. None when none was offered or it verified.
+    event_time_attestation_problem: Optional[str] = None
 
 
 @dataclass

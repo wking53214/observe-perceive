@@ -48,7 +48,8 @@ class SentinelPerceiveAdapter:
     def sentinel_artifact_to_governance_request(
         artifact,  # SentinelArtifact (typing removed to avoid import)
         operation_type: str,
-        context: dict = None
+        context: dict = None,
+        source_signers=None,
     ) -> GovernanceRequest:
         """
         Convert SentinelArtifact to GovernanceRequest.
@@ -73,6 +74,9 @@ class SentinelPerceiveAdapter:
         }
         request_type = request_type_map.get(operation_type, GovernanceRequestType.APPROVE_DECISION)
 
+        event_time = SentinelPerceiveAdapter._event_time_of(artifact)
+        attested, key_id, problem = SentinelPerceiveAdapter.check_event_time_attestation(
+            artifact, event_time, source_signers)
         request = GovernanceRequest(
             request_id=artifact.artifact_id,
             request_type=request_type,
@@ -86,8 +90,11 @@ class SentinelPerceiveAdapter:
             lineage=artifact.metadata.parent_artifact_ids or [],
             context=context,
             timestamp=datetime.now(timezone.utc),
-            event_time=SentinelPerceiveAdapter._event_time_of(artifact),
+            event_time=event_time,
             ingested_at=datetime.now(timezone.utc).isoformat(),
+            event_time_attested=attested,
+            event_time_key_id=key_id,
+            event_time_attestation_problem=problem,
         )
         # The state this commitment covers is defined once, in
         # governance_chain.request_state, and shared with the verifier: a
@@ -190,6 +197,57 @@ class SentinelPerceiveAdapter:
         policy_request = cls.governance_request_to_policy_request(request)
         verdict = perceive_kernel.evaluate_request(policy_request)
         return cls.policy_verdict_to_governance_decision(verdict, request)
+
+    # -- event time attestation (1.2.0) ---------------------------------------
+    #
+    # Until 1.2.0 the event time was whatever the source said. A source that
+    # holds a key registered with the deployment can now sign it, and the
+    # request records (and commits) that the time was attested and by which
+    # key. The payload is the artifact id and the time, so an attestation
+    # cannot be moved to another artifact or another time.
+
+    @staticmethod
+    def attestation_payload(artifact_id: str, event_time: str) -> bytes:
+        return f"{artifact_id}|{event_time}".encode("utf-8")
+
+    @staticmethod
+    def attest_event_time(signer, artifact_id: str, event_time: str) -> dict:
+        """What a source attaches as `metadata.event_time_attestation`."""
+        return {
+            "key_id": signer.key_id,
+            "algorithm": getattr(signer, "algorithm", "unknown"),
+            "value": signer.sign(SentinelPerceiveAdapter.attestation_payload(artifact_id, event_time)),
+        }
+
+    @staticmethod
+    def _attestation_of(artifact):
+        for holder in (getattr(artifact, "metadata", None), artifact):
+            value = getattr(holder, "event_time_attestation", None) if holder is not None else None
+            if isinstance(value, dict):
+                return value
+        return None
+
+    @staticmethod
+    def check_event_time_attestation(artifact, event_time, source_signers):
+        """(attested, key_id, problem). `source_signers` is a mapping of
+        key_id to Signer, or an iterable of Signers, or None."""
+        attestation = SentinelPerceiveAdapter._attestation_of(artifact)
+        if attestation is None:
+            return False, None, None
+        if event_time is None:
+            return False, attestation.get("key_id"), "attestation present but the artifact states no event time"
+        signers = {}
+        if source_signers:
+            values = source_signers.values() if hasattr(source_signers, "values") else source_signers
+            signers = {getattr(sg, "key_id", None): sg for sg in values}
+        key_id = attestation.get("key_id")
+        signer = signers.get(key_id)
+        if signer is None:
+            return False, key_id, f"attestation by unregistered key {key_id!r}"
+        payload = SentinelPerceiveAdapter.attestation_payload(artifact.artifact_id, event_time)
+        if not signer.verify(payload, attestation.get("value")):
+            return False, key_id, f"attestation by key {key_id!r} does not verify"
+        return True, key_id, None
 
     @staticmethod
     def _event_time_of(artifact) -> "str | None":

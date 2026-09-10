@@ -1,5 +1,51 @@
 # CHANGELOG — OBSERVE / PERCEIVE hardening pass
 
+## 1.3.0 (2026-09-08) — the seven residual risks
+
+The closure report (1.2.0) named ten residual risks and ranked seven as
+engineering work. All seven are closed or narrowed here; the record of
+each is in `docs/closure/GOVERNANCE_BYPASS_REPORT.md` ("1.3.0").
+
+- **R1/R4 signed boundary.** `ExecutionLedger(path, signer=)`,
+  `ReceiptLog(path, signer=)` and `ConservationKernel.save/load(signer=)`
+  (kernel 0.3.0) sign every entry, receipt and snapshot over its hash with
+  a caller-held key (`conservation_kernel.signing.HmacSigner`, or any
+  object with `key_id`, `sign`, `verify`). Opened with a key, a file
+  refuses to load if any entry is unsigned, signed by another key, or does
+  not verify. The consistent forgery that integrity alone accepted (edit,
+  recompute the public hash chain) is refused.
+- **R2 the orchestrator guards the executor itself.** `guard_executor=True`
+  (default) wraps the caller's callable with `execution_guard.guarded`
+  unless it already is; the guard's authorization is recorded under
+  `execution_authorization`, not inside the committed result.
+- **R6 one ledger file, many processes.** The execution ledger takes a file
+  lock on every write and re-reads the file before every read and write,
+  so two processes on one path see one ledger; an artifact already issued
+  an execution in the file is refused a second one (`one_per_artifact`,
+  default on), so a replay in a second process is a replay.
+- **R7 receipt probe.** With receipts configured, the store is opened for
+  append and synced before anything is issued; an unreachable store is a
+  recorded refusal (`refused_by="receipt_store"`) before the action.
+- **R3 PERCEIVE's ledger persisted.** `PerceiveGovernanceKernel(ledger_path=)`
+  appends every audit entry to JSONL and re-verifies the chain on reopen,
+  so `decision.in_perceive_ledger` is checked after a restart instead of
+  skipped.
+- **R5 strict profile.** `GovernanceOrchestrator(profile="strict")`
+  requires a sealed scope, vitals, an attested event time, and refuses
+  violations PERCEIVE only advised on. The profile and every flag are on
+  the record (`handoff.profile`, `handoff.strict`).
+- **R8 attested event time.** A source signs `artifact_id|event_time` with
+  a registered key (`SentinelPerceiveAdapter.attest_event_time`); the
+  orchestrator verifies against `source_signers`, records and commits
+  `event_time_attested` and the key id (contract 1.2.0); a bad attestation
+  is a temporal anomaly in the advisory profile and a refusal in strict.
+
+The vertical slice runs strict, signed, with a persisted PERCEIVE ledger
+and an attested source, and still explains the action after a restart.
+
+Tests: 610 passed, 5 skipped (was 589): `test_authenticated_boundary.py`
+(24). Requires conservation_kernel 0.3.0.
+
 ## 1.2.0 (2026-09-08) — CLOSE THE SYSTEM
 
 The execution boundary is now enforced, the record is durable, and the

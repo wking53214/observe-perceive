@@ -88,3 +88,21 @@ effects written by attacks: 0
 | R8 | `event_time` is what the source claims | The kernel records it as evidence, the spine records anomalies; verifying a source clock needs the custody ledger (sentinel_os), which is frozen | DOCUMENT |
 | R9 | CCC recording is explicit, not on the orchestrator path | Keeping it out of the spine's hard dependencies was a deliberate choice; the slice shows the call | DOCUMENT |
 | R10 | OBSERVE regime "stable" for aggressive vitals in some cases (pediatric engine) | Clinical model quality, not governance; out of mission scope | DO_NOT_TOUCH |
+
+## 1.3.0: the residual risks, revisited
+
+Measured 2026-09-08 after the seven items were built. "Before" is the
+1.2.0 behaviour recorded above.
+
+| ID | Attack | Before (1.2.0) | Repair (1.3.0) | After (measured) | Tests | Class now |
+|---|---|---|---|---|---|---|
+| R1/R4 | Edit a ledger entry, receipt or kernel snapshot and recompute the public hash chain or digest | Accepted: integrity-only | Signed boundary: `ExecutionLedger(signer=)`, `ReceiptLog(signer=)`, kernel `save/load(signer=)`; signature over each hash by a caller-held key; `LedgerAuthenticityError`, `RecordAuthenticityError`, `SnapshotAuthenticityError` | Refused with the key; an unsigned file and a file signed by another key are refused too; without a key, integrity behaves as before | test_authenticated_boundary (4), kernel test_signing (8) | FIXED. Residual: whoever holds the key can sign; keep it outside the process (the `Signer` protocol lets a signing service stand in) |
+| R2 | Hand a plain executor a forged or replayed context through the orchestrator | Executed if the caller had not wrapped it | The orchestrator wraps every executor with `guarded` (`guard_executor=True`) unless already guarded | Refused before the effect; the guard's checks are on the record | test_execution_guard (2) | FIXED on the orchestrator path. Residual: a callable invoked outside the orchestrator is outside the system |
+| R6 | Govern the same artifact in a second process sharing the ledger file | Two decisions, two executions | File lock and re-read on every access; one issuance per artifact per ledger | Second process: REJECTED by the execution ledger before issuance; a file edited between refreshes is refused | test_authenticated_boundary (3) | FIXED for a shared file. Residual: processes that do not share the file |
+| R7 | Receipt store unreachable when the action runs | Action ran; `receipt_error` only | Probe (open for append and sync) before issuance | REJECTED `refused_by="receipt_store"` with nothing issued | test_authenticated_boundary (2) | FIXED for missing path, permissions, read-only mount. Residual: a disk that fills between probe and write |
+| R3 | Verify a record after a restart | `decision.in_perceive_ledger` skipped | PERCEIVE ledger persisted to JSONL and re-verified on reopen | Check runs and passes after a restart; a tampered file refuses to open | test_authenticated_boundary (2), test_vertical_slice | FIXED |
+| R5 | Rely on a scope claim, skip vitals, let an advised violation through | Advisory by default; strict flags opt-in individually | `profile="strict"`: sealed scope, vitals, attested event time, advised violations enforced; profile on every record | Each refused in strict with a named stage; the advisory profile records and proceeds, as before | test_authenticated_boundary (4) | FIXED as an explicit product choice; the default profile is still advisory and says so |
+| R8 | Claim any event time | Recorded as stated | Source-signed attestation over `artifact_id\|event_time`; verified against registered source keys; `event_time_attested` and key id committed | Attested time is committed; wrong key, moved attestation or unregistered key is an anomaly (advisory) or a refusal (strict) | test_authenticated_boundary (5) | FIXED for sources that hold a key. Residual: a source without a key is still a claim, and says so |
+
+Post-repair attack run (attack_spine_2, re-run on 1.3.0): unchanged, 11
+attacks, 0 effects.

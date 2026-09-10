@@ -10,7 +10,7 @@ spine's suite if the other side changes that surface.
 
 | Repo | Version | Import (from observe-perceive) | Calls made | Resolution | Break test |
 |---|---|---|---|---|---|
-| conservation_kernel | 0.2.0 | `ConservationKernel`, `Artifact`, `Actor`, `ActorKind`, `Proposition`, `FunctionalContract`, `DeclaredChange`, enums (`EpistemicStatus`, `Origin`, `AuthorityStatus`, `ChangeKind`), `errors.InvalidArtifact`, `errors.LedgerError` | `register_root`, `submit`, `reconstruct`, `register_manifest`, `save`, `ConservationKernel.load` | declared in pyproject (`conservation-kernel @ git+...@5b388f1`, the 0.2.0 merge commit), installed package | test_conservation_boundary (7), test_chain_closure (6), test_vertical_slice (5) |
+| conservation_kernel | 0.3.0 | `ConservationKernel`, `Artifact`, `Actor`, `ActorKind`, `Proposition`, `FunctionalContract`, `DeclaredChange`, enums (`EpistemicStatus`, `Origin`, `AuthorityStatus`, `ChangeKind`), `errors.InvalidArtifact`, `errors.LedgerError`, `signing.{Signer, HmacSigner, signature_block, check_signature}` | `register_root`, `submit`, `reconstruct`, `register_manifest`, `save(signer=)`, `ConservationKernel.load(signer=)` | declared in pyproject (`conservation-kernel @ git+...@v0.2.0`), installed package | test_conservation_boundary (7), test_chain_closure (6), test_vertical_slice (5) |
 
 Contract the spine relies on (verified by test_conservation_boundary):
 `register_root` refuses an artifact whose propositions are born canonical or
@@ -22,7 +22,7 @@ returns the transformation chain the verifier checks membership against
 and the request artifact among the roots); `save`/`load` re-verify every
 artifact on restore and raise `SnapshotIntegrityError` on any alteration.
 
-The kernel PR (#4) squash-merged 2026-09-08 as commit 5b388f1; the spine pins that commit. A `v0.2.0` tag on it still needs creating from the GitHub UI (the session's git proxy refuses tag pushes).
+Kernel PR #4 (0.2.0) merged as 5b388f1 and PR #5 (0.3.0, signed snapshots) as 25145aa; the spine pins 25145aa. Tags cannot be pushed from this session; `v0.3.0` on 25145aa is the friendlier name once created.
 
 ## Optional packs (extras `chain` and `fortress`)
 
@@ -45,11 +45,13 @@ The kernel PR (#4) squash-merged 2026-09-08 as commit 5b388f1; the spine pins th
 
 | Field | Value | Where |
 |---|---|---|
-| `handoff.contract_version` | 1.1.0 | governance_contracts.CONTRACT_VERSION; on every result and receipt |
+| `handoff.contract_version` | 1.2.0 (adds `event_time_attested`, `event_time_key_id` to the committed request state) | governance_contracts.CONTRACT_VERSION; on every result and receipt |
 | `record_version` | 1 | governance_record.RECORD_VERSION; on every receipt record |
 | commitment scheme | `compute_state_commitment(parent, state)` over `governance_chain.{request_state, approval_state, execution_context_state, outcome_state}` | governance_chain |
-| execution ledger entry | `{kind: issued|consumed|refused, execution_id, request_id, artifact_id, artifact_hash, approval_state_commitment, context_state_commitment, approval_timestamp, context_timestamp, producer, lineage, consumer, outcome, previous, hash, recorded_at}` | execution_guard.issuance_record |
-| receipt | `{sequence, record_hash, previous, written_at, hash, status, request_id, execution_id}` beside the full `record` | governance_record.ReceiptLog |
+| execution ledger entry | `{kind: issued|consumed|refused, execution_id, request_id, artifact_id, artifact_hash, approval_state_commitment, context_state_commitment, approval_timestamp, context_timestamp, producer, lineage, consumer, outcome, previous, hash, recorded_at, signature?}` | execution_guard.issuance_record; `signature = {key_id, algorithm, value}` over `hash` when signed |
+| receipt | `{sequence, record_hash, previous, written_at, hash, status, request_id, execution_id, signature?}` beside the full `record` | governance_record.ReceiptLog |
+| PERCEIVE ledger entry | `AuditEntry` as JSON with ISO timestamp, `previous_hash`, `immutable_hash` | perceive_consolidated.ImmutableAuditLedger(path=) |
+| event time attestation | `{key_id, algorithm, value}` over `artifact_id\|event_time`, on `metadata.event_time_attestation` | sentinel_perceive_adapter.attest_event_time |
 
 ## Second-order dependencies observed
 
@@ -66,8 +68,8 @@ The kernel PR (#4) squash-merged 2026-09-08 as commit 5b388f1; the spine pins th
 
 | Repo | Branch | Clean-clone install | Tests | ruff |
 |---|---|---|---|---|
-| observe-perceive | claude/prompt-red-blue-team-sj9a31 | kernel only: imports ok | 494 passed, 63 skipped (kernel only); 589 passed, 5 skipped (all packs) | clean |
-| conservation_kernel | main (5b388f1, PR #4 merged) | ok | 67 passed | clean |
+| observe-perceive | claude/prompt-red-blue-team-sj9a31 (1.3.0) | kernel only: imports ok | 610 passed, 5 skipped (all packs) | clean |
+| conservation_kernel | main (25145aa, 0.3.0, PR #5 merged) | ok | 75 passed | clean |
 | CCC | main (PR #12 merged) | ok | 142 passed, 1 xfailed | clean |
 | ghost_tools | main (PR #11 merged) | ok | 167 passed | clean |
 | Governance_Gateway | main | ok (PR #3) | CI green | clean |

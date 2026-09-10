@@ -194,13 +194,49 @@ DEFER: R3 PERCEIVE persistence, R4 snapshot authentication.
 DO_NOT_TOUCH: R10 OBSERVE clinical model; frozen repositories (AUGUR,
 fortress-kernel, sentinel_os, GSA-815) beyond their freeze banners.
 
-## 12. Final adversarial review
+## 12. 1.3.0 addendum: the seven residual risks, closed or narrowed
+
+Built after this report was first written; measured 2026-09-08 (see
+GOVERNANCE_BYPASS_REPORT "1.3.0" and FAILURE_SEMANTICS_MATRIX "1.3.0").
+
+| Risk | Now | What remains |
+|---|---|---|
+| R1/R4 unkeyed commitments, unsigned files | Ledger entries, receipts and kernel snapshots signed with a caller-held key; forgeries with recomputed hashes refused | The key holder can sign; hold it outside the process |
+| R2 unguarded executors | The orchestrator guards every executor itself | A callable invoked outside the orchestrator |
+| R6 cross-process replay | Shared ledger file with locking, re-read, one issuance per artifact | Processes that do not share the file |
+| R7 receipt after action | Probe before issuance; unreachable store refuses first | A disk filling between probe and write |
+| R3 PERCEIVE ledger | Persisted and re-verified; checked after restart | none |
+| R5 advisory defaults | `profile="strict"`; profile on every record | The default is still advisory, by choice, and visible |
+| R8 event time a claim | Source-signed attestation, committed with the key id | Sources without a key remain claims, and say so |
+
+Revised scores (0 to 10):
+
+| Dimension | 1.2.0 | 1.3.0 | Why |
+|---|---|---|---|
+| Correctness of the governance chain | 8 | 8 | unchanged; 21 more tests |
+| Enforcement at the execution boundary | 6 | 8 | orchestrator guards; shared ledger |
+| Provenance and explainability | 8 | 9 | PERCEIVE ledger persisted; attested time |
+| Persistence and restart | 7 | 9 | everything durable is signed |
+| Failure semantics | 8 | 9 | probe before action |
+| Temporal integrity | 7 | 8 | attested event time |
+| Resistance to an in-process attacker | 3 | 7 | signatures; the key is the boundary now |
+| Cross-repo integration | 7 | 7 | kernel 0.3.0 pinned by commit |
+| Release hygiene | 7 | 7 | unchanged |
+| Operability | 5 | 6 | strict profile and one signer type; still no service or key management |
+
+The success condition is now proven for the shipped configuration against
+a file-writing attacker without the key as well; the untrusted party has
+moved from "anyone who can write the files" to "anyone who holds the key".
+
+## 13. Final adversarial review
 
 "If I wanted to prove this architecture is unsafe, where would I attack?"
 In order: (1) the process itself or its files, with the public commitment
 function (R1); (2) an executor someone forgot to wrap (R2); (3) a second
 process with its own files (R6); (4) the receipt store at the moment after
 the effect (R7); (5) the source clock (R8). None of these is hidden; each is
-named on the record or in this report, and the first two are the next
-engineering steps. Nothing in the attack list executes silently against the
-shipped configuration.
+named on the record or in this report. At 1.3.0 each of those is closed or
+narrowed (section 12); the list now starts with the signing key itself,
+then a callable invoked outside the orchestrator, then processes that do
+not share the ledger file. Nothing in the attack list executes silently
+against the shipped configuration.
