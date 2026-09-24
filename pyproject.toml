@@ -22,14 +22,21 @@ dependencies = [
 # The other chain stages. Each adapter resolves a sibling checkout first and
 # the installed package second, and its tests skip when neither is present;
 # installing this extra makes the whole suite run from a single clone.
+# Pinned to commits, like the kernel: unpinned, each install took whatever the
+# default branch was that day. GEMS bb4cf40 (2026-09-20) deleted
+# HumanAuthorityGuard, HandoffValidator and governance/constitution.py, which
+# gems_governance_adapter.py imports, and every fresh install then errored 16
+# tests. 273aeea is its parent, the last GEMS commit that has them. The other
+# pins are the default-branch commits the full suite passed against on
+# 2026-09-24. Bump deliberately, and re-run the suite on the new SHA.
 chain = [
-  "cognitive-continuity-constitution @ git+https://github.com/wking53214/CCC",
-  "augur @ git+https://github.com/wking53214/AUGUR",
-  "gems-infrastructure @ git+https://github.com/wking53214/GEMS",
-  "governance-gateway @ git+https://github.com/wking53214/Governance_Gateway",
+  "cognitive-continuity-constitution @ git+https://github.com/wking53214/CCC@2cf7aa19db7fdad23f2b4f4d10727a9ea88a1368",
+  "augur @ git+https://github.com/wking53214/AUGUR@9e24dab5bc672fad35b88551480c3037eb063f83",
+  "gems-infrastructure @ git+https://github.com/wking53214/GEMS@273aeea29463b2bc7b940757726f16fea825bf06",
+  "governance-gateway @ git+https://github.com/wking53214/Governance_Gateway@c507be7279c4488f98404514fcea2c900c53168e",
 ]
 # Opt-in strict stage; numpy comes in through its own metadata.
-fortress = ["fortress-kernel @ git+https://github.com/wking53214/fortress-kernel"]
+fortress = ["fortress-kernel @ git+https://github.com/wking53214/fortress-kernel@4105ccb5fec2806f3f1ab5aeb0f88151e6a6fdc0"]
 test = ["pytest>=8", "hypothesis"]
 
 [tool.setuptools]

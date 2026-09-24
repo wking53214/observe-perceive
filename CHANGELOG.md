@@ -1,5 +1,20 @@
 # CHANGELOG — OBSERVE / PERCEIVE hardening pass
 
+## Unreleased
+
+- **Chain and fortress dependencies pinned to commits.** CCC, AUGUR, GEMS,
+  Governance_Gateway and fortress-kernel were unpinned, so each install
+  took that day's default branch. GEMS `bb4cf40` (2026-09-20) deleted
+  `HumanAuthorityGuard`, `HandoffValidator` and `governance/constitution.py`,
+  which `gems_governance_adapter.py` imports. From then on every fresh
+  `pip install -r requirements.txt` errored the 16 tests in
+  `test_gems_governance_adapter.py`, while CI stayed green because it had
+  not re-run since 2026-09-11. GEMS is now pinned to `273aeea`, that
+  commit's parent. The other four are pinned to the default-branch commits
+  the suite passed against on 2026-09-24. Fresh install, then
+  `python -m pytest -q`: 681 passed, 5 xfailed (was 665 passed, 16
+  errors). `ruff check .` is clean.
+
 ## 1.3.0 (2026-09-08) — the seven residual risks
 
 The closure report (1.2.0) named ten residual risks and ranked seven as
