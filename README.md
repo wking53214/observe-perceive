@@ -1,165 +1,141 @@
 # observe-perceive
 
-**Hub of the governed action stack.**  
-Admission, optional screens, policy evaluation (PERCEIVE), Conservation Kernel verification, execution, and post-action observation — tied together by recomputable state commitments and a verifiable hash chain.
+**Hub of the governed action stack.** Version `1.3.0`. Python ≥ 3.11. Hard dependency: [`Conservation_Kernel`](https://github.com/wking53214/Conservation_Kernel) `@25145aa`. Optional extras: Gateway, CCC, AUGUR, GEMS (pinned to last commit that still has `HumanAuthorityGuard`), fortress-kernel.
 
 Pediatric sepsis monitoring is the **reference domain**, not the product boundary.
 
-```bash
-pip install -e ".[test,chain,fortress]"   # or: pip install -r requirements.txt
-pytest                                    # includes chain adversarial suite
-python demo_why.py                        # one governed action + deliberate corruption
-```
+## 1. Pipeline Position & Role
 
-Version is in `pyproject.toml`. Conservation Kernel is the hard dependency for a full conserved path. Optional stages (Gateway, AUGUR, GEMS, CCC, fortress-kernel) resolve from a sibling checkout first, then the installed package.
-
-**Entry points**
-
-| Piece | Role |
-|--------|------|
-| `GovernanceOrchestrator` (`governance_orchestrator.py`) | Runs the chain |
-| `governance_contracts.py` | Cross-system request/decision/approval types + state commitments |
-| `governance_chain.verify_result` | Re-derives commitments; does not trust stored strings |
-| Adapters (`gateway_admission_adapter`, `sentinel_perceive_adapter`, `perceive_conservation_adapter`, …) | Translate vocabularies at each seam |
-
----
-
-## Where this sits in the stack
+**Orchestrator spanning Admission → Observation → Policy → Conservation → Execution → Audit.** This repo *is* the live decision path. α/ζ/β/δ are extracted, composable twins; they are **not imported here**.
 
 ```text
 Signals / artifacts
         │
         ▼
- ADMISSION          Governance_Gateway          well-formed? untampered? scoped?
-        │                                        refusal → NOT_ADMITTED (not policy)
+ ADMISSION          Governance_Gateway          well-formed? scoped? digest ok?
+        │                                        refusal → NOT_ADMITTED
         ▼
- OBSERVATION        OBSERVE / interconnected_α  evidence → named Keys
+ OBSERVATION        observe_consolidated        evidence → fused regime / Keys
         │
         ▼
- INTERLOCKS         interconnected_ζ            Locks (AND/OR/N-of-M, dwell, force)
+ INTERLOCKS         EscalationPolicy (inline)   dwell / cooldown / bypass
+        │           (ζ exists, not wired)
+        ▼
+ POLICY             perceive_consolidated       PERCEIVE gates (advisory default)
         │
         ▼
- POLICY             PERCEIVE (this repo)        may this request proceed?
+ OPTIONAL SCREENS   AUGUR (veto-only)           may refuse; may never approve
+                    fortress-kernel             containment / slew
         │
         ▼
- DECISION           interconnected_β            Decision + reasoning / reversal / instructions
+ CONSERVATION       Conservation_Kernel.submit  undeclared epistemic shift → REJECT
         │
         ▼
- CONSERVATION       Conservation_Kernel         declared changes only; refuse undeclared
+ EXECUTION          execution_guard             ISSUED context, single-use
+                    caller-supplied callable    "GSA-815" in diagrams ≠ this import
         │
         ▼
- EXECUTION          GSA-815 (optional)          act only under approval
-        │
-        ▼
- CUSTODY            interconnected_δ / sentinel_os   ledger, obligations, fairness, twin
+ CUSTODY            ExecutionLedger + receipts  hash-chained JSONL
+                    CCC (optional)              recurrence memory
 ```
 
-This repository **orchestrates** the live path. The composable decision spine (Keys → Locks → Decision → custody) also lives as four small packages:
+`GovernanceOrchestrator` (`governance_orchestrator.py`, ~920 lines) runs the chain. `governance_chain.verify_result` **re-derives commitments**; it does not trust stored strings.
 
-- [interconnected_alpha](https://github.com/wking53214/interconnected_alpha) — Keys  
-- [interconnected_zeta](https://github.com/wking53214/interconnected_zeta) — Locks  
-- [interconnected_beta](https://github.com/wking53214/interconnected_beta) — Decision + narrative  
-- [interconnected_delta](https://github.com/wking53214/interconnected_delta) — ledger + obligations + fairness  
+## 2. Full System Scope & Architectural Depth
 
-Domain runtime with cassettes, episodes, and twin custody: [sentinel_os](https://github.com/wking53214/sentinel_os).
+### Contracts (`governance_contracts.py`)
 
----
+Cross-system request / decision / approval types plus **state commitments**. Contract 1.1.0+: `event_time` committed, `ingested_at` recorded, `execution_id` committed, approval self-describing, canonical result hash. Processing timestamps stay **outside** commitments on purpose (covered by receipt/ledger hashes).
 
-## What each stage is (and is not)
+### PERCEIVE (`perceive_consolidated.py`, ~1217 lines)
 
-| Stage | Question | Not |
-|--------|----------|-----|
-| **Admission (Gateway)** | Is this a well-formed, sealed, correctly scoped artifact? | Policy permission |
-| **OBSERVE** | What can be established about state from evidence? | What may be done about it |
-| **PERCEIVE** | Given that state, what do the gates allow? | Human authorization to execute |
-| **Conservation** | Did this transformation preserve protected dimensions (or declare changes honestly)? | A soft audit log |
-| **Execution** | Run only with a valid approval/receipt | Free action |
-| **OBSERVE (post)** | What happened after the act? | Rewriting the decision |
+Policy gates under declared consensus. Historical six-gate unanimous pattern. **`PolicyEnforcementConfig` defaults to advisory** (commercial red team B2): gates record; they do not by themselves stop execution unless the orchestrator is in a strict profile. Crash of PERCEIVE is guarded (fail-closed, not silent skip). PERCEIVE ledger can persist.
 
-**Policy approval is not authorization.** PERCEIVE may approve a request; Conservation maps decision propositions as machine-originated with authority `NONE` unless explicit `authorization_refs` are present. The stack refuses to blur that line in code.
+**Policy approval ≠ authorization.** Explicit human authority references are required for full authorization; the kernel checks registered events.
 
----
+### OBSERVE (`observe_consolidated.py`, ~1416 lines)
 
-## OBSERVE vs PERCEIVE (inside this repo)
+Clinical fusion: validate → multi-assessor → fuse → regime → escalation. `RiskAdapters.heuristic` and `behavioral_vaccine` are the source α extracted. `EscalationPolicy` is the source ζ extracted. They still run **here**, live.
+
+### Execution guard (`execution_guard.py`)
+
+Measured 2026-09-08: a hand-built `ExecutionContext` with public constructors was indistinguishable from an orchestrator-issued one, and a genuine context could be executed any number of times. Guard closes that:
+
+- `ExecutionLedger`: append-only, hash-chained, in-memory or JSONL.
+- `authorize_execution`: re-derives approval/context commitments, field-compares to issuance, refuses never-issued / altered / already-consumed.
+- `guarded(func, ledger)` wraps so the check cannot be forgotten.
+- **Does not stop a caller who invokes the raw callable.** That is the executor's contract.
+
+Integrity ≠ authenticity: anyone in-process can recompute hashes. With a signer, forged JSONL appends fail (`LedgerAuthenticityError`). Whoever controls the ledger the executor consults controls "issued".
+
+### Adapters (vocabulary translation at seams)
+
+`gateway_admission_adapter` · `augur_screen_adapter` · `fortress_perceive_adapter` · `perceive_conservation_adapter` · `gsa815_observe_adapter` · `sentinel_perceive_adapter` · `gems_governance_adapter` · `herald_governance_adapter` · `innovation_governance_adapter` · `tie_governance_adapter` · `orchestrator_ccc_adapter` · `conservation_gsa815_adapter`
+
+Sibling checkout first, installed package second; tests skip when neither is present.
+
+### Cassettes
+
+`cassette.py`, `pediatric_cassette.py`, `industrial_cassette.py`, `installed_cassettes.py`. Domain packs, not a published Cassette SDK.
+
+## 3. What It Does NOT Do / Non-Goals
+
+- Does **not** import α, ζ, β, δ, GSA-815, or sentinel_os as the live path.
+- Does **not** issue human grants (no identity registry, no grant lifecycle).
+- Does **not** provide KMS/HSM as a service (optional signer if you pass a key).
+- Does **not** ship a deployable SaaS. Library + demo (`demo_why.py`).
+- Does **not** claim FDA-cleared clinical detection. `fda_510k_checklist.py` is a checklist, not a submission.
+- Does **not** perform post-execution agent routing.
+
+## 4. Brutally Honest Current Status & Gaps
+
+From `CLAUDE_ARCHITECTURE_STATE.md` and `docs/audit/COMMERCIAL_RED_TEAM_2026-09-08.md` (still current on gaps; 90-day freeze lifted 2026-09-11 without superseding findings):
+
+| Gap | Detail |
+|---|---|
+| Dual spine | Extracted α-ζ-β-δ is not the orchestrator. Two decision stories. |
+| Advisory PERCEIVE default | Strict profile exists; default does not fail-closed on policy. |
+| Pediatric misses | Known missed/late detections and sensor-fault gaps filed as **skipped tests**. Not a clinical product. |
+| GEMS pin | `273aeea` — parent of `bb4cf40`, which **deleted** `HumanAuthorityGuard` / `HandoffValidator` / `governance/constitution.py` that `gems_governance_adapter.py` still imports. Head of GEMS main will error ~16 tests. |
+| Key holder residual | Closure proven against external caller, file editor without the key, second process on shared ledger, restart. **Not** proven against the key holder, a callable invoked outside the orchestrator, or processes that do not share the file. |
+| Untyped orchestrator output | Commercial audit: result is an untyped dict. |
+| No actor registry / grant lifecycle | Architecture epic, missing. |
+| sentinel_os / GSA-815 | Never imported. Diagrams that show them as chain stages are conceptual. |
+| Optional stages | AUGUR/CCC/fortress/Gateway/GEMS skipped if absent. A clone without extras is a shorter chain. |
+
+Measured (architecture state): 610 passed / 5 skipped with all packs. `pip install -e ".[test,chain,fortress]" && pytest`.
+
+## 5. Core Invariants & Guarantees
+
+- Fail-closed on conservation REJECT, unissued/altered/replayed execution contexts, PERCEIVE crash (guarded).
+- Recomputation over trust for state commitments and ledger hashes.
+- Actor self-report is not evidence for kernel judgment.
+- Policy ≠ authorization.
+- Single-use execution contexts **when the executor uses the guard**.
+- Signed ledger/receipts/snapshots when a signer is configured (1.3.0).
+
+## 6. Inputs, Outputs & Type Contracts
+
+Duck-typed sentinel artifact with event time → orchestrator result dict + receipts. Important types: `GovernanceApproval`, `compute_state_commitment`, `ExecutionContext`, `ExecutionLedger`. See `governance_contracts.py` and `execution_guard.issuance_record()`.
+
+`python demo_why.py` — one governed action + deliberate corruption.
+
+## 7. Stack Integration Topology
 
 ```text
-OBSERVE     What is happening?     validate → assess → fuse → evidence-bearing state
-PERCEIVE    What may be done?      context → gates → consensus → GovernanceDecision
+                    ┌── Governance_Gateway (opt, extra `chain`)
+                    ├── CCC (opt)
+                    ├── AUGUR (opt, veto-only)
+                    ├── GEMS @273aeea (opt; newer GEMS breaks adapter)
+                    └── fortress-kernel (opt, extra `fortress`)
+observe-perceive ───┤
+                    ├── Conservation_Kernel @25145aa   HARD
+                    ├── observe_consolidated + perceive_consolidated  (in-tree)
+                    └── execution_guard ledger (JSONL)
+                         │
+                         ✗ does not import α ζ β δ sentinel_os GSA-815
 ```
 
-OBSERVE does not authorize. PERCEIVE does not invent OBSERVE’s evidence. Missing evidence is not treated as normality (abstention is first-class).
+Reports: `docs/closure/ARCHITECTURE_CLOSURE_REPORT.md`, `GOVERNANCE_BYPASS_REPORT.md`, `docs/audit/COMMERCIAL_RED_TEAM_2026-09-08.md`.
 
-Reference path: physiological signals → multi-engine assessment → fused clinical state → escalation/policy gates → governed decision. Same separation applies outside clinical domains.
-
----
-
-## Chain verification
-
-`governance_chain.verify_result` checks, among other things:
-
-- artifact hash matches content  
-- every state commitment **recomputes** from the same field set the producer used  
-- identifiers agree across request → decision → conservation → approval → execution → outcome  
-- time runs forward  
-- when kernels are present: decision is in PERCEIVE’s ledger; Conservation entry is a **derivation** from the request artifact (not mere presence under an id)  
-
-`audit_chain_valid` requires the checks that could run to pass **and** the chain to reach an observed outcome (`complete`). An earlier presence-only check of non-empty hash fields was replaced; see `governance_chain.py`.
-
-Adversarial coverage: `test_chain_adversarial.py` and related chain tests.
-
----
-
-## Invariants
-
-1. **Fail closed** — unknown or unevaluated state does not approve.  
-2. **Seams** — observation ≠ policy ≠ authorization ≠ execution ≠ custody.  
-3. **Recompute** — commitments and chain links are verified by recalculation.  
-4. **Self-report is not evidence** — claims travel separately from observed actuals.  
-5. **Conservation** — protected dimensions cannot change unless declared and independently checked.  
-6. **Admission ≠ rejection** — Gateway refusal is `NOT_ADMITTED`; policy refusal is `REJECTED`.
-
----
-
-## Optional stages
-
-| Component | Role |
-|-----------|------|
-| [Governance_Gateway](https://github.com/wking53214/Governance_Gateway) | Front door: structural validity, provenance, scope |
-| [AUGUR](https://github.com/wking53214/AUGUR) | Veto-only behavioural simulation screen |
-| [Conservation_Kernel](https://github.com/wking53214/Conservation_Kernel) | Transformation integrity (required for conserved path) |
-| [GSA-815](https://github.com/wking53214/GSA-815) | Governed execution under approval |
-| [fortress-kernel](https://github.com/wking53214/fortress-kernel) | Optional containment / slew bounds |
-| Assurance: [ghost_tools](https://github.com/wking53214/ghost_tools), [SWIZZLE](https://github.com/wking53214/SWIZZLE), [TOUCHSTONE](https://github.com/wking53214/TOUCHSTONE) | Integrity, adversarial eval, non-synthetic ground truth — not the live product path |
-
----
-
-## Demo: why did the system do that?
-
-One reproducible scenario through the real gate, then deliberate corruption that the chain must catch:
-
-```bash
-git clone https://github.com/wking53214/observe-perceive
-git clone https://github.com/wking53214/Governance_Gateway
-git clone https://github.com/wking53214/AUGUR
-python3 -m pip install -r observe-perceive/requirements.txt
-python3 -m pip install "git+https://github.com/wking53214/Conservation_Kernel"
-cd observe-perceive
-python3 demo_why.py
-python3 demo_why.py --corrupt approval   # or: source, authority, timestamp
-```
-
-Exit 0 means the corruption was detected. Without optional checkouts the demo reports which step it could not run and does not pretend it did.
-
----
-
-## Status
-
-**In development.** Reference implementation is exercised and tested; packaging and production ops still vary by deployment. Known stack gaps outside this repo include authorization *issuance*, a full identity plane, policy-as-governed-object, external auditor packs, and subject contestability — see sibling kernels and the decision spine for what *is* implemented.
-
-Further architecture notes: `docs/closure/`, `GOVERNANCE_ORCHESTRATION.md`, `CLAUDE_ARCHITECTURE_STATE.md`.
-
----
-
-## Central proposition
-
-> OBSERVE establishes what can be established about state. PERCEIVE interprets that state under policy gates. Conservation checks whether the transformation preserved what it claimed. The chain recomputes evidence instead of trusting stored strings. Authorization remains a separate concern the policy layer does not claim.
+MIT (pyproject) / see LICENSE.
