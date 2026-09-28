@@ -1,704 +1,165 @@
-# OBSERVE / PERCEIVE
+# observe-perceive
 
-## Install and run
+**Hub of the governed action stack.**  
+Admission, optional screens, policy evaluation (PERCEIVE), Conservation Kernel verification, execution, and post-action observation — tied together by recomputable state commitments and a verifiable hash chain.
 
-    pip install -e ".[test,chain,fortress]"    # or: pip install -r requirements.txt
-    pytest                                     # 529 tests, 5 clinical known-gap skips
-    python demo_why.py                         # why the gate decided what it decided
+Pediatric sepsis monitoring is the **reference domain**, not the product boundary.
 
-Version 1.1.0 in `pyproject.toml`. The one hard dependency is the
-Conservation Kernel; the `chain` extra installs the optional stages (CCC,
-AUGUR, GEMS, Governance_Gateway) and `fortress` the opt-in strict stage. Each
-adapter resolves a sibling checkout first and the installed package second,
-so a clone beside the other repositories works without installing them.
+```bash
+pip install -e ".[test,chain,fortress]"   # or: pip install -r requirements.txt
+pytest                                    # includes chain adversarial suite
+python demo_why.py                        # one governed action + deliberate corruption
+```
 
-The entrypoint is `GovernanceOrchestrator` in `governance_orchestrator.py`;
-`governance_chain.verify_result` re-derives the hash chain of any result it
-returns, and `test_chain_adversarial.py` is the sixteen attacks that
-verification must reject.
+Version is in `pyproject.toml`. Conservation Kernel is the hard dependency for a full conserved path. Optional stages (Gateway, AUGUR, GEMS, CCC, fortress-kernel) resolve from a sibling checkout first, then the installed package.
 
-## Closure reports
+**Entry points**
 
-The CLOSE THE SYSTEM pass (2026-09-08) is documented in `docs/closure/`:
-architecture closure, governance bypasses, provenance closure, failure
-semantics and the cross-repository integration matrix. The hand-off state
-is `CLAUDE_ARCHITECTURE_STATE.md`. Run `python vertical_slice.py` for one
-governed action explained after a restart.
-
-## Governed Observation and Interpretation System
-
-OBSERVE/PERCEIVE is a governed observation-and-interpretation architecture that separates the detection and assessment of system state from the policy-governed interpretation and authorization of responses to that state.
-
-The architecture is designed to establish a clear distinction between:
-
-    WHAT IS HAPPENING
-
-and:
-
-    WHAT THAT OBSERVATION MEANS
-    WITHIN A GOVERNING FRAMEWORK
-
-At the architectural level:
-
-    ENVIRONMENT / SYSTEM
-            │
-            ▼
-        ┌─────────┐
-        │ OBSERVE │
-        └────┬────┘
-             │
-             ▼
-      OBSERVED / ASSESSED STATE
-             │
-             ▼
-       ┌───────────┐
-       │ PERCEIVE  │
-       └─────┬─────┘
-             │
-             ▼
-      GOVERNED INTERPRETATION
-             │
-             ▼
-       AUTHORIZED ACTION
-
-The current implementation applies this architecture to **pediatric sepsis monitoring**.
-
-The pediatric sepsis implementation is the current representative application of the architecture. It should not be interpreted as the architectural limitation or intended industry boundary of OBSERVE/PERCEIVE.
+| Piece | Role |
+|--------|------|
+| `GovernanceOrchestrator` (`governance_orchestrator.py`) | Runs the chain |
+| `governance_contracts.py` | Cross-system request/decision/approval types + state commitments |
+| `governance_chain.verify_result` | Re-derives commitments; does not trust stored strings |
+| Adapters (`gateway_admission_adapter`, `sentinel_perceive_adapter`, `perceive_conservation_adapter`, …) | Translate vocabularies at each seam |
 
 ---
 
-# Architectural Definition
+## Where this sits in the stack
 
-The underlying system can be understood as two deliberately separated functions.
+```text
+Signals / artifacts
+        │
+        ▼
+ ADMISSION          Governance_Gateway          well-formed? untampered? scoped?
+        │                                        refusal → NOT_ADMITTED (not policy)
+        ▼
+ OBSERVATION        OBSERVE / interconnected_α  evidence → named Keys
+        │
+        ▼
+ INTERLOCKS         interconnected_ζ            Locks (AND/OR/N-of-M, dwell, force)
+        │
+        ▼
+ POLICY             PERCEIVE (this repo)        may this request proceed?
+        │
+        ▼
+ DECISION           interconnected_β            Decision + reasoning / reversal / instructions
+        │
+        ▼
+ CONSERVATION       Conservation_Kernel         declared changes only; refuse undeclared
+        │
+        ▼
+ EXECUTION          GSA-815 (optional)          act only under approval
+        │
+        ▼
+ CUSTODY            interconnected_δ / sentinel_os   ledger, obligations, fairness, twin
+```
 
-## OBSERVE
+This repository **orchestrates** the live path. The composable decision spine (Keys → Locks → Decision → custody) also lives as four small packages:
 
-OBSERVE establishes an evidence-bearing representation of observed system state.
+- [interconnected_alpha](https://github.com/wking53214/interconnected_alpha) — Keys  
+- [interconnected_zeta](https://github.com/wking53214/interconnected_zeta) — Locks  
+- [interconnected_beta](https://github.com/wking53214/interconnected_beta) — Decision + narrative  
+- [interconnected_delta](https://github.com/wking53214/interconnected_delta) — ledger + obligations + fairness  
 
-It is concerned with:
-
-- receiving signals;
-- validating observations;
-- assessing state;
-- identifying changes;
-- detecting abnormalities;
-- evaluating temporal behavior;
-- combining independent assessments;
-- representing uncertainty;
-- and preserving evidence.
-
-Its fundamental question is:
-
-> **What is happening?**
-
----
-
-## PERCEIVE
-
-PERCEIVE takes an observed and assessed state and evaluates it within a governing context.
-
-It is concerned with:
-
-- contextual interpretation;
-- policy evaluation;
-- governance constraints;
-- invariant validation;
-- authorization;
-- consensus;
-- and governed response.
-
-Its fundamental question is:
-
-> **Given what is happening, what does it mean here, and what may be done about it?**
+Domain runtime with cassettes, episodes, and twin custody: [sentinel_os](https://github.com/wking53214/sentinel_os).
 
 ---
 
-# The Fundamental Separation
+## What each stage is (and is not)
 
-The system deliberately separates observation from interpretation.
+| Stage | Question | Not |
+|--------|----------|-----|
+| **Admission (Gateway)** | Is this a well-formed, sealed, correctly scoped artifact? | Policy permission |
+| **OBSERVE** | What can be established about state from evidence? | What may be done about it |
+| **PERCEIVE** | Given that state, what do the gates allow? | Human authorization to execute |
+| **Conservation** | Did this transformation preserve protected dimensions (or declare changes honestly)? | A soft audit log |
+| **Execution** | Run only with a valid approval/receipt | Free action |
+| **OBSERVE (post)** | What happened after the act? | Rewriting the decision |
 
-    OBSERVE
-       │
-       │
-       │ "This condition exists."
-       │
-       ▼
-    OBSERVED STATE
-       │
-       │
-       │ "What does this condition
-       │  mean under the applicable
-       │  rules and context?"
-       ▼
-    PERCEIVE
-       │
-       ▼
-    GOVERNED DECISION
-
-This prevents the system that detects a condition from automatically becoming the system that determines the permitted response.
+**Policy approval is not authorization.** PERCEIVE may approve a request; Conservation maps decision propositions as machine-originated with authority `NONE` unless explicit `authorization_refs` are present. The stack refuses to blur that line in code.
 
 ---
 
-# OBSERVE
+## OBSERVE vs PERCEIVE (inside this repo)
 
-OBSERVE is the observation and state-assessment layer.
+```text
+OBSERVE     What is happening?     validate → assess → fuse → evidence-bearing state
+PERCEIVE    What may be done?      context → gates → consensus → GovernanceDecision
+```
 
-It transforms available signals and evidence into structured representations of system condition.
+OBSERVE does not authorize. PERCEIVE does not invent OBSERVE’s evidence. Missing evidence is not treated as normality (abstention is first-class).
 
-Conceptually:
-
-    SIGNALS
-       │
-       ▼
-    VALIDATION
-       │
-       ▼
-    OBSERVATION
-       │
-       ▼
-    ASSESSMENT
-       │
-       ▼
-    FUSION
-       │
-       ▼
-    OBSERVED STATE
-
-The resulting state becomes an input to PERCEIVE.
+Reference path: physiological signals → multi-engine assessment → fused clinical state → escalation/policy gates → governed decision. Same separation applies outside clinical domains.
 
 ---
 
-# Signal Validation
+## Chain verification
 
-OBSERVE validates incoming observations before incorporating them into assessment.
+`governance_chain.verify_result` checks, among other things:
 
-This creates an important distinction between:
+- artifact hash matches content  
+- every state commitment **recomputes** from the same field set the producer used  
+- identifiers agree across request → decision → conservation → approval → execution → outcome  
+- time runs forward  
+- when kernels are present: decision is in PERCEIVE’s ledger; Conservation entry is a **derivation** from the request artifact (not mere presence under an id)  
 
-    VALID OBSERVATION
+`audit_chain_valid` requires the checks that could run to pass **and** the chain to reach an observed outcome (`complete`). An earlier presence-only check of non-empty hash fields was replaced; see `governance_chain.py`.
 
-and:
-
-    INVALID / INSUFFICIENT OBSERVATION
-
-The system should not silently convert missing or invalid information into evidence of normal operation.
-
----
-
-# Independent Assessment
-
-The observation layer can use multiple independent assessment mechanisms.
-
-The current implementation demonstrates this through multiple risk-assessment engines.
-
-The architectural pattern is:
-
-    OBSERVED INPUT
-          │
-          ├──────────────┐
-          │              │
-          ▼              ▼
-      ASSESSOR 1     ASSESSOR 2
-          │              │
-          ├──────┬───────┤
-                 │
-                 ▼
-              FUSION
-                 │
-                 ▼
-          ASSESSED STATE
-
-Independent assessment allows different analytical mechanisms to contribute to a common representation of state.
+Adversarial coverage: `test_chain_adversarial.py` and related chain tests.
 
 ---
 
-# Abstention
+## Invariants
 
-OBSERVE recognizes that insufficient information is different from evidence of normality.
-
-An assessment mechanism may abstain when it lacks the information required to make a valid assessment.
-
-Conceptually:
-
-    INSUFFICIENT EVIDENCE
-            ≠
-       NORMAL CONDITION
-
-This prevents missing information from silently suppressing an abnormal observation.
+1. **Fail closed** — unknown or unevaluated state does not approve.  
+2. **Seams** — observation ≠ policy ≠ authorization ≠ execution ≠ custody.  
+3. **Recompute** — commitments and chain links are verified by recalculation.  
+4. **Self-report is not evidence** — claims travel separately from observed actuals.  
+5. **Conservation** — protected dimensions cannot change unless declared and independently checked.  
+6. **Admission ≠ rejection** — Gateway refusal is `NOT_ADMITTED`; policy refusal is `REJECTED`.
 
 ---
 
-# Fusion
+## Optional stages
 
-Where multiple assessment mechanisms produce usable results, OBSERVE can combine them into a fused assessment.
-
-Fusion can incorporate:
-
-- assessment results;
-- confidence;
-- uncertainty;
-- active assessment mechanisms;
-- triggered conditions;
-- and temporal information.
-
-The result is a structured representation of the observed state rather than an isolated sensor value.
+| Component | Role |
+|-----------|------|
+| [Governance_Gateway](https://github.com/wking53214/Governance_Gateway) | Front door: structural validity, provenance, scope |
+| [AUGUR](https://github.com/wking53214/AUGUR) | Veto-only behavioural simulation screen |
+| [Conservation_Kernel](https://github.com/wking53214/Conservation_Kernel) | Transformation integrity (required for conserved path) |
+| [GSA-815](https://github.com/wking53214/GSA-815) | Governed execution under approval |
+| [fortress-kernel](https://github.com/wking53214/fortress-kernel) | Optional containment / slew bounds |
+| Assurance: [ghost_tools](https://github.com/wking53214/ghost_tools), [SWIZZLE](https://github.com/wking53214/SWIZZLE), [TOUCHSTONE](https://github.com/wking53214/TOUCHSTONE) | Integrity, adversarial eval, non-synthetic ground truth — not the live product path |
 
 ---
 
-# Temporal State
+## Demo: why did the system do that?
 
-OBSERVE treats state as temporal.
-
-A single observation represents a point in time.
-
-A sequence of observations can reveal:
-
-- persistence;
-- trajectory;
-- drift;
-- emerging conditions;
-- regime changes;
-- and deviations from historical behavior.
-
-Conceptually:
-
-    t1 ──► t2 ──► t3 ──► t4 ──► t5
-                           │
-                           ▼
-                      CURRENT STATE
-
-The historical sequence can therefore contribute to interpretation of the present state.
-
----
-
-# Evidence
-
-OBSERVE treats important observations and assessments as evidence-bearing representations.
-
-The architecture can preserve information such as:
-
-- source observations;
-- assessment results;
-- timestamps;
-- state classifications;
-- confidence;
-- fingerprints;
-- and audit information.
-
-This produces a chain such as:
-
-    SIGNAL
-      │
-      ▼
-    OBSERVATION
-      │
-      ▼
-    ASSESSMENT
-      │
-      ▼
-    EVIDENCE
-      │
-      ▼
-    GOVERNANCE INPUT
-
----
-
-# PERCEIVE
-
-PERCEIVE operates on the observed and assessed state.
-
-Its purpose is not to independently recreate the observation.
-
-Its purpose is to interpret that state within the governing context.
-
-Conceptually:
-
-    OBSERVED STATE
-          │
-          ▼
-      CONTEXT
-          │
-          ▼
-       POLICY
-          │
-          ▼
-      GOVERNANCE
-          │
-          ▼
-    PERMITTED RESPONSE
-
-PERCEIVE therefore provides the bridge between:
-
-    OBSERVED REALITY
-
-and:
-
-    GOVERNED ACTION
-
----
-
-# Governance Gates
-
-The current PERCEIVE implementation contains multiple governance gates.
-
-These include mechanisms associated with:
-
-- boundary enforcement;
-- linguistic enforcement;
-- invariant validation;
-- security constraints;
-- sentinel validation;
-- and controlled remediation.
-
-The architecture requires the applicable governance controls to be satisfied before a governed decision can proceed.
-
----
-
-# Consensus
-
-PERCEIVE can incorporate multiple governance evaluations rather than relying on a single uncontrolled decision point.
-
-Conceptually:
-
-    GOVERNANCE GATE 1 ──┐
-    GOVERNANCE GATE 2 ──┤
-    GOVERNANCE GATE 3 ──┼──► GOVERNANCE RESULT
-    GOVERNANCE GATE 4 ──┤
-                        ┘
-
-This permits the system to represent governance as an explicit evaluation process rather than an implicit property of the application.
-
----
-
-# OBSERVE → PERCEIVE Boundary
-
-The boundary between the two systems is one of the most important architectural features.
-
-OBSERVE produces:
-
-    EVIDENCE-BEARING OBSERVED STATE
-
-PERCEIVE consumes:
-
-    EVIDENCE-BEARING OBSERVED STATE
-
-and produces:
-
-    GOVERNED INTERPRETATION / DECISION
-
-The distinction can therefore be summarized as:
-
-    OBSERVE
-       =
-    DETECT
-    MEASURE
-    ASSESS
-    FUSE
-    CLASSIFY
-
-    PERCEIVE
-       =
-    CONTEXTUALIZE
-    INTERPRET
-    EVALUATE
-    GOVERN
-    AUTHORIZE
-
----
-
-# Current Implementation:
-# Pediatric Sepsis Monitoring
-
-The current implementation demonstrates the architecture through pediatric sepsis monitoring.
-
-The representative pipeline is:
-
-    PHYSIOLOGICAL SIGNALS
-             │
-             ▼
-       SIGNAL VALIDATION
-             │
-             ▼
-      MULTIPLE RISK ENGINES
-             │
-             ▼
-            FUSION
-             │
-             ▼
-       CLINICAL STATE
-             │
-             ▼
-        ESCALATION
-             │
-             ▼
-          PERCEIVE
-             │
-             ▼
-       GOVERNANCE GATES
-             │
-             ▼
-      GOVERNED DECISION
-
-The clinical implementation includes concepts such as:
-
-- physiological observations;
-- risk assessment;
-- trajectory;
-- drift;
-- behavioral signals;
-- adversarial sensor-fault detection;
-- physiological reserve;
-- fused risk;
-- operational regimes;
-- and escalation.
-
-These are domain-specific implementations of the broader observation architecture.
-
----
-
-# The Pediatric Implementation Is a Representative Example
-
-The presence of pediatric sepsis monitoring in the current implementation should not be interpreted as meaning that OBSERVE/PERCEIVE is inherently a healthcare system.
-
-The underlying architecture is industry-agnostic.
-
-The same separation can conceptually be applied to other environments in which a system must:
-
-1. observe its environment or internal state;
-2. validate and assess evidence;
-3. establish a representation of what is happening;
-4. interpret that state within context;
-5. apply governing constraints;
-6. and determine what action is permitted.
-
-The current pediatric implementation is therefore the **representative production-oriented example through which the architecture is presently implemented**.
-
----
-
-# Industry-Agnostic Model
-
-The domain-independent representation is:
-
-    ENVIRONMENT
-         │
-         ▼
-      SIGNALS
-         │
-         ▼
-      OBSERVE
-         │
-         ▼
-   OBSERVED STATE
-         │
-         ▼
-     PERCEIVE
-         │
-         ├── CONTEXT
-         ├── POLICY
-         ├── GOVERNANCE
-         └── AUTHORITY
-         │
-         ▼
-   GOVERNED DECISION
-         │
-         ▼
-      EXECUTION
-         │
-         ▼
-       OUTCOME
-         │
-         └──────────────► OBSERVE
-
-The domain-specific meaning of "signal," "state," "risk," "decision," and "action" can change.
-
-The architecture remains the same.
-
----
-
-# Post-Execution Observation
-
-The system does not have to stop observing after a decision.
-
-The outcome of execution can become a new observation.
-
-    DECISION
-       │
-       ▼
-    EXECUTION
-       │
-       ▼
-     OUTCOME
-       │
-       ▼
-     OBSERVE
-       │
-       ▼
-    NEW EVIDENCE
-       │
-       ▼
-    FUTURE PERCEIVE
-
-This creates a continuous observation-governance cycle.
-
----
-
-# Why the Separation Matters
-
-A system that combines observation and governance into a single component can make it difficult to distinguish:
-
-- what actually happened;
-- what the system inferred;
-- what policy concluded;
-- and what action was authorized.
-
-OBSERVE/PERCEIVE deliberately separates those functions.
-
-The architecture therefore establishes a conceptual chain:
-
-    OBSERVATION
-         ↓
-    ASSESSMENT
-         ↓
-    EVIDENCE
-         ↓
-    INTERPRETATION
-         ↓
-    GOVERNANCE
-         ↓
-    AUTHORIZATION
-         ↓
-    ACTION
-         ↓
-    OUTCOME
-         ↓
-    OBSERVATION
-
-This creates a closed-loop architecture while preserving distinctions between the stages.
-
----
-
-# Design Principles
-
-## Observation Before Interpretation
-
-The system should establish an evidence-bearing observed state before governance interprets it.
-
-## Evidence Before Authority
-
-The existence of a condition and the authority to act upon that condition are separate concepts.
-
-## No Silent Normalization
-
-Missing or insufficient evidence should not automatically become evidence of normality.
-
-## Independent Assessment
-
-Multiple assessment mechanisms may evaluate the same observed state independently.
-
-## Explicit Fusion
-
-Combining observations should be an identifiable operation.
-
-## Temporal Continuity
-
-Current state should remain distinguishable from historical behavior and change.
-
-## Governance at the Boundary
-
-The transition from observed state to authorized action should occur through explicit governance controls.
-
-## Separation of Concerns
-
-OBSERVE should not silently become PERCEIVE.
-
-PERCEIVE should not silently invent OBSERVE's evidence.
-
-## Application Independence
-
-A representative implementation should demonstrate the architecture without defining its limits.
-
----
-
-# What OBSERVE/PERCEIVE Is Not
-
-The architecture is not inherently:
-
-- a pediatric monitoring system;
-- a sepsis detection system;
-- a medical decision system;
-- a telemetry collector;
-- a conventional logging framework;
-- or a single-domain governance application.
-
-Those describe the current implementation context rather than the underlying architecture.
-
----
-
-# Current Status
-
-OBSERVE/PERCEIVE is implemented as a concrete observation-and-governance system using pediatric sepsis monitoring as its current representative application.
-
-The implementation demonstrates:
-
-    SIGNAL OBSERVATION
-          │
-          ▼
-    VALIDATION
-          │
-          ▼
-    MULTI-MODEL ASSESSMENT
-          │
-          ▼
-    FUSION
-          │
-          ▼
-    OBSERVED STATE
-          │
-          ▼
-    GOVERNED INTERPRETATION
-          │
-          ▼
-    AUTHORIZED RESPONSE
-
-The architecture itself is industry-agnostic.
-
-The pediatric sepsis implementation is the current representative example through which the architecture is exercised.
-
----
-
-# Central Proposition
-
-> **OBSERVE establishes what can be established about the state of a system. PERCEIVE interprets that state within context and governance. The separation creates an explicit boundary between observation, meaning, authority, and action.**
-
----
-
-# Why did the system do that?
-
-One reproducible scenario through the real governed action gate, then one
-deliberate corruption of the record, which the chain must catch. It exercises
-the actual components: Gateway admission and sealing, the AUGUR screen,
-PERCEIVE, the Conservation Kernel, execution, OBSERVE, and the chain verifier.
-
-From a clean environment:
+One reproducible scenario through the real gate, then deliberate corruption that the chain must catch:
 
 ```bash
 git clone https://github.com/wking53214/observe-perceive
-git clone https://github.com/wking53214/Governance_Gateway   # admission and sealing (step 1)
-git clone https://github.com/wking53214/AUGUR                # simulation screen (step 6)
+git clone https://github.com/wking53214/Governance_Gateway
+git clone https://github.com/wking53214/AUGUR
 python3 -m pip install -r observe-perceive/requirements.txt
 python3 -m pip install "git+https://github.com/wking53214/Conservation_Kernel"
 cd observe-perceive
-python3 demo_why.py                    # corrupts the recorded outcome
-python3 demo_why.py --corrupt approval # or: source, authority, timestamp
+python3 demo_why.py
+python3 demo_why.py --corrupt approval   # or: source, authority, timestamp
 ```
 
-Exit status 0 means the corruption was detected. Without the two optional
-checkouts the demo says which step it could not run and does not pretend it
-did. `python3 -m pytest test_demo_why.py` runs every corruption as a test.
+Exit 0 means the corruption was detected. Without optional checkouts the demo reports which step it could not run and does not pretend it did.
 
-What the record carries afterwards: every stage's decision object, the
-request it decided, a `handoff` block (producer, contract version, authority,
-epistemic status, strict flags), and `chain_verification`, which re-derives
-every state commitment, checks the artifact hash against the content, checks
-every identifier across records, checks that time runs forward, and checks
-that the decision is in both kernels' ledgers. `audit_chain_valid` is true
-only when all of that holds and the chain reached an outcome.
+---
+
+## Status
+
+**In development.** Reference implementation is exercised and tested; packaging and production ops still vary by deployment. Known stack gaps outside this repo include authorization *issuance*, a full identity plane, policy-as-governed-object, external auditor packs, and subject contestability — see sibling kernels and the decision spine for what *is* implemented.
+
+Further architecture notes: `docs/closure/`, `GOVERNANCE_ORCHESTRATION.md`, `CLAUDE_ARCHITECTURE_STATE.md`.
+
+---
+
+## Central proposition
+
+> OBSERVE establishes what can be established about state. PERCEIVE interprets that state under policy gates. Conservation checks whether the transformation preserved what it claimed. The chain recomputes evidence instead of trusting stored strings. Authorization remains a separate concern the policy layer does not claim.
