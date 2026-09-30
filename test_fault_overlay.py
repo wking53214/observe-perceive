@@ -345,6 +345,38 @@ class TestFaultPageDedup(unittest.TestCase):
         self.assertFalse(fault.escalation_required)
         self.assertNotIn("tw", engine._patient_fault_paged)
 
+    # Reading times the dedup cannot measure (red-team finding on the overlay):
+    # no timestamp, naive against aware, or not a datetime at all. The base
+    # fault path returned a verdict for all of these; the overlay must too.
+    _NAIVE = datetime(2026, 1, 1, 0, 0, 10)
+
+    def test_a_missing_reading_time_does_not_turn_a_sensor_fault_into_a_page_storm(self):
+        engine = ObserveClinicalEngine()
+        pages = [engine.evaluate(make_vitals(patient_id="nt", oxygen_saturation=NAN,
+                                             timestamp=ts)).escalation_required
+                 for ts in (None, None, T0, T0 + timedelta(seconds=ESCALATION_LOCK_SECONDS))]
+        # held while the window cannot be measured; once the feed's times are
+        # comparable again, the next fault a full window later pages
+        self.assertEqual(pages, [True, False, False, True])
+
+    def test_an_incomparable_reading_time_never_raises_on_the_fault_path(self):
+        engine = ObserveClinicalEngine()
+        pages = []
+        for ts in (T0, self._NAIVE, "2026-01-01T00:00:20", 1767225630.0):
+            verdict = engine.evaluate(make_vitals(patient_id="tz", oxygen_saturation=NAN, timestamp=ts))
+            self.assertGreaterEqual(verdict.risk_score, REGIME_RISK_FLOOR["warning"], msg=repr(ts))
+            pages.append(verdict.escalation_required)
+        self.assertEqual(pages, [True, False, False, False])  # the window cannot be measured: held
+
+    def test_a_valid_channel_emergency_still_pages_when_the_window_cannot_be_measured(self):
+        engine = ObserveClinicalEngine()
+        self.assertTrue(engine.evaluate(make_vitals(patient_id="tb", timestamp=T0,
+                                                    **_HARD_RULE_ON_VALID)).escalation_required)
+        again = engine.evaluate(make_vitals(patient_id="tb", timestamp=self._NAIVE, **_HARD_RULE_ON_VALID))
+        self.assertTrue(again.escalation_required)  # never swallow an emergency on a working channel
+        sensor = engine.evaluate(make_vitals(patient_id="tb", oxygen_saturation=NAN, timestamp=self._NAIVE))
+        self.assertFalse(sensor.escalation_required)
+
 
 class TestTheKalmanTrackerIsNotFedAPlaceholder(unittest.TestCase):
 

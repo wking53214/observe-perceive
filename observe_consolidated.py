@@ -1368,9 +1368,21 @@ class ObserveClinicalEngine:
         kind = "bypass" if bypass else "sensor"
         with self._state_lock:
             stamps = self._patient_fault_paged.setdefault(subject, {})
-            last = stamps.get(kind)
-            if last is not None and (timestamp - last).total_seconds() < ESCALATION_LOCK_SECONDS:
-                return False
+            if kind in stamps:
+                try:
+                    cooled = (timestamp - stamps[kind]).total_seconds() >= ESCALATION_LOCK_SECONDS
+                except (TypeError, AttributeError):
+                    # The window cannot be measured: a reading time that is
+                    # missing, naive against aware, or not a datetime. A
+                    # repeated sensor page is held, so a sustained probe fault
+                    # is not a page storm; a bypass still pages, so an
+                    # emergency on a working channel is never swallowed. The
+                    # window restarts from this reading, so once the feed's
+                    # times are comparable again a hold lasts one window at most.
+                    stamps[kind] = timestamp
+                    cooled = bypass
+                if not cooled:
+                    return False
             stamps[kind] = timestamp
             if bypass:
                 stamps["sensor"] = timestamp
