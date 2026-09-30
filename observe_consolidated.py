@@ -33,6 +33,7 @@ from uuid import uuid4
 import copy
 
 from cassette import label as cassette_label
+from governance_contracts import compute_state_commitment
 from kalman_trajectory import PatientKalmanTracker
 
 logger = logging.getLogger("OBSERVE")
@@ -96,6 +97,10 @@ class FusedVerdict:
     escalation_required: bool = False  # True only for THIS evaluation's NEW escalation
     # (regime may remain WARNING/CRITICAL on later calls due to escalation_locked
     # cooldown even when escalation_required=False on those calls)
+    parameter_set_version: str = ""  # PARAMETER_SET_VERSION active when this verdict was produced
+    predecessor_state_commitment: str = ""  # the subject's previous state_commitment, "" for its first
+    state_commitment: str = ""  # governance_contracts.compute_state_commitment over verdict_state(),
+    # chained per subject through predecessor_state_commitment; recorded in the audit entry
 
 @dataclass
 class ScheduledJob:
@@ -138,6 +143,26 @@ VITALS_PHYSICAL_BOUNDS = {
     "respiratory_rate": (0.0, 150.0),
     "temperature": (20.0, 45.0),
 }
+
+# ============================================================================
+# CALIBRATION SURFACE (ported from OBSERVE, finding I-3)
+# ============================================================================
+# Named so there is one source of truth for each value the core's decision
+# path is tuned by, and so PARAMETER_SET_VERSION (below) changes whenever any
+# of them changes. The entropy trigger for the heavy engine set and the
+# hard-rule risk threshold are not here: they belong to the cassette, so the
+# cassette's name and version are bound into every decision payload instead.
+REGIME_DISTRIBUTION_BANDS = (
+    # (inclusive lower risk bound, {regime: probability}); descending, the last is the floor band
+    (0.75, {"stable": 0.05, "caution": 0.10, "warning": 0.25, "critical": 0.60}),
+    (0.50, {"stable": 0.10, "caution": 0.20, "warning": 0.55, "critical": 0.15}),
+    (0.25, {"stable": 0.35, "caution": 0.50, "warning": 0.12, "critical": 0.03}),
+    (0.00, {"stable": 0.88, "caution": 0.08, "warning": 0.03, "critical": 0.01}),
+)
+REGIME_CRITICAL_FLOOR_DEFAULT = 0.01  # regime_distribution: critical never reaches exactly zero
+DRIFT_CRITICAL_FLOOR = 0.02           # the drift adapter's stricter floor
+ESCALATION_DWELL_THRESHOLD = 2        # consecutive confirming readings before a regime change
+ESCALATION_LOCK_SECONDS = 300         # post-escalation cooldown
 
 
 def validate_vitals(vitals: "VitalsSnapshot") -> List[str]:
@@ -246,6 +271,60 @@ def sanitize_context(
     return cleaned, notes
 
 
+# ============================================================================
+# PARAMETER-SET PROVENANCE (ported from OBSERVE, finding I-3)
+# ============================================================================
+# Two builds with different calibration constants could produce byte-identical
+# audit records on identical inputs, so a verdict was not independently
+# replayable and drift in a threshold was invisible downstream. PARAMETER_SET
+# is the declared manifest of the core's calibration surface; its SHA-256,
+# PARAMETER_SET_VERSION, is stamped on every FusedVerdict and folded into the
+# fingerprinted decision payload and the audit entry. test_observe_invariants.py
+# asserts each entry still tracks its live constant.
+#
+# Scope. Covered: the module constants named here, which the engine uses with
+# no override (EscalationPolicy is built with the declared dwell and lock).
+# Not covered: the score increments inside the adapters and the branch logic
+# of evaluate, EscalationPolicy and regime_distribution; those are attested by
+# the source revision that produced the build. The cassette's own calibration
+# (engine selection, hard-rule threshold) is bound through the cassette name
+# and version recorded in the same decision payload, not through this hash.
+#
+# copy.deepcopy so this is a snapshot taken at import, not a live alias of the
+# module dicts: a runtime mutation of PEDIATRIC_NORMS would otherwise shift the
+# effective config while the version stamp stayed byte-identical.
+PARAMETER_SET: Dict[str, Any] = copy.deepcopy({
+    "schema": "observe.parameters/v1",
+    "pediatric_norms": PEDIATRIC_NORMS,
+    "drift_sigma_threshold": DRIFT_SIGMA_THRESHOLD,
+    "vitals_physical_bounds": {k: list(v) for k, v in VITALS_PHYSICAL_BOUNDS.items()},
+    "regime_distribution_bands": [[lb, shape] for lb, shape in REGIME_DISTRIBUTION_BANDS],
+    "regime_critical_floor_default": REGIME_CRITICAL_FLOOR_DEFAULT,
+    "drift_critical_floor": DRIFT_CRITICAL_FLOOR,
+    "escalation_dwell_threshold": ESCALATION_DWELL_THRESHOLD,
+    "escalation_lock_seconds": ESCALATION_LOCK_SECONDS,
+})
+
+
+def _canonical_json(obj: Any) -> str:
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
+
+
+PARAMETER_SET_VERSION: str = hashlib.sha256(_canonical_json(PARAMETER_SET).encode("utf-8")).hexdigest()
+
+
+def verdict_state(subject: str, decision_fingerprint: str) -> Dict[str, Any]:
+    """The state one verdict commits to, chained per subject by predecessor.
+
+    The fingerprint already covers the observation, the engine outputs, the
+    verdict, the parameter-set version and the cassette identity, so the
+    commitment binds only the subject and the fingerprint. A verifier
+    recomputes it from the audit entry with
+    governance_contracts.compute_state_commitment(predecessor, verdict_state(...)).
+    """
+    return {"subject": subject, "decision_fingerprint": decision_fingerprint}
+
+
 def decision_fingerprint(data: Dict[str, Any]) -> str:
     """Reproducible SHA256 of the decision-relevant payload (no wall-clock).
 
@@ -270,7 +349,7 @@ def get_age_group(age_months: Optional[int]) -> str:
     return "child"
 
 
-def regime_distribution(risk_score: float, critical_floor: float = 0.01) -> Dict[str, float]:
+def regime_distribution(risk_score: float, critical_floor: float = REGIME_CRITICAL_FLOOR_DEFAULT) -> Dict[str, float]:
     """
     Risk-stratified regime probability distribution.
     FIX: Replaces broken linear-scaling distributions (where 'critical' was
@@ -278,14 +357,12 @@ def regime_distribution(risk_score: float, critical_floor: float = 0.01) -> Dict
     properly dominates at high risk. critical_floor ensures critical never
     truly hits zero (residual clinical uncertainty).
     """
-    if risk_score >= 0.75:
-        d = {"stable": 0.05, "caution": 0.10, "warning": 0.25, "critical": 0.60}
-    elif risk_score >= 0.50:
-        d = {"stable": 0.10, "caution": 0.20, "warning": 0.55, "critical": 0.15}
-    elif risk_score >= 0.25:
-        d = {"stable": 0.35, "caution": 0.50, "warning": 0.12, "critical": 0.03}
-    else:
-        d = {"stable": 0.88, "caution": 0.08, "warning": 0.03, "critical": 0.01}
+    # A fresh dict per call: the floor adjustment below mutates it.
+    d = dict(REGIME_DISTRIBUTION_BANDS[-1][1])
+    for lower_bound, shape in REGIME_DISTRIBUTION_BANDS:
+        if risk_score >= lower_bound:
+            d = dict(shape)
+            break
 
     if d["critical"] < critical_floor:
         deficit = critical_floor - d["critical"]
@@ -507,8 +584,8 @@ class RiskAdapters:
         max_hist = max(len(history_o2), len(history_hr))
         confidence = 0.95 if max_hist >= 100 else 0.85 if max_hist >= 50 else 0.70 if max_hist >= 10 else 0.50
 
-        # FIX: explicit critical_floor=0.02 documented — drift never reduces critical risk to exactly 0
-        return RiskOutput("drift", score, confidence, regime_distribution(score, critical_floor=0.02), triggered, datetime.now(timezone.utc))
+        # FIX: explicit DRIFT_CRITICAL_FLOOR documented: drift never reduces critical risk to exactly 0
+        return RiskOutput("drift", score, confidence, regime_distribution(score, critical_floor=DRIFT_CRITICAL_FLOOR), triggered, datetime.now(timezone.utc))
 
     @staticmethod
     def behavioral_vaccine(vitals: VitalsSnapshot) -> RiskOutput:
@@ -859,7 +936,8 @@ class BayesianFusion:
 class EscalationPolicy:
     """Hysteresis + dwell logic to prevent regime thrashing."""
 
-    def __init__(self, dwell_threshold: int = 2, lock_seconds: int = 300):
+    def __init__(self, dwell_threshold: int = ESCALATION_DWELL_THRESHOLD,
+                 lock_seconds: int = ESCALATION_LOCK_SECONDS):
         self.dwell_threshold = dwell_threshold
         self.lock_seconds = lock_seconds
         self.current_regime = OperationalRegime.STABLE
@@ -1177,6 +1255,10 @@ class ObserveClinicalEngine:
         self._max_tracked_patients = max_tracked_patients
         self._patient_policies: "OrderedDict[str, EscalationPolicy]" = OrderedDict()
         self._patient_entropy: Dict[str, float] = {}
+        # Head of each subject's verdict-state chain. Evicted with the policy
+        # state, so a subject that returns after eviction starts a new chain
+        # (predecessor ""); the audit ledger still holds every commitment.
+        self._state_commitments: Dict[str, str] = {}
         # FIX(red-team / concurrency): the per-patient OrderedDict + entropy dict are
         # mutated during evaluate(). Safe under a single asyncio loop (no await inside
         # evaluate), but a thread pool / multiple loops could corrupt them mid-resize.
@@ -1209,6 +1291,7 @@ class ObserveClinicalEngine:
             while len(self._patient_policies) > self._max_tracked_patients:
                 evicted_id, _ = self._patient_policies.popitem(last=False)  # drop LRU
                 self._patient_entropy.pop(evicted_id, None)
+                self._state_commitments.pop(evicted_id, None)
 
     def _get_policy(self, patient_id: str) -> EscalationPolicy:
         with self._state_lock:
@@ -1216,6 +1299,28 @@ class ObserveClinicalEngine:
                 self._patient_policies[patient_id] = EscalationPolicy()
         self._touch_patient(patient_id)
         return self._patient_policies[patient_id]
+
+    def _provenance(self) -> Dict[str, Any]:
+        """What produced a decision besides its inputs: the core's calibration
+        version and the cassette's identity. Part of the fingerprinted payload."""
+        return {
+            "parameter_set_version": PARAMETER_SET_VERSION,
+            "cassette": {"name": str(getattr(self._cassette, "name", "")),
+                         "version": str(getattr(self._cassette, "version", ""))},
+        }
+
+    def _commit_state(self, subject: str, decision_fingerprint: str) -> Tuple[str, str]:
+        """Chain this verdict's state onto the subject's previous one.
+
+        Returns (predecessor_state_commitment, state_commitment). The head
+        moves under the state lock; two readings for the same subject in
+        flight at once are still the caller's to serialize (see README).
+        """
+        with self._state_lock:
+            predecessor = self._state_commitments.get(subject, "")
+            commitment = compute_state_commitment(predecessor, verdict_state(subject, decision_fingerprint))
+            self._state_commitments[subject] = commitment
+        return predecessor, commitment
 
     def select_engines(self, vitals: VitalsSnapshot) -> List[str]:
         """Which engines to run. The rule is the DOMAIN's, not the core's.
@@ -1323,8 +1428,10 @@ class ObserveClinicalEngine:
             "selected_engines": selected,
             "outputs": [{"engine": o.engine_name, "risk": o.risk_score, "confidence": o.confidence, "rules": o.triggered_rules} for o in outputs],
             "verdict": {"risk_score": fused_risk, "regime": final_regime.value, "escalation_required": escalation, "entropy": entropy},
+            **self._provenance(),
         }
         fingerprint = decision_fingerprint(decision_data)
+        predecessor, commitment = self._commit_state(subject, fingerprint)
 
         verdict = FusedVerdict(
             risk_score=fused_risk,
@@ -1336,11 +1443,15 @@ class ObserveClinicalEngine:
             timestamp=datetime.now(timezone.utc),
             escalation_required=escalation,
             decision_fingerprint=fingerprint,
+            parameter_set_version=PARAMETER_SET_VERSION,
+            predecessor_state_commitment=predecessor,
+            state_commitment=commitment,
         )
 
         audit_hash = self.audit_ledger.append(
             subject, cassette_label(self._cassette, "record_kind"),
-            {**decision_data, "decision_fingerprint": fingerprint},
+            {**decision_data, "decision_fingerprint": fingerprint,
+             "predecessor_state_commitment": predecessor, "state_commitment": commitment},
         )
         verdict.audit_hash = audit_hash
 
@@ -1376,17 +1487,22 @@ class ObserveClinicalEngine:
             "outputs": [],
             "verdict": {"risk_score": 0.0, "regime": "warning", "escalation_required": escalation,
                         "entropy": 0.0, "data_integrity_fault": True},
+            **self._provenance(),
         }
         fingerprint = decision_fingerprint(decision_data)
+        predecessor, commitment = self._commit_state(subject, fingerprint)
         audit_hash = self.audit_ledger.append(
             subject, cassette_label(self._cassette, "record_kind"),
-            {**decision_data, "decision_fingerprint": fingerprint},
+            {**decision_data, "decision_fingerprint": fingerprint,
+             "predecessor_state_commitment": predecessor, "state_commitment": commitment},
         )
         logger.warning(f"DATA_INTEGRITY_FAULT: subject={subject} faults={faults}")
         return FusedVerdict(
             risk_score=0.0, regime=OperationalRegime.WARNING, confidence=0.0, entropy=0.0,
             active_engines=[], triggered_rules=triggered, timestamp=datetime.now(timezone.utc),
             escalation_required=escalation, decision_fingerprint=fingerprint, audit_hash=audit_hash,
+            parameter_set_version=PARAMETER_SET_VERSION,
+            predecessor_state_commitment=predecessor, state_commitment=commitment,
         )
 
 
