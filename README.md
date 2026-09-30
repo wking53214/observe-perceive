@@ -55,7 +55,7 @@ Policy gates under declared consensus. Historical six-gate unanimous pattern. **
 
 ### OBSERVE (`observe_consolidated.py`, ~1416 lines)
 
-Clinical fusion: validate → multi-assessor → fuse → regime → escalation. `RiskAdapters.heuristic` and `behavioral_vaccine` are the source α extracted. `EscalationPolicy` is the source ζ extracted. They still run **here**, live.
+Clinical fusion: validate → multi-assessor → fuse → regime → escalation. `RiskAdapters.heuristic` and `behavioral_vaccine` are the source α extracted. `EscalationPolicy` is the source ζ extracted. They still run **here**, live. Every verdict is stamped with `PARAMETER_SET_VERSION` (SHA-256 of the declared calibration constants) and a per-subject `state_commitment` chained through `predecessor_state_commitment`; both are replayable from the audit entry (`test_observe_invariants.py`).
 
 ### Execution guard (`execution_guard.py`)
 
