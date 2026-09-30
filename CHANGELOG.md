@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+- **OBSERVE partial-assessment fault overlay** (ported from the OBSERVE
+  fork, its T2b findings). A reading with a faulted channel is no longer
+  left unscored when the cassette can say which channel is bad. A cassette
+  may now supply one optional member, `mask_faults(obs, faults)`
+  (`cassette.OPTIONAL`, `cassette.PartiallyAssessable`,
+  `cassette.optional_member`; `conformance_failures` names it only when it
+  is present and not callable). The pediatric cassette, now 1.1.0,
+  supplies it: each faulted channel is read as a neutral value that is a
+  finding in no engine (`_VITALS_NEUTRAL`) and the context keys that carry
+  that channel's history are dropped (`_CHANNEL_CONTEXT_KEYS`), so the
+  channels that still work are scored. The core then overlays the fault:
+  the regime is the most severe of the masked candidate, WARNING and the
+  tracked regime; the EscalationPolicy is read and never written on a
+  faulted reading; `risk_score` is floored to `REGIME_RISK_FLOOR` of that
+  regime on every such reading; confidence is multiplied by
+  `UNASSESSABLE_CONFIDENCE_PENALTY` (0.5); the reading's entropy is not
+  carried; the Kalman tracker is not updated. Paging on a faulted reading
+  is deduplicated per subject by reading time over
+  `ESCALATION_LOCK_SECONDS`, with a sensor page and a page for a hard rule
+  or syndrome on a valid channel kept apart, so a sensor page never
+  silences a real emergency. When the cassette cannot attribute a fault,
+  or every channel is faulted, nothing is scored and the record says so;
+  the policy is still not written. `FusedVerdict` gains
+  `validation_faults` and `unassessable`. On a faulted reading the decision
+  payload records the reading as it arrived, `validation_faults`,
+  `verdict.unassessable` and `assessed_vitals`, all inside the
+  fingerprint; clean entries keep their shape. Rules keep the
+  `DATA_INTEGRITY_FAULT: ` prefix. The industrial cassette is unchanged
+  and keeps the plain fault verdict (which, like before, still writes
+  WARNING into the policy). `REGIME_RISK_FLOOR` and
+  `UNASSESSABLE_CONFIDENCE_PENALTY` join `PARAMETER_SET`, so
+  `PARAMETER_SET_VERSION` changes; with the cassette version bump,
+  fingerprints of earlier records do not match. One pre-existing
+  assertion changed: `test_nan_vital_rejected` asserted
+  `active_engines == []` ("nothing was scored"), the behaviour this entry
+  replaces; it now asserts `validation_faults` and `unassessable`, as the
+  fork's original does. The seven T2b tests are ported in
+  `T2b_PartialAssessmentOverlayIsSafe`; the port's own decisions are
+  pinned in `test_fault_overlay.py`. Full suite: 671 passed, 59 skipped,
+  5 xfailed (was 622 passed). `ruff check .` is clean.
+
 - **OBSERVE parameter-set version and per-subject state commitments**
   (ported from the OBSERVE fork, finding I-3 of its resilience assessment).
   The core's calibration surface is now named constants
@@ -21,7 +62,7 @@
   Fingerprints of records written before this change do not match the new
   ones. `test_observe_invariants.py` ports the fork's invariants suite
   (42 tests); the seven assertions that encode the fork's partial-assessment
-  fault overlay are listed in its docstring as not ported.
+  fault overlay were ported afterwards (see the entry above).
 
 - **Chain and fortress dependencies pinned to commits.** CCC, AUGUR, GEMS,
   Governance_Gateway and fortress-kernel were unpinned, so each install

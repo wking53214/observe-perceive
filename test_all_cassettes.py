@@ -15,7 +15,7 @@ import pytest
 
 from cassette import REQUIRED, conformance_failures, label
 from installed_cassettes import INSTALLED, InstalledCassette, verify_registry
-from observe_consolidated import ObserveClinicalEngine
+from observe_consolidated import ObserveClinicalEngine, decision_fingerprint
 
 IDS = [e.name for e in INSTALLED]
 
@@ -117,6 +117,19 @@ class TestEveryDomainReachesTheRightVerdict:
             f"{entry.name}: an impossible reading was scored as stable"
         )
         assert any("DATA_INTEGRITY_FAULT" in r for r in verdict.triggered_rules)
+
+    def test_a_fault_verdict_has_one_shape_in_every_domain(self, entry):
+        """Whichever fault path a domain takes, downstream reads one contract
+        and a verifier can replay the record."""
+        engine = self._engine(entry)
+        verdict = engine.evaluate(entry.faulted())
+        assert verdict.unassessable
+        assert verdict.validation_faults == entry.cassette.validate(entry.faulted())
+        assert any(r.startswith("DATA_INTEGRITY_FAULT: ") for r in verdict.triggered_rules)
+        data = engine.audit_ledger.entries[-1]["data"]
+        payload = {k: v for k, v in data.items()
+                   if k not in ("decision_fingerprint", "predecessor_state_commitment", "state_commitment")}
+        assert decision_fingerprint(payload) == verdict.decision_fingerprint
 
     def test_subjects_are_isolated_from_one_another(self, entry):
         """Per-subject state keys on whatever the cassette calls identity."""

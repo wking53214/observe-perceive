@@ -32,7 +32,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 from uuid import uuid4
 import copy
 
-from cassette import label as cassette_label
+from cassette import label as cassette_label, optional_member as cassette_optional_member
 from governance_contracts import compute_state_commitment
 from kalman_trajectory import PatientKalmanTracker
 
@@ -47,6 +47,20 @@ class OperationalRegime(Enum):
     CAUTION = "caution"
     WARNING = "warning"
     CRITICAL = "critical"
+
+#: STABLE < CAUTION < WARNING < CRITICAL, named once so the fault overlay can
+#: take a maximum without re-deriving the order from band shapes.
+_REGIME_SEVERITY = {
+    OperationalRegime.STABLE: 0,
+    OperationalRegime.CAUTION: 1,
+    OperationalRegime.WARNING: 2,
+    OperationalRegime.CRITICAL: 3,
+}
+
+
+def _max_severity(*regimes: OperationalRegime) -> OperationalRegime:
+    """The most severe of the given regimes."""
+    return max(regimes, key=lambda r: _REGIME_SEVERITY[r])
 
 class JobStatus(Enum):
     QUEUED = "queued"
@@ -101,6 +115,10 @@ class FusedVerdict:
     predecessor_state_commitment: str = ""  # the subject's previous state_commitment, "" for its first
     state_commitment: str = ""  # governance_contracts.compute_state_commitment over verdict_state(),
     # chained per subject through predecessor_state_commitment; recorded in the audit entry
+    validation_faults: List[str] = field(default_factory=list)  # validate()'s faults; non-empty iff unassessable
+    unassessable: bool = False  # True iff at least one channel of this reading failed validate().
+    # With active_engines non-empty the verdict assesses the VALID channels only, floored at
+    # WARNING and never below the tracked regime; with active_engines == [] nothing was scored.
 
 @dataclass
 class ScheduledJob:
@@ -162,7 +180,12 @@ REGIME_DISTRIBUTION_BANDS = (
 REGIME_CRITICAL_FLOOR_DEFAULT = 0.01  # regime_distribution: critical never reaches exactly zero
 DRIFT_CRITICAL_FLOOR = 0.02           # the drift adapter's stricter floor
 ESCALATION_DWELL_THRESHOLD = 2        # consecutive confirming readings before a regime change
-ESCALATION_LOCK_SECONDS = 300         # post-escalation cooldown
+ESCALATION_LOCK_SECONDS = 300         # post-escalation cooldown (also the fault-page dedup window)
+# Fault overlay (ported from OBSERVE, T2b): how the core reasons about a reading
+# with a faulted channel. Each floor is the bottom of the REGIME_DISTRIBUTION_BANDS
+# band its regime wins, so a floored verdict's risk and regime agree.
+REGIME_RISK_FLOOR = {"stable": 0.0, "caution": 0.25, "warning": 0.50, "critical": 0.75}
+UNASSESSABLE_CONFIDENCE_PENALTY = 0.5  # multiplies fused confidence when any channel is faulted
 
 
 def validate_vitals(vitals: "VitalsSnapshot") -> List[str]:
@@ -303,6 +326,8 @@ PARAMETER_SET: Dict[str, Any] = copy.deepcopy({
     "drift_critical_floor": DRIFT_CRITICAL_FLOOR,
     "escalation_dwell_threshold": ESCALATION_DWELL_THRESHOLD,
     "escalation_lock_seconds": ESCALATION_LOCK_SECONDS,
+    "regime_risk_floor": REGIME_RISK_FLOOR,
+    "unassessable_confidence_penalty": UNASSESSABLE_CONFIDENCE_PENALTY,
 })
 
 
@@ -1259,6 +1284,11 @@ class ObserveClinicalEngine:
         # state, so a subject that returns after eviction starts a new chain
         # (predecessor ""); the audit ledger still holds every commitment.
         self._state_commitments: Dict[str, str] = {}
+        # Reading time of the last page a data-integrity fault caused for each
+        # subject, per page kind ("sensor", "bypass"); see _fault_page. The
+        # EscalationPolicy is never written on such a reading, so it cannot
+        # carry this dedup. Evicted with the policy.
+        self._patient_fault_paged: Dict[str, Dict[str, datetime]] = {}
         # FIX(red-team / concurrency): the per-patient OrderedDict + entropy dict are
         # mutated during evaluate(). Safe under a single asyncio loop (no await inside
         # evaluate), but a thread pool / multiple loops could corrupt them mid-resize.
@@ -1292,6 +1322,7 @@ class ObserveClinicalEngine:
                 evicted_id, _ = self._patient_policies.popitem(last=False)  # drop LRU
                 self._patient_entropy.pop(evicted_id, None)
                 self._state_commitments.pop(evicted_id, None)
+                self._patient_fault_paged.pop(evicted_id, None)
 
     def _get_policy(self, patient_id: str) -> EscalationPolicy:
         with self._state_lock:
@@ -1322,6 +1353,29 @@ class ObserveClinicalEngine:
             self._state_commitments[subject] = commitment
         return predecessor, commitment
 
+    def _fault_page(self, subject: str, timestamp: datetime, crossed_up: bool, bypass: bool) -> bool:
+        """Whether a reading with a data-integrity fault pages. Never writes the policy.
+
+        Two page kinds, each deduplicated per subject for ESCALATION_LOCK_SECONDS
+        of reading time. "sensor": the fault lifts a subject tracked below
+        WARNING to a reported WARNING (crossed_up). "bypass": a hard rule or
+        syndrome fired on a channel that is still valid; it pages whatever the
+        tracked regime. A bypass page also stamps "sensor", since it surfaced
+        the fault too; a sensor page never silences a later bypass.
+        """
+        if not (crossed_up or bypass):
+            return False
+        kind = "bypass" if bypass else "sensor"
+        with self._state_lock:
+            stamps = self._patient_fault_paged.setdefault(subject, {})
+            last = stamps.get(kind)
+            if last is not None and (timestamp - last).total_seconds() < ESCALATION_LOCK_SECONDS:
+                return False
+            stamps[kind] = timestamp
+            if bypass:
+                stamps["sensor"] = timestamp
+        return True
+
     def select_engines(self, vitals: VitalsSnapshot) -> List[str]:
         """Which engines to run. The rule is the DOMAIN's, not the core's.
 
@@ -1342,9 +1396,23 @@ class ObserveClinicalEngine:
         # impossible reading is a sensor/data fault, not a clinical state. It must
         # NEVER be scored as 'stable'. Surface it as an immediate WARNING escalation
         # so a human checks the patient/sensor. Deterministic on the (invalid) inputs.
+        # PARTIAL ASSESSMENT (ported from OBSERVE, T2b): a cassette that supplies
+        # mask_faults hands back the reading with its faulted channels made
+        # inert, so the channels that still work are scored and the fault is
+        # overlaid below; None from it means nothing is left to score. A
+        # cassette without it keeps the plain fault verdict.
         faults = self._cassette.validate(vitals)
-        if faults:
-            return self._fault_verdict(vitals, policy, faults)
+        unassessable = bool(faults)
+        nothing_assessable = False
+        recorded = vitals  # the reading as it arrived, NaN and all
+        if unassessable:
+            mask_faults = cassette_optional_member(self._cassette, "mask_faults")
+            if mask_faults is None:
+                return self._fault_verdict(vitals, policy, faults)
+            assessed = mask_faults(vitals, faults)
+            nothing_assessable = assessed is None
+            if not nothing_assessable:
+                vitals = assessed
 
         # CONTEXT SANITIZATION (FIX, red-team R-CTX): context was an unvalidated
         # trust boundary. A non-numeric value (e.g. age_months="?") crashed
@@ -1359,13 +1427,14 @@ class ObserveClinicalEngine:
         if cleaned_context is not vitals.context:
             vitals = replace(vitals, context=cleaned_context)
 
-        selected = self.select_engines(vitals)
+        selected = [] if nothing_assessable else self.select_engines(vitals)
         engines = self._cassette.engines()
         outputs = [engines[name](vitals) for name in selected]
 
         # OPTIONAL (new learning): stateful Kalman trajectory adapter joins fusion when
         # enabled. Deterministic per patient (sequence-dependent). Abstains during warm-up.
-        if self._enable_kalman:
+        # Never on an unassessable reading: a placeholder is not a measurement.
+        if self._enable_kalman and not unassessable:
             kr = self._get_kalman(subject).update(
                 values=self._cassette.channels(vitals), timestamp=vitals.timestamp,
             )
@@ -1377,8 +1446,9 @@ class ObserveClinicalEngine:
             selected = selected + ["trajectory_kalman"]
 
         fused_risk, entropy, regime_probs, rationale = BayesianFusion.fuse(outputs)
-        with self._state_lock:
-            self._patient_entropy[subject] = entropy
+        if not unassessable:  # masked-data entropy must not pick the next reading's engines
+            with self._state_lock:
+                self._patient_entropy[subject] = entropy
 
         max_regime_name = max(regime_probs, key=regime_probs.get)
         candidate_regime = OperationalRegime(max_regime_name)
@@ -1403,7 +1473,24 @@ class ObserveClinicalEngine:
         )
         bypass = hard_rule_fired or syndrome_fired
 
-        if bypass and candidate_regime.value in ("warning", "critical"):
+        if unassessable:
+            # FROZEN POLICY: read, never written, on a faulted reading. Placeholder
+            # data must neither bump, lock, stall nor downgrade the real-signal
+            # state. Report at least WARNING and never below the tracked regime.
+            final_regime = _max_severity(candidate_regime, OperationalRegime.WARNING, policy.current_regime)
+            crossed_up = _REGIME_SEVERITY[policy.current_regime] < _REGIME_SEVERITY[OperationalRegime.WARNING]
+            escalation = self._fault_page(subject, recorded.timestamp, crossed_up, bypass)
+            bypass_label = cassette_label(self._cassette, "safety_bypass")
+            if bypass:
+                reason = "hard-rule" if hard_rule_fired else "dangerous-syndrome"
+                all_triggered_bypass_note = [
+                    f"{bypass_label}: {reason} trigger on a valid channel during a data-integrity fault"]
+            elif nothing_assessable:
+                all_triggered_bypass_note = [f"{bypass_label}: data-integrity fault skipped scoring"]
+            else:
+                all_triggered_bypass_note = []
+            fused_risk = max(fused_risk, REGIME_RISK_FLOOR[final_regime.value])  # every call, not only a change
+        elif bypass and candidate_regime.value in ("warning", "critical"):
             escalation = policy.current_regime.value in ("stable", "caution")
             final_regime = candidate_regime
             policy.current_regime = final_regime
@@ -1419,17 +1506,24 @@ class ObserveClinicalEngine:
             final_regime, escalation = policy.evaluate(candidate_regime, vitals.timestamp)
             all_triggered_bypass_note = []
 
-        all_triggered = all_triggered_bypass_note + [r for o in outputs for r in o.triggered_rules]
+        fault_notes = [f"DATA_INTEGRITY_FAULT: {f}" for f in faults]
+        all_triggered = fault_notes + all_triggered_bypass_note + [r for o in outputs for r in o.triggered_rules]
         avg_confidence = sum(o.confidence for o in outputs) / len(outputs) if outputs else 0.0
+        if unassessable:
+            avg_confidence *= UNASSESSABLE_CONFIDENCE_PENALTY
 
         # Decision-relevant payload — wall-clock-free, so the fingerprint is reproducible.
         decision_data = {
-            "vitals": asdict(vitals),
+            "vitals": asdict(recorded if unassessable else vitals),
             "selected_engines": selected,
             "outputs": [{"engine": o.engine_name, "risk": o.risk_score, "confidence": o.confidence, "rules": o.triggered_rules} for o in outputs],
             "verdict": {"risk_score": fused_risk, "regime": final_regime.value, "escalation_required": escalation, "entropy": entropy},
             **self._provenance(),
         }
+        if unassessable:  # present only then, so a clean entry keeps its shape
+            decision_data["validation_faults"] = list(faults)
+            decision_data["verdict"]["unassessable"] = True
+            decision_data["assessed_vitals"] = None if nothing_assessable else asdict(vitals)
         fingerprint = decision_fingerprint(decision_data)
         predecessor, commitment = self._commit_state(subject, fingerprint)
 
@@ -1446,6 +1540,8 @@ class ObserveClinicalEngine:
             parameter_set_version=PARAMETER_SET_VERSION,
             predecessor_state_commitment=predecessor,
             state_commitment=commitment,
+            validation_faults=list(faults),
+            unassessable=unassessable,
         )
 
         audit_hash = self.audit_ledger.append(
@@ -1455,6 +1551,9 @@ class ObserveClinicalEngine:
         )
         verdict.audit_hash = audit_hash
 
+        if unassessable:
+            logger.warning(f"DATA_INTEGRITY_FAULT: subject={subject} faults={faults} "
+                           f"assessed={selected} regime={final_regime.value}")
         if escalation:
             logger.info(f"ESCALATION: subject={subject} regime={final_regime.value} risk={fused_risk:.2f}")
 
@@ -1467,6 +1566,9 @@ class ObserveClinicalEngine:
         letting it score as a confident 'stable'. Severity (warn+escalate) is the safe
         default for a pediatric early-warning system; a quieter sensor-fault channel is
         advisable in production (configurable — see README).
+
+        Reached only when the cassette supplies no mask_faults; a cassette that
+        supplies one takes the partial-assessment overlay in evaluate() instead.
         """
         subject = self._cassette.subject_id(vitals)
         escalation = policy.current_regime.value in ("stable", "caution")
@@ -1503,6 +1605,7 @@ class ObserveClinicalEngine:
             escalation_required=escalation, decision_fingerprint=fingerprint, audit_hash=audit_hash,
             parameter_set_version=PARAMETER_SET_VERSION,
             predecessor_state_commitment=predecessor, state_commitment=commitment,
+            validation_faults=list(faults), unassessable=True,
         )
 
 
