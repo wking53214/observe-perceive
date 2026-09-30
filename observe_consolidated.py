@@ -1406,8 +1406,9 @@ class ObserveClinicalEngine:
 
         # DATA-INTEGRITY GATE (FIX, red-team R1/R2): a non-finite or physically
         # impossible reading is a sensor/data fault, not a clinical state. It must
-        # NEVER be scored as 'stable'. Surface it as an immediate WARNING escalation
-        # so a human checks the patient/sensor. Deterministic on the (invalid) inputs.
+        # NEVER be scored as 'stable'. Report at least WARNING so a human checks the
+        # patient/sensor; the page is deduplicated (_fault_page on the overlay below,
+        # the policy lock on _fault_verdict). Deterministic on the (invalid) inputs.
         # PARTIAL ASSESSMENT (ported from OBSERVE, T2b): a cassette that supplies
         # mask_faults hands back the reading with its faulted channels made
         # inert, so the channels that still work are scored and the fault is

@@ -18,7 +18,6 @@ Adapted to this engine's surface where the fork differed:
   * The heavy-path entropy trigger and hard-rule threshold belong to the
     cassette here, so the decision payload binds the cassette's name and
     version instead of PARAMETER_SET listing them.
-
   * The fork's partial-assessment fault overlay (T2b_PartialAssessmentOverlayIsSafe)
     is reached through the cassette's optional mask_faults; the neutral values
     and channel-to-context-key map live in pediatric_cassette.py, not the core.

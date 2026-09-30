@@ -42,6 +42,17 @@
   `T2b_PartialAssessmentOverlayIsSafe`; the port's own decisions are
   pinned in `test_fault_overlay.py`. Full suite: 671 passed, 59 skipped,
   5 xfailed (was 622 passed). `ruff check .` is clean.
+  Follow-up from the red team: when the dedup window cannot be measured
+  (a missing, naive-against-aware or non-datetime reading time) a repeated
+  sensor page is held, a bypass still pages, and the window restarts from
+  that reading; before, such readings raised or paged on every call.
+  Known limitation: the physiological reserve engine reads rich-telemetry
+  context keys (`_PHYSIO_AXIS_KEYS`, `hr_history`) that `sanitize_context`
+  does not bound, so a non-numeric value there raises. That was already
+  true of clean readings; the old fault path never reached the engines,
+  so a faulted reading with such context used to return a verdict and
+  now raises too. Bounding those keys needs clinical ranges and is left
+  to their owner.
 
 - **OBSERVE parameter-set version and per-subject state commitments**
   (ported from the OBSERVE fork, finding I-3 of its resilience assessment).
