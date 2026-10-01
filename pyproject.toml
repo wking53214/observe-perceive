@@ -37,13 +37,17 @@ chain = [
 ]
 # Opt-in strict stage; numpy comes in through its own metadata.
 fortress = ["fortress-kernel @ git+https://github.com/wking53214/fortress-kernel@4105ccb5fec2806f3f1ab5aeb0f88151e6a6fdc0"]
+# Optional: lets cns_governed_decision combine gates from any library under the
+# cns.gate contract. Nothing imports CNS unless that module's pipeline is used.
+# Pinned to the commit of tag v1.4.0. Not a runtime dependency.
+cns = ["cns @ git+https://github.com/wking53214/cns.git@3b465dbcc1a6a4ab6f1040f93d44483196abd737"]
 test = ["pytest>=8", "hypothesis"]
 
 [tool.setuptools]
 # Flat layout: every module sits at the repository root.
 py-modules = [
   "adversarial_sensor_faults", "augur_screen_adapter", "capacity_planning",
-  "clinical_governance_system", "compliance_exporters",
+  "clinical_governance_system", "cns_governed_decision", "compliance_exporters",
   "conservation_gsa815_adapter", "demo_why", "deterioration_simulator",
   "execution_guard",
   "fda_510k_checklist", "fortress_perceive_adapter", "gateway_admission_adapter",

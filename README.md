@@ -138,4 +138,38 @@ observe-perceive ───┤
 
 Reports: `docs/closure/ARCHITECTURE_CLOSURE_REPORT.md`, `GOVERNANCE_BYPASS_REPORT.md`, `docs/audit/COMMERCIAL_RED_TEAM_2026-09-08.md`.
 
+## Governed decision across libraries (optional)
+
+`cns_governed_decision.py` takes the verdicts of gates from separate libraries and turns them into one decision. You give it two lists of gates. The first list (ALPHA) is judged before your work function runs, and if any of them refuses, the work is never called. The second list (OMEGA) is judged on what the work returned, and if any of them refuses, the result is withheld. Every verdict goes through `cns.gate.resolve`, and the answer is a `GovernedDecision`: the outcome (`pass`, `retry` or `terminal_breach`), every verdict, which gates were not evaluated and why, whether the work ran, and a digest of the record.
+
+What it is not. It is a verdict-combining layer. It does not replace `GovernanceOrchestrator`, which stays hard-wired and unchanged, and it does not read the orchestrator's ledger or receipts. It only works with libraries that ship a CNS connector (a class that satisfies `cns.gate.Gate`). It makes no gate's judgment better: a library's PASS is "no objection", and the layer says nothing about whether the result is correct.
+
+What it needs. CNS, a private package, through the optional extra `cns` (pinned to the commit of tag v1.4.0). This repository imports CNS only when a pipeline is built or run. Without CNS, everything else here works as before and building a pipeline raises `CnsNotInstalled` with the install command. No runtime dependency was added.
+
+Run the demo. It builds one pipeline from the real CNS gates of five libraries (governance_gateway, ccc and augur before the work; dit and conservation_kernel on the result) and a stub work function, then runs eleven scenarios and prints every verdict, whether the work ran, and the final decision:
+
+```text
+python -m venv .venv-demo && . .venv-demo/bin/activate
+pip install -r requirements-demo.txt
+PYTHONPATH=. python examples/cns_governed_decision_demo.py
+```
+
+`requirements-demo.txt` installs each library from the branch that carries its connector. Those are branch refs, not commit SHAs, and should be pinned once the branches are final. A recorded run is in `docs/CNS_GOVERNED_DECISION_DEMO.md`. The tests are in `test_cns_governed_decision_demo.py` and skip cleanly, with a reason, where CNS or a library is missing.
+
+Limits of the demo. The work is a stub, not a model. Two scenarios (a required library is missing) are simulated by leaving a slot empty; nothing stands in for the missing gate. AUGUR's gate appends audit lines to a log, and the demo sends them to a temporary file that is not deleted. The digests are tamper-evidence, not tamper-proofing: someone who rebuilds a verdict with a recomputed digest is not caught by the digest alone, and the demo shows that too.
+
+The rules the layer enforces, each with tests that fail without it (`test_cns_governed_decision.py`):
+
+| Rule | What the layer does |
+|---|---|
+| R1 order | ALPHA gates are judged before the work. The work is called only if every ALPHA verdict is PASS. |
+| R2 fail closed | A gate that raises, returns something that is not a well-formed `GateResult`, or is missing while required becomes a TERMINAL_BREACH. Never a pass, never a crash. A missing required OMEGA gate refuses the run before the work starts. |
+| R3 placement | A gate's declared position must match the slot it sits in. A mismatch refuses the whole run before any gate or the work runs. A position is never relabelled. |
+| R4 precedence | All verdicts, the layer's own included, resolve through `cns.gate.resolve`: any TERMINAL_BREACH wins, then any RETRY, and PASS only when nothing objected. |
+| R5 short-circuit | After the first TERMINAL_BREACH on an end, later gates on that end are not asked and are listed as not evaluated. A RETRY does not stop evaluation. |
+| R6 omega | OMEGA gates run only after every ALPHA gate passed and the work returned. A work function that raises is a TERMINAL_BREACH with `work_error` set. The result is returned only when the outcome is PASS. |
+| R7 binding | By default a verdict must record what it judged (a subject and a digest of it). An unbound verdict is refused even when it passes. |
+
+Two further rules are bookkeeping and packaging: duplicate gate names raise `ValueError` and the record says what was judged and why (R8), and CNS is imported lazily with no new runtime dependency (R9).
+
 Proprietary. All rights reserved. See LICENSE.
