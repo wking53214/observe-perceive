@@ -235,11 +235,16 @@ def test_requirements_demo_names_cns_and_each_library_at_its_branch():
         "conservation-kernel": "conservation_kernel",
     }
     for dist, repo in repos.items():
-        assert by_name[dist] == (
-            f"{dist}[cns] @ git+https://github.com/wking53214/{repo}.git@{BRANCH}"
-        )
+        # Each library is pinned to an exact 40-hex commit, never a branch name,
+        # so a later push cannot change what the demo installs.
+        assert re.fullmatch(
+            re.escape(f"{dist}[cns] @ git+https://github.com/wking53214/{repo}.git@")
+            + r"[0-9a-f]{40}",
+            by_name[dist],
+        ), by_name[dist]
+        assert BRANCH not in by_name[dist]
     text = REQUIREMENTS.read_text(encoding="utf-8")
-    assert "BRANCH REFS" in text and "commit SHA" in text
+    assert "exact commits" in text and "BRANCH REFS" not in text
 
 
 def test_the_readme_section_explains_the_layer_and_lists_rules_r1_to_r7():
