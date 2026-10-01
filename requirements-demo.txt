@@ -1,0 +1,24 @@
+# Packages for examples/cns_governed_decision_demo.py, the demo of the optional
+# CNS combining layer (cns_governed_decision.py).
+#
+# Use a scratch virtual environment, then run the demo from the repository root:
+#   pip install -r requirements-demo.txt
+#   PYTHONPATH=. python examples/cns_governed_decision_demo.py
+# Do not install observe-perceive itself into the same environment: its
+# pyproject pins older commits of some of these libraries. The demo imports
+# only the flat module cns_governed_decision, which needs nothing but CNS.
+#
+# The five libraries are installed from the branch that carries their CNS
+# connector. These are BRANCH REFS, not commit SHAs: a later push to a branch
+# changes what gets installed. Pin each one to a commit SHA once the branches
+# are final.
+#
+# CNS is pinned to the commit of tag v1.4.0. Each library's [cns] extra pins
+# the same commit, so the lines below agree with each other.
+
+cns @ git+https://github.com/wking53214/cns.git@3b465dbcc1a6a4ab6f1040f93d44483196abd737
+governance-gateway[cns] @ git+https://github.com/wking53214/governance_gateway.git@claude/lean-technical-review-9n6xwk
+cognitive-continuity-constitution[cns] @ git+https://github.com/wking53214/ccc.git@claude/lean-technical-review-9n6xwk
+augur[cns] @ git+https://github.com/wking53214/augur.git@claude/lean-technical-review-9n6xwk
+dit[cns] @ git+https://github.com/wking53214/dit.git@claude/lean-technical-review-9n6xwk
+conservation-kernel[cns] @ git+https://github.com/wking53214/conservation_kernel.git@claude/lean-technical-review-9n6xwk
