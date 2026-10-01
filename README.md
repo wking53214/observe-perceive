@@ -138,4 +138,4 @@ observe-perceive ───┤
 
 Reports: `docs/closure/ARCHITECTURE_CLOSURE_REPORT.md`, `GOVERNANCE_BYPASS_REPORT.md`, `docs/audit/COMMERCIAL_RED_TEAM_2026-09-08.md`.
 
-MIT (pyproject) / see LICENSE.
+Proprietary. All rights reserved. See LICENSE.
