@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **OBSERVE parameter-set version and per-subject state commitments**
+  (ported from the OBSERVE fork, finding I-3 of its resilience assessment).
+  The core's calibration surface is now named constants
+  (`REGIME_DISTRIBUTION_BANDS`, `REGIME_CRITICAL_FLOOR_DEFAULT`,
+  `DRIFT_CRITICAL_FLOOR`, `ESCALATION_DWELL_THRESHOLD`,
+  `ESCALATION_LOCK_SECONDS`, joining the existing norms, bounds and drift
+  sigma) collected in `PARAMETER_SET`; its SHA-256, `PARAMETER_SET_VERSION`,
+  is stamped on every `FusedVerdict` and, with the cassette's name and
+  version, folded into the fingerprinted decision payload. Two builds with
+  different constants, or different cassettes, no longer produce identical
+  fingerprints on identical inputs. Each verdict also carries
+  `predecessor_state_commitment` and `state_commitment`
+  (`governance_contracts.compute_state_commitment` over the subject and the
+  fingerprint, chained per subject; the head is evicted with the LRU policy
+  state). Both are recorded in the audit entry, so a verifier can replay
+  the fingerprint and the commitment from the stored entry alone.
+  Fingerprints of records written before this change do not match the new
+  ones. `test_observe_invariants.py` ports the fork's invariants suite
+  (42 tests); the seven assertions that encode the fork's partial-assessment
+  fault overlay are listed in its docstring as not ported.
+
 - **Chain and fortress dependencies pinned to commits.** CCC, AUGUR, GEMS,
   Governance_Gateway and fortress-kernel were unpinned, so each install
   took that day's default branch. GEMS `bb4cf40` (2026-09-20) deleted
