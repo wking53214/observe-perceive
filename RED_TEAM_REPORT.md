@@ -25,7 +25,9 @@ Severity key: **CRITICAL** (patient-safety / silent wrong answer) ·
 - **Fix (WS2):** `validate_vitals` + a data-integrity gate in `evaluate()` route any
   non-finite / out-of-physical-range reading to an immediate WARNING escalation with
   an explicit `DATA_INTEGRITY_FAULT`, recorded in the audit ledger. Never scored as
-  stable. Tests: `TestVitalsValidation`.
+  stable. Tests: `TestVitalsValidation`. Since the partial-assessment overlay, a
+  cassette that supplies `mask_faults` scores the valid channels, reports at least
+  WARNING and deduplicates the page per subject; see CHANGELOG, Unreleased.
 
 ---
 

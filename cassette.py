@@ -78,6 +78,30 @@ It is not a place for policy. Dwell thresholds, regime boundaries and
 fusion weights stay in the core, because those are statements about how
 to reason under uncertainty, not about a domain. A cassette that starts
 carrying thresholds is a cassette turning back into an engine.
+
+WHAT A CASSETTE MAY SUPPLY
+--------------------------
+One more answer is optional. A cassette without it is still a cassette.
+
+  mask_faults(obs, faults)     given a reading validate() faulted and the
+                               very list it returned, the reading to assess
+                               in its place: each faulted channel set to a
+                               value that is a finding in no engine of this
+                               domain, and every context key that carries
+                               that channel's history removed, so the
+                               channels that still work are still scored.
+                               None when nothing can be assessed: a fault
+                               that names no known channel, or every
+                               channel faulted. Must not mutate obs, must
+                               keep its identity and timestamp, and must be
+                               deterministic.
+
+Which value is inert, which keys carry a channel's past, and how a fault
+names its channel are facts about a domain's instruments, so they live in
+the cassette. What to do with a partial view (a floor, a penalty, a frozen
+policy, deduplicated paging) is reasoning under uncertainty, so it stays
+in the core. A cassette that does not supply mask_faults gets the plain
+fault path: nothing scored, a WARNING record.
 """
 from __future__ import annotations
 
@@ -145,6 +169,15 @@ class Cassette(Protocol):
     def labels(self) -> Mapping[str, str]: ...
 
 
+@runtime_checkable
+class PartiallyAssessable(Protocol):
+    """The optional answer: a faulted reading with its faulted channels made
+    inert, or None when nothing in it can be assessed. Kept out of Cassette
+    so a domain without it still satisfies that protocol."""
+
+    def mask_faults(self, obs: Any, faults: List[str]) -> Optional[Any]: ...
+
+
 #: Every member the core will reach for, in one place, so a conformance
 #: failure names the missing piece instead of raising an AttributeError
 #: somewhere deep in an evaluation.
@@ -155,6 +188,12 @@ REQUIRED = (
 )
 
 _CALLABLE = REQUIRED[2:]
+
+#: Members a cassette MAY supply. Absence is an answer ("this domain cannot
+#: assess a reading partially"), not a conformance failure. Presence without
+#: callability is a failure: a capability declared wrongly is rejected at
+#: load rather than quietly skipped on some later evaluation.
+OPTIONAL = ("mask_faults",)
 
 
 #: Used when a cassette omits a label key. Neutral on purpose: a domain
@@ -172,6 +211,17 @@ def label(cassette: Any, key: str) -> str:
     return supplied.get(key, DEFAULT_LABELS[key]) if supplied else DEFAULT_LABELS[key]
 
 
+def optional_member(cassette: Any, name: str) -> Optional[Callable[..., Any]]:
+    """The cassette's optional member `name`, or None when it supplies none.
+
+    Unlike label(), a call through the returned member is not guarded: a
+    mask is substantive, and an exception from it must surface rather than
+    turn into a plausible verdict.
+    """
+    member = getattr(cassette, name, None)
+    return member if callable(member) else None
+
+
 def conformance_failures(candidate: Any) -> List[str]:
     """Every reason `candidate` is not a usable cassette, or an empty list.
 
@@ -185,6 +235,9 @@ def conformance_failures(candidate: Any) -> List[str]:
             problems.append(f"missing {member!r}")
             continue
         if member in _CALLABLE and not callable(getattr(candidate, member)):
+            problems.append(f"{member!r} is not callable")
+    for member in OPTIONAL:
+        if hasattr(candidate, member) and not callable(getattr(candidate, member)):
             problems.append(f"{member!r} is not callable")
     for member in ("name", "version"):
         value = getattr(candidate, member, None)

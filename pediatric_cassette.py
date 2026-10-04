@@ -11,7 +11,8 @@ industry can supply its own answers without touching the engine.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from dataclasses import replace
+from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 
 from cassette import ChannelModel
 from kalman_trajectory import _PEDIATRIC_CHANNEL_MODEL
@@ -37,12 +38,36 @@ HARD_RULE_RISK = 0.5
 #: The engine whose hard rules carry that weight in this domain.
 HARD_RULE_ENGINE = "heuristic"
 
+#: What a faulted channel is read as so the OTHER channels can still be
+#: assessed. Each value is inside every PEDIATRIC_NORMS window and clear of
+#: every heuristic, bayesian, behavioral and select_engines trigger, so a
+#: masked channel is a finding in no engine; the fault itself is reported
+#: by the core. A placeholder, never an estimate of the child.
+_VITALS_NEUTRAL: Dict[str, float] = {
+    "heart_rate": 110.0,
+    "oxygen_saturation": 98.0,
+    "respiratory_rate": 25.0,
+    "temperature": 37.0,
+}
+
+#: Every context key an engine here reads for a channel. Dropped with the
+#: channel, so trajectory, drift, adversarial and the instability axis
+#: abstain on it instead of setting a faulted sensor's past against the
+#: placeholder (masking O2 to 98 beside previous_o2=90 fabricated an
+#: uptrend in the fork's first cut).
+_CHANNEL_CONTEXT_KEYS: Dict[str, Tuple[str, ...]] = {
+    "oxygen_saturation": ("previous_o2", "baseline_o2", "history_o2", "recent_o2_readings"),
+    "heart_rate": ("previous_hr", "baseline_hr", "history_hr", "hr_history"),
+    "respiratory_rate": ("previous_rr",),
+    "temperature": ("previous_temp",),
+}
+
 
 class PediatricCassette:
     """Pediatric deterioration: the original domain, behind the seam."""
 
     name = "pediatric_deterioration"
-    version = "1.0.0"
+    version = "1.1.0"  # 1.1.0: supplies mask_faults
 
     # -- identity -----------------------------------------------------
     def subject_id(self, obs: Any) -> str:
@@ -51,6 +76,28 @@ class PediatricCassette:
     # -- trust boundary -----------------------------------------------
     def validate(self, obs: Any) -> List[str]:
         return validate_vitals(obs)
+
+    def mask_faults(self, obs: Any, faults: List[str]) -> Optional[Any]:
+        """The reading to assess in place of a faulted one, or None.
+
+        validate_vitals names the channel before the first '=' of every
+        fault; that grammar is this domain's, which is why the parse is
+        here and not in the core. None when a fault names no channel we
+        know (we cannot say which channel is poisoned) or when every
+        channel is faulted (nothing is left to assess).
+        """
+        faulted: Set[str] = set()
+        for fault in faults:
+            channel = fault.split("=", 1)[0]
+            if channel not in _VITALS_NEUTRAL:
+                return None
+            faulted.add(channel)
+        if not faulted or faulted == set(_VITALS_NEUTRAL):
+            return None
+        dropped = {key for channel in faulted for key in _CHANNEL_CONTEXT_KEYS[channel]}
+        context = obs.context if isinstance(obs.context, dict) else {}
+        kept = {k: v for k, v in context.items() if k not in dropped}
+        return replace(obs, context=kept, **{c: _VITALS_NEUTRAL[c] for c in faulted})
 
     def context_bounds(self) -> Mapping[str, Optional[Tuple[float, float]]]:
         return _NUMERIC_CONTEXT_SCALAR_BOUNDS

@@ -61,6 +61,57 @@ class TestConformance(unittest.TestCase):
         self.assertIsInstance(PediatricCassette(), Cassette)
 
 
+class TestPartialAssessmentIsOptional(unittest.TestCase):
+    """mask_faults is the one optional answer. A domain without it keeps the
+    plain fault verdict and still conforms; a domain that declares it wrongly
+    is rejected at load."""
+
+    def test_it_is_optional_not_required(self):
+        from cassette import OPTIONAL
+        self.assertIn("mask_faults", OPTIONAL)
+        self.assertNotIn("mask_faults", REQUIRED)
+
+    def test_the_pediatric_cassette_supplies_it(self):
+        from cassette import PartiallyAssessable, optional_member
+        self.assertIsInstance(PediatricCassette(), PartiallyAssessable)
+        self.assertTrue(callable(optional_member(PediatricCassette(), "mask_faults")))
+
+    def test_the_industrial_cassette_does_not_and_still_conforms(self):
+        from cassette import PartiallyAssessable, optional_member
+        from industrial_cassette import IndustrialCassette
+        self.assertEqual(conformance_failures(IndustrialCassette()), [])
+        self.assertIsInstance(IndustrialCassette(), Cassette)
+        self.assertNotIsInstance(IndustrialCassette(), PartiallyAssessable)
+        self.assertIsNone(optional_member(IndustrialCassette(), "mask_faults"))
+
+    def test_a_non_callable_optional_member_is_rejected_at_load(self):
+        from cassette import optional_member
+        c = PediatricCassette()
+        c.mask_faults = "not a function"
+        self.assertIn("'mask_faults' is not callable", conformance_failures(c))
+        self.assertIsNone(optional_member(c, "mask_faults"))
+
+    def test_the_industrial_fault_verdict_is_unchanged(self):
+        """Today's exact behaviour for a domain without the capability: no
+        scoring, WARNING, the policy written and locked, the old ledger shape."""
+        from industrial_cassette import AssetReading, IndustrialCassette
+        engine = ObserveClinicalEngine(cassette=IndustrialCassette())
+        v = engine.evaluate(AssetReading("PUMP-F", datetime.now(timezone.utc), float("nan"), 55.0, 3.2))
+        fault = "vibration_mm_s is not a finite number: nan"
+        self.assertEqual(v.regime.value, "warning")
+        self.assertEqual((v.risk_score, v.confidence, v.active_engines), (0.0, 0.0, []))
+        self.assertEqual(v.triggered_rules, ["EQUIPMENT_SAFETY_BYPASS: data-integrity fault skipped scoring",
+                                             f"DATA_INTEGRITY_FAULT: {fault}"])
+        self.assertEqual((v.validation_faults, v.unassessable), ([fault], True))
+        policy = engine._patient_policies["PUMP-F"]
+        self.assertEqual(policy.current_regime.value, "warning")
+        self.assertTrue(policy.escalation_locked)
+        data = engine.audit_ledger.entries[-1]["data"]
+        self.assertTrue(data["verdict"]["data_integrity_fault"])
+        self.assertNotIn("validation_faults", data)
+        self.assertNotIn("assessed_vitals", data)
+
+
 class TestSelectEnginesIsUnchanged(unittest.TestCase):
     """The differential check: the extracted rule must equal the original
     on every point of a swept input space, not merely on a happy path."""
