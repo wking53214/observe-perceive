@@ -13,22 +13,14 @@ Adapted to this engine's surface where the fork differed:
   * The fingerprint is decision_fingerprint(payload) over the audit entry's
     decision payload; replay recomputes it from the stored entry.
   * A data-integrity fault is surfaced as DATA_INTEGRITY_FAULT triggered rules
-    and an empty engine set, not as validation_faults / unassessable fields.
+    (the fork's VALIDATION_FAULT prefix) as well as the validation_faults and
+    unassessable verdict fields.
   * The heavy-path entropy trigger and hard-rule threshold belong to the
     cassette here, so the decision payload binds the cassette's name and
     version instead of PARAMETER_SET listing them.
-
-Not ported. Seven T2b assertions encode the fork's partial-assessment fault
-overlay, where a faulted channel is masked and the remaining channels are
-still scored; this engine routes any fault to _fault_verdict without scoring,
-so they describe a design this engine does not have:
-  test_fault_does_not_downgrade_a_tracked_critical_patient,
-  test_fault_in_one_channel_preserves_signals_in_the_others,
-  test_risk_floor_is_applied_on_hold_calls_not_just_the_change_call,
-  test_sustained_fault_does_not_corrupt_or_lock_the_escalation_policy,
-  test_transient_fault_does_not_permanently_bump_the_tracked_regime,
-  test_bypass_during_a_fault_does_not_mutate_the_tracked_regime,
-  test_masked_channel_does_not_inject_a_synthetic_improving_trend.
+  * The fork's partial-assessment fault overlay (T2b_PartialAssessmentOverlayIsSafe)
+    is reached through the cassette's optional mask_faults; the neutral values
+    and channel-to-context-key map live in pediatric_cassette.py, not the core.
 VendoredCopyStaysInSync is dropped: there is no vendored copy here.
 
 Run: python3 -m pytest test_observe_invariants.py -v
@@ -60,6 +52,8 @@ from observe_consolidated import (
     ESCALATION_LOCK_SECONDS,
     VITALS_PHYSICAL_BOUNDS,
     PEDIATRIC_NORMS,
+    REGIME_RISK_FLOOR,
+    UNASSESSABLE_CONFIDENCE_PENALTY,
 )
 from pediatric_cassette import PediatricCassette
 
@@ -229,7 +223,8 @@ class T2_MissingOrGarbageTelemetryNeverReadsAsHealthy(unittest.TestCase):
         self.assertNotEqual(verdict.regime, OperationalRegime.STABLE)
         self.assertEqual(verdict.regime, OperationalRegime.WARNING)  # fresh engine, prior STABLE
         self.assertTrue(_faults_of(verdict))
-        self.assertEqual(verdict.active_engines, [])  # nothing was scored
+        self.assertTrue(verdict.validation_faults)
+        self.assertTrue(verdict.unassessable)
         self.assertTrue(verdict.escalation_required)
 
     def test_inf_vital_rejected(self):
@@ -299,6 +294,112 @@ class T2b_FaultVerdictIsSafe(unittest.TestCase):
         engine._patient_entropy["ent"] = 1.5  # prior genuine disagreement
         engine.evaluate(make_vitals(patient_id="ent", oxygen_saturation=float("nan")))
         self.assertEqual(engine._patient_entropy["ent"], 1.5)
+
+
+class T2b_PartialAssessmentOverlayIsSafe(unittest.TestCase):
+    """The fork's T2b overlay findings: a faulted channel must not (1) downgrade a
+    tracked regime, (2) suppress signals in the still-valid channels, (3) read
+    as benign on a hold call, (4) corrupt or lock the escalation policy, or
+    (5) inject a synthetic trend. Ported verbatim; the fork's VALIDATION_FAULT
+    rule prefix reads DATA_INTEGRITY_FAULT here.
+    """
+
+    def _drive_to_critical(self, engine, pid):
+        crit = make_vitals(patient_id=pid, oxygen_saturation=70.0, heart_rate=190.0,
+                           respiratory_rate=65.0, temperature=39.5)
+        v = engine.evaluate(crit)
+        self.assertEqual(v.regime, OperationalRegime.CRITICAL)
+        return crit
+
+    def test_fault_does_not_downgrade_a_tracked_critical_patient(self):
+        engine = ObserveClinicalEngine()
+        self._drive_to_critical(engine, "crit1")
+        # SpO2 probe falls off mid-monitoring
+        after = engine.evaluate(make_vitals(patient_id="crit1", oxygen_saturation=float("nan"),
+                                            heart_rate=190.0, respiratory_rate=65.0, temperature=39.5))
+        self.assertTrue(after.unassessable)
+        self.assertEqual(after.regime, OperationalRegime.CRITICAL)  # NOT downgraded to WARNING
+
+    def test_fault_in_one_channel_preserves_signals_in_the_others(self):
+        engine = ObserveClinicalEngine()
+        verdict = engine.evaluate(make_vitals(patient_id="multi", oxygen_saturation=float("nan"),
+                                              heart_rate=210.0, respiratory_rate=70.0))
+        self.assertTrue(verdict.unassessable)
+        self.assertTrue(any("DATA_INTEGRITY_FAULT" in r for r in verdict.triggered_rules))
+        # the real tachycardia / tachypnea must still surface
+        self.assertTrue(any(("tachy" in r.lower() or "hr" in r.lower() or "rr" in r.lower()
+                             or "DANGEROUS_PATTERN" in r)
+                            for r in verdict.triggered_rules if "DATA_INTEGRITY_FAULT" not in r),
+                        msg=verdict.triggered_rules)
+        self.assertIn(verdict.regime, (OperationalRegime.WARNING, OperationalRegime.CRITICAL))
+
+    def test_risk_floor_is_applied_on_hold_calls_not_just_the_change_call(self):
+        # Finding: the floor was only applied when the regime changed; on a
+        # subsequent hold call regime=WARNING but risk_score fell back to ~0.05.
+        engine = ObserveClinicalEngine()
+        t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        first = engine.evaluate(make_vitals(patient_id="hold", oxygen_saturation=float("nan"), timestamp=t0))
+        held = engine.evaluate(make_vitals(patient_id="hold", oxygen_saturation=float("nan"),
+                                           timestamp=t0 + timedelta(seconds=10)))
+        self.assertEqual(held.regime, OperationalRegime.WARNING)
+        self.assertGreaterEqual(held.risk_score, first.risk_score)
+        self.assertGreaterEqual(held.risk_score, 0.50)
+
+    def test_sustained_fault_does_not_corrupt_or_lock_the_escalation_policy(self):
+        # Finding: the overlay wiped pending/dwell and armed a 300s lock every
+        # call, so a real gradual CRITICAL could never accumulate dwell.
+        engine = ObserveClinicalEngine()
+        t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        for i in range(4):
+            engine.evaluate(make_vitals(patient_id="frozen", oxygen_saturation=float("nan"),
+                                        timestamp=t0 + timedelta(seconds=30 * i)))
+        policy = engine._patient_policies["frozen"]
+        self.assertEqual(policy.current_regime, OperationalRegime.STABLE)  # not bumped
+        self.assertFalse(policy.escalation_locked)                          # not locked
+        self.assertEqual(policy.dwell_count, 0)
+
+    def test_transient_fault_does_not_permanently_bump_the_tracked_regime(self):
+        # Finding: a one-reading fault bumped policy.current_regime to WARNING,
+        # so a later genuine WARNING->CRITICAL yielded escalation=False.
+        engine = ObserveClinicalEngine()
+        t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        engine.evaluate(make_vitals(patient_id="tr", oxygen_saturation=float("nan"), timestamp=t0))
+        self.assertEqual(engine._patient_policies["tr"].current_regime, OperationalRegime.STABLE)
+        crash = engine.evaluate(make_vitals(patient_id="tr", oxygen_saturation=76.0, heart_rate=188.0,
+                                            respiratory_rate=62.0, temperature=39.7,
+                                            timestamp=t0 + timedelta(seconds=120)))
+        self.assertEqual(crash.regime, OperationalRegime.CRITICAL)
+        self.assertTrue(crash.escalation_required)  # the real CRITICAL still pages
+
+    def test_bypass_during_a_fault_does_not_mutate_the_tracked_regime(self):
+        # Review round 3: the old code wrote policy.current_regime=WARNING on a
+        # fault reading, suppressing a later genuine CRITICAL. Here NaN SpO2 with
+        # HR=210 alone scores 0.2 and fires no bypass; the test holds on the frozen
+        # policy, and test_fault_overlay.py covers a bypass that does fire.
+        engine = ObserveClinicalEngine()
+        t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        engine.evaluate(make_vitals(patient_id="bpf", oxygen_saturation=float("nan"),
+                                    heart_rate=210.0, timestamp=t0))
+        self.assertEqual(engine._patient_policies["bpf"].current_regime, OperationalRegime.STABLE)
+        recovered = engine.evaluate(make_vitals(patient_id="bpf", oxygen_saturation=75.0,
+                                                heart_rate=150.0, respiratory_rate=45.0,
+                                                timestamp=t0 + timedelta(seconds=600)))
+        self.assertEqual(recovered.regime, OperationalRegime.CRITICAL)
+        self.assertTrue(recovered.escalation_required)
+
+    def test_masked_channel_does_not_inject_a_synthetic_improving_trend(self):
+        # Finding: masking O2 to 98 while previous_o2=90 fabricated a +8 %/min
+        # uptrend that cancelled real deterioration.
+        engine = ObserveClinicalEngine()
+        verdict = engine.evaluate(make_vitals(
+            patient_id="trend", oxygen_saturation=float("nan"), heart_rate=155.0,
+            context={"age_months": 24, "previous_o2": 90, "previous_hr": 120,
+                     "history_o2": [90, 89, 88, 90, 89], "time_delta_seconds": 60},
+        ))
+        # no fabricated O2-improvement rule; the real HR climb still surfaces
+        self.assertFalse(any("O2_MOMENTUM" in r and "+" in r for r in verdict.triggered_rules),
+                         msg=verdict.triggered_rules)
+        self.assertTrue(any("HR_MOMENTUM" in r for r in verdict.triggered_rules), msg=verdict.triggered_rules)
 
 
 class T4_RiskIsGradedNotSaturated(unittest.TestCase):
@@ -448,6 +549,17 @@ class I3_ParameterSetVersionIsBoundIntoProvenance(unittest.TestCase):
                                 PEDIATRIC_NORMS["child"]["hr_high"])
         finally:
             PEDIATRIC_NORMS["child"]["hr_high"] = original
+
+    def test_manifest_tracks_the_fault_overlay_constants(self):
+        self.assertEqual(PARAMETER_SET["regime_risk_floor"], REGIME_RISK_FLOOR)
+        self.assertEqual(PARAMETER_SET["unassessable_confidence_penalty"], UNASSESSABLE_CONFIDENCE_PENALTY)
+
+    def test_regime_risk_floor_covers_every_regime(self):
+        self.assertEqual(set(REGIME_RISK_FLOOR), {r.value for r in OperationalRegime})
+        # monotone with severity
+        self.assertLess(REGIME_RISK_FLOOR["stable"], REGIME_RISK_FLOOR["caution"])
+        self.assertLess(REGIME_RISK_FLOOR["caution"], REGIME_RISK_FLOOR["warning"])
+        self.assertLess(REGIME_RISK_FLOOR["warning"], REGIME_RISK_FLOOR["critical"])
 
     def test_regime_distribution_bands_cover_every_regime_in_descending_order(self):
         regimes = {r.value for r in OperationalRegime}

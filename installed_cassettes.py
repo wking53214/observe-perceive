@@ -18,7 +18,7 @@ So each entry also supplies three readings from its own domain:
 
   nominal   nothing wrong; must come back stable
   adverse   the domain's own "never noise" condition; must escalate
-  faulted   an impossible reading; must be a data fault, never scored
+  faulted   an impossible reading; must be a data fault, never read as stable
 
 Those three are the smallest set that exercises the whole path, and they
 are written in each domain's own units by whoever knows them.

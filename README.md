@@ -55,7 +55,7 @@ Policy gates under declared consensus. Historical six-gate unanimous pattern. **
 
 ### OBSERVE (`observe_consolidated.py`, ~1416 lines)
 
-Clinical fusion: validate → multi-assessor → fuse → regime → escalation. `RiskAdapters.heuristic` and `behavioral_vaccine` are the source α extracted. `EscalationPolicy` is the source ζ extracted. They still run **here**, live. Every verdict is stamped with `PARAMETER_SET_VERSION` (SHA-256 of the declared calibration constants) and a per-subject `state_commitment` chained through `predecessor_state_commitment`; both are replayable from the audit entry (`test_observe_invariants.py`).
+Clinical fusion: validate → multi-assessor → fuse → regime → escalation. `RiskAdapters.heuristic` and `behavioral_vaccine` are the source α extracted. `EscalationPolicy` is the source ζ extracted. They still run **here**, live. Every verdict is stamped with `PARAMETER_SET_VERSION` (SHA-256 of the declared calibration constants) and a per-subject `state_commitment` chained through `predecessor_state_commitment`; both are replayable from the audit entry (`test_observe_invariants.py`). A sensor fault on one channel no longer discards the whole reading: when the cassette offers `mask_faults`, the core scores the remaining channels, reports the most severe of that result, WARNING and the tracked regime, and never writes the fault into the escalation policy (`test_fault_overlay.py`).
 
 ### Execution guard (`execution_guard.py`)
 
