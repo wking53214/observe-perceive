@@ -261,7 +261,9 @@ class ReceiptLog:
         recorded as `receipt_error` on the result.
         """
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as fh:
+        # Owner-only, and refuses a symlink at the path.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        with os.fdopen(os.open(self.path, flags, 0o600), "a", encoding="utf-8") as fh:
             fh.flush()
             os.fsync(fh.fileno())
 
@@ -286,7 +288,9 @@ class ReceiptLog:
             receipt["signature"] = signature_block(self.signer, receipt["hash"])
         entry = {"receipt": receipt, "record": record}
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as fh:
+        # Owner-only, and refuses a symlink at the path.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        with os.fdopen(os.open(self.path, flags, 0o600), "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, sort_keys=True, ensure_ascii=False, default=str) + "\n")
         self._entries.append(entry)
         return receipt
