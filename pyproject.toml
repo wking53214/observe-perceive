@@ -54,7 +54,7 @@ py-modules = [
   "execution_guard",
   "fda_510k_checklist", "fortress_perceive_adapter", "gateway_admission_adapter",
   "gems_governance_adapter", "governance_chain", "governance_contracts",
-  "governance_orchestrator", "governance_record", "gsa815_observe_adapter", "herald_governance_adapter",
+  "governance_orchestrator", "governance_record", "governance_recurring_report", "gsa815_observe_adapter", "herald_governance_adapter",
   "innovation_governance_adapter", "kalman_trajectory", "observe_consolidated",
   "orchestrator_ccc_adapter", "perceive_conservation_adapter",
   "perceive_consolidated", "reserve_control", "sentinel_perceive_adapter",
