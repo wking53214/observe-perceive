@@ -172,4 +172,4 @@ The rules the layer enforces, each with tests that fail without it (`test_cns_go
 
 Two further rules are bookkeeping and packaging: duplicate gate names raise `ValueError` and the record says what was judged and why (R8), and CNS is imported lazily with no new runtime dependency (R9).
 
-MIT (pyproject) / see LICENSE.
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Copyright 2026 William N. King.
