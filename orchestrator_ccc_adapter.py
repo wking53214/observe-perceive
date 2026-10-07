@@ -61,6 +61,57 @@ def _import_ccc():
 Actor, CCCSystem, EpistemicStatus = _import_ccc()
 
 
+def _import_text_matcher():
+    """CCCb supplies the text matching CCC's duplicate and recurrence guard
+    needs; CCC refuses machine findings without it. Same resolution order as
+    CCC: sibling checkout first, installed package as fallback."""
+    cccb_path = os.path.join(os.path.dirname(__file__), "..", "CCCb")
+    if os.path.isdir(cccb_path) and cccb_path not in sys.path:
+        sys.path.insert(0, cccb_path)
+    try:
+        from cccb import TextMatcher
+    except ImportError:
+        return None
+    return TextMatcher
+
+
+TextMatcher = _import_text_matcher()
+
+#: Sources a recorded finding must not cite unless allow_private_source=True.
+#: CCC names no repositories itself (since CCC 144fde9); the application that
+#: records findings states them. These are this project's private corpora:
+#: Resume_OS holds real ground truth kept private on purpose, and the *_History
+#: repos are private personal-conversation archives (ChatGPT_History also
+#: carries un-scrubbed third-party PII).
+PRIVATE_SOURCE_MARKERS = (
+    "Resume_OS",
+    "ChatGPT_History",
+    "Claude_History",
+    "CoPilot_History",
+    "Gemini_History",
+)
+
+
+def make_ccc_system(persistence_path: Optional[str] = None):
+    """A CCCSystem configured the way this repo records into it: CCCb's text
+    matcher attached and this project's private sources stated. Both are
+    required by current CCC before it records a machine finding."""
+    if CCCSystem is None:
+        raise ImportError(
+            "CCC not found. Clone it beside this repo (../CCC) or install it."
+        )
+    if TextMatcher is None:
+        raise ImportError(
+            "CCCb not found. CCC records machine findings only with a text "
+            "matcher attached; clone CCCb beside this repo (../CCCb) or install it."
+        )
+    return CCCSystem(
+        persistence_path=persistence_path,
+        text_matcher=TextMatcher(),
+        private_source_markers=PRIVATE_SOURCE_MARKERS,
+    )
+
+
 @dataclass(frozen=True)
 class OrchestrationFinding:
     """The Ecology `FindingRecord` shape, built here rather than imported.
@@ -87,17 +138,17 @@ class OrchestratorCCCAdapter:
     def __init__(self, ccc_system=None, actor_id: str = "governance-orchestrator"):
         """
         Args:
-            ccc_system: A CCCSystem. Constructed fresh if omitted; pass a
-                persistent one to accumulate recurrence across runs, which is
-                the only configuration in which pattern detection is
-                meaningful.
+            ccc_system: A CCCSystem. Built by make_ccc_system() if omitted;
+                pass a persistent one (make_ccc_system(path)) to accumulate
+                recurrence across runs, which is the only configuration in
+                which pattern detection is meaningful.
             actor_id: Recorded as the machine actor on every discovery.
         """
         if CCCSystem is None:
             raise ImportError(
                 "CCC not found. Clone it beside this repo (../CCC) or install it."
             )
-        self.ccc = ccc_system if ccc_system is not None else CCCSystem()
+        self.ccc = ccc_system if ccc_system is not None else make_ccc_system()
         self.actor = Actor.model(actor_id)
 
     # ------------------------------------------------------------------
