@@ -74,6 +74,8 @@ Integrity ≠ authenticity: anyone in-process can recompute hashes. With a signe
 
 Sibling checkout first, installed package second; tests skip when neither is present.
 
+`governance_recurring_report` (via `OrchestratorCCCAdapter.recurring_problems()`) lists the recurring problems CCC has grouped from recorded decisions, most serious first, labelled from CCC's own ladder: anomaly, pattern, needs a human look (3+ independent occurrences, CCC's third-strike point), or mandate (set by a human). Read-only; CCC decides what counts as the same problem. Needs a CCC with `recurring_groups()` (CCC PR #26).
+
 ### Cassettes
 
 `cassette.py`, `pediatric_cassette.py`, `industrial_cassette.py`, `installed_cassettes.py`. Domain packs, not a published Cassette SDK.
