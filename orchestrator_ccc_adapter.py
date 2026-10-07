@@ -335,6 +335,13 @@ class OrchestratorCCCAdapter:
     # Recording
     # ------------------------------------------------------------------
 
+    def recurring_problems(self, min_occurrences: int = 1):
+        """The recurring problems CCC has grouped from recorded decisions,
+        most serious first. Read-only; see governance_recurring_report."""
+        from governance_recurring_report import recurring_problems
+
+        return recurring_problems(self.ccc, min_occurrences=min_occurrences)
+
     def record(self, result: Dict[str, Any], request_id: str = None,
                allow_private_source: bool = False):
         """Record one completed orchestration into CCC.
