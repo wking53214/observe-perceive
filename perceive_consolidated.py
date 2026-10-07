@@ -22,6 +22,7 @@ import hmac
 import json
 import logging
 import math
+import os
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -629,7 +630,9 @@ class ImmutableAuditLedger:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         raw = asdict(entry)
         raw["timestamp"] = entry.timestamp.isoformat()
-        with self.path.open("a", encoding="utf-8") as fh:
+        # Owner-only, and refuses a symlink at the path.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        with os.fdopen(os.open(self.path, flags, 0o600), "a", encoding="utf-8") as fh:
             fh.write(json.dumps(raw, sort_keys=True, default=str) + "\n")
 
     def append_decision(
