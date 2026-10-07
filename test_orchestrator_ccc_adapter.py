@@ -26,16 +26,16 @@ import pytest
 # one machine.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "CCC"))
 
-from orchestrator_ccc_adapter import OrchestratorCCCAdapter  # noqa: E402
+from orchestrator_ccc_adapter import OrchestratorCCCAdapter, make_ccc_system  # noqa: E402
 
 ccc_available = True
 try:
-    from ccc import AnalysisStage, CCCSystem
-    from ccc.matching import MINIMUM_MATCH_LENGTH, anti_probability_of_coincidental_match
-except ImportError:  # pragma: no cover - CCC is a sibling checkout
+    from ccc import Actor, AnalysisStage
+    from cccb.matching import MINIMUM_MATCH_LENGTH, anti_probability_of_coincidental_match
+except ImportError:  # pragma: no cover - CCC and CCCb are sibling checkouts
     ccc_available = False
 
-pytestmark = pytest.mark.skipif(not ccc_available, reason="CCC checkout not available")
+pytestmark = pytest.mark.skipif(not ccc_available, reason="CCC or CCCb checkout not available")
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ def test_event_time_is_the_decisions_own_timestamp():
 
 def test_a_result_with_no_decision_is_not_recorded():
     """Nothing happened worth recording; do not manufacture a finding."""
-    adapter = OrchestratorCCCAdapter(CCCSystem())
+    adapter = OrchestratorCCCAdapter(make_ccc_system())
     assert adapter.record({"status": "REJECTED", "reason": "no kernel"}) is None
 
 
@@ -176,7 +176,7 @@ def test_identical_routine_approvals_are_duplicates_not_a_pattern():
     distortion. Nothing distinguishes them but an arbitrary id. Routine
     operation recurring is not a pattern that should reach a human, and CCC
     reading them as re-observations is the honest answer."""
-    adapter = OrchestratorCCCAdapter(CCCSystem())
+    adapter = OrchestratorCCCAdapter(make_ccc_system())
     first = adapter.record(_approved("case-A"))
     second = adapter.record(_approved("case-B"))
 
@@ -195,7 +195,7 @@ def test_a_recurring_refusal_escalates_and_raises_a_road_sign():
     that call). Occurrence 3 raises a REPEATED_RETURN road sign -- APM's
     halt-and-review pressure, an observable indicator rather than a
     conclusion. Nothing here reaches MANDATE; that stays human-only."""
-    adapter = OrchestratorCCCAdapter(CCCSystem())
+    adapter = OrchestratorCCCAdapter(make_ccc_system())
 
     adapter.record(_refused("case-A", "rate: 7 in window, limit 5", 0.31))
     second = adapter.record(_refused("case-B", "rate: 12 in window, limit 5", 0.62))
@@ -221,12 +221,12 @@ def test_recurrence_survives_a_restart_when_the_store_is_persisted(tmp_path):
     no patterns at all while appearing to work."""
     path = tmp_path / "ccc-state.json"
 
-    first_session = OrchestratorCCCAdapter(CCCSystem(persistence_path=str(path)))
+    first_session = OrchestratorCCCAdapter(make_ccc_system(str(path)))
     first_session.record(_refused("case-A", "rate: 7 in window, limit 5", 0.31))
     first_session.ccc.store.save()
 
     # A separate session, as a restarted service would be.
-    second_session = OrchestratorCCCAdapter(CCCSystem(persistence_path=str(path)))
+    second_session = OrchestratorCCCAdapter(make_ccc_system(str(path)))
     assert len(second_session.ccc.store.discoveries) == 1, "prior state did not load"
 
     second = second_session.record(_refused("case-B", "rate: 12 in window, limit 5", 0.62))
@@ -239,7 +239,28 @@ def test_recurrence_survives_a_restart_when_the_store_is_persisted(tmp_path):
 def test_everything_recorded_here_is_machine_originated():
     """Nothing on this path may assert human authority. The discovery enters
     as an ANOMALY from a MODEL actor; only a human moves anything to MANDATE."""
-    adapter = OrchestratorCCCAdapter(CCCSystem())
+    adapter = OrchestratorCCCAdapter(make_ccc_system())
     record = adapter.record(_approved("case-A"))
     assert record.machine_origin is True
     assert record.stage is AnalysisStage.ANOMALY
+
+
+def test_this_repo_states_its_private_sources_and_ccc_enforces_them():
+    """CCC names no repositories; this adapter states them. A finding citing one
+    is refused unless explicitly allowed."""
+    from orchestrator_ccc_adapter import OrchestrationFinding, PRIVATE_SOURCE_MARKERS
+    assert "Resume_OS" in PRIVATE_SOURCE_MARKERS
+    system = make_ccc_system()
+    for marker in PRIVATE_SOURCE_MARKERS:
+        finding = OrchestrationFinding(
+            conclusion="a refusal recurred", method="governance_orchestrator",
+            source_material=(f"{marker}/records/x.json",), confidence=0.5, verified=True,
+        )
+        with pytest.raises(ValueError, match="known-private"):
+            system.record_external_finding(finding, actor=Actor.model("m"))
+
+
+def test_default_adapter_system_has_the_matcher_and_private_sources():
+    adapter = OrchestratorCCCAdapter()
+    assert adapter.ccc.text_matcher is not None
+    assert adapter.ccc.private_source_markers

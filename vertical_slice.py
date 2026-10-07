@@ -150,9 +150,8 @@ def run_action(workdir: Path, *, artifact_id: str = "feed-icu-3-0042", execution
     try:
         # The adapter resolves CCC (sibling checkout or installed package)
         # and must be imported first.
-        from orchestrator_ccc_adapter import OrchestratorCCCAdapter
-        from ccc import CCCSystem
-        ccc = CCCSystem(persistence_path=paths.ccc)
+        from orchestrator_ccc_adapter import OrchestratorCCCAdapter, make_ccc_system
+        ccc = make_ccc_system(paths.ccc)
         record = OrchestratorCCCAdapter(ccc_system=ccc).record(result)
         ccc.save()
         ccc_recorded = getattr(record, "discovery_id", None)
