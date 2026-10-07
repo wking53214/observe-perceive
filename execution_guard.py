@@ -268,7 +268,9 @@ class ExecutionLedger:
             stored["signature"] = signature_block(self.signer, entry_hash)
         if self.path:
             line = json.dumps(stored, sort_keys=True, default=str) + "\n"
-            with self.path.open("a", encoding="utf-8") as fh:
+            # Owner-only, and refuses a symlink at the path.
+            flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+            with os.fdopen(os.open(self.path, flags, 0o600), "a", encoding="utf-8") as fh:
                 fh.write(line)
                 fh.flush()
                 os.fsync(fh.fileno())
