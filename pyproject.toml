@@ -33,7 +33,7 @@ chain = [
   "cognitive-continuity-constitution @ git+https://github.com/wking53214/CCC@833901efb1a98e595611e771aa05c199391ac163",
   # CCCb: the text matcher current CCC requires before it records a finding.
   "cccb @ git+https://github.com/wking53214/CCCb@23911917e25f48522da7318b2e250d119536591f",
-  "augur @ git+https://github.com/wking53214/AUGUR@9e24dab5bc672fad35b88551480c3037eb063f83",
+  "augur @ git+https://github.com/wking53214/AUGUR@1fc76118f75024be5ebebed227c2d9a4530c78b7",
   "gems-infrastructure @ git+https://github.com/wking53214/GEMS@273aeea29463b2bc7b940757726f16fea825bf06",
   "governance-gateway @ git+https://github.com/wking53214/Governance_Gateway@c507be7279c4488f98404514fcea2c900c53168e",
 ]
