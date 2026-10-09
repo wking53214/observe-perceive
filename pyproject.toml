@@ -43,7 +43,7 @@ fortress = ["fortress-kernel @ git+https://github.com/wking53214/fortress-kernel
 # cns.gate contract. Nothing imports CNS unless that module's pipeline is used.
 # Pinned to the commit of tag v1.4.0. Not a runtime dependency.
 cns = ["cns @ git+https://github.com/wking53214/cns.git@3b465dbcc1a6a4ab6f1040f93d44483196abd737"]
-test = ["pytest>=8", "hypothesis"]
+test = ["pytest>=8", "hypothesis", "freezegun"]
 
 [tool.setuptools]
 # Flat layout: every module sits at the repository root.
