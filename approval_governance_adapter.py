@@ -1,13 +1,13 @@
 """
-Innovation OS → governance chain Adapter
+Approval record → governance chain Adapter
 
-Feeds an innovation_os approval into the orchestrated governance chain, so a
-human's decision about an innovation artifact is evaluated, contained,
+Feeds an approval record into the orchestrated governance chain, so a
+human's decision about an artifact is evaluated, contained,
 conservation-verified and recorded like any other governed decision.
 
 Direction of the seam
 ---------------------
-innovation_os sits *upstream*. It is where ideas become artifacts, get
+Whatever produces the record sits *upstream*. It is where artifacts get
 reviewed, and get approved or rejected by a named reviewer. The chain is
 downstream of that: it governs the approval itself -- was this decision
 permitted, does acting on it stay in safe bounds, was the transformation
@@ -15,14 +15,14 @@ conservative, and has this shape of approval come up before.
 
 So the adapter converts an `ApprovalRecord` into the artifact shape the
 chain's SentinelPerceiveAdapter already consumes. It does not import
-innovation_os: the record is read structurally (`.approval_id`,
+the system that made the record: it is read structurally (`.approval_id`,
 `.target_id`, `.reviewer`, `.decision`, `.rationale`, `.lineage_hash`,
 `.decision_id`), the same duck-typed discipline every other seam here uses.
 
 The provenance trap this seam is built around
 ---------------------------------------------
-Every request the chain has handled so far was machine-originated. An
-innovation_os approval is not: `ApprovalRecord.reviewer` is a person, and
+Every request the chain had handled before this seam was machine-originated.
+An approval record is not: `ApprovalRecord.reviewer` is a person, and
 the record carries their rationale.
 
 Getting that mapping wrong in the obvious direction is a known failure. A
@@ -43,7 +43,7 @@ The same shape of error is available here, in both directions:
   content acquire human provenance by being approved.
 
 So: authority is HUMAN (a person made this call), origin stays
-INNOVATION_OS (the record was produced by that system), and epistemic status
+APPROVAL_RECORD (the record was produced by an approval system), and epistemic status
 is ATTESTED for an approval -- a human asserted it -- but never for a
 rejection, where nothing was affirmed at all.
 """
@@ -54,7 +54,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger("InnovationGovernanceAdapter")
+logger = logging.getLogger("ApprovalGovernanceAdapter")
 
 
 @dataclass
@@ -64,7 +64,7 @@ class _Status:
     The chain reads `.value` off origin/authority/epistemic status objects
     and never checks their type, so an approval can enter the chain without
     observe-perceive taking a dependency on Sentinel's enums or on
-    innovation_os's.
+    the approval source's.
     """
     value: str
 
@@ -79,14 +79,18 @@ class _Metadata:
 
 @dataclass
 class ApprovalArtifact:
-    """An innovation_os approval, in the artifact shape the chain consumes."""
+    """An approval record, in the artifact shape the chain consumes."""
     artifact_id: str
     content: str
     metadata: _Metadata
 
 
-class InnovationGovernanceAdapter:
-    """Converts innovation_os approvals into governed chain requests."""
+class ApprovalGovernanceAdapter:
+    """Converts approval records into governed chain requests.
+
+    Written for innovation_os approvals. That repo is retired and this seam
+    was kept as a general one for any source of approval records. It has no
+    caller yet."""
 
     # An approval is a human assertion about an artifact; a rejection asserts
     # nothing. Kept as data rather than inline so the distinction is visible
@@ -98,7 +102,7 @@ class InnovationGovernanceAdapter:
         """The reviewer's name, or None when nobody is attached.
 
         An empty, blank or missing reviewer is not a person. innovation_os's
-        ApprovalEngine accepts an approval with reviewer="" (measured), and
+        ApprovalEngine (now retired) accepted an approval with reviewer="" (measured), and
         this adapter used to stamp every approval HUMAN / human_reviewed
         regardless -- so an automated pass wearing an approval's shape
         acquired human authority by arriving through this seam. citadel's
@@ -114,7 +118,7 @@ class InnovationGovernanceAdapter:
 
     @staticmethod
     def approval_to_artifact(approval) -> ApprovalArtifact:
-        """Convert an innovation_os ApprovalRecord into the chain's artifact
+        """Convert an ApprovalRecord into the chain's artifact
         shape.
 
         The artifact being governed is *the approval*, not the thing approved.
@@ -125,27 +129,27 @@ class InnovationGovernanceAdapter:
         two.
         """
         decision = (getattr(approval, "decision", "") or "").strip().lower()
-        affirmative = decision in InnovationGovernanceAdapter._AFFIRMATIVE_DECISIONS
-        reviewer = InnovationGovernanceAdapter.named_reviewer(approval)
+        affirmative = decision in ApprovalGovernanceAdapter._AFFIRMATIVE_DECISIONS
+        reviewer = ApprovalGovernanceAdapter.named_reviewer(approval)
         if reviewer is None:
             logger.warning(
-                f"Innovation approval {getattr(approval, 'approval_id', '?')} names no "
+                f"Approval {getattr(approval, 'approval_id', '?')} names no "
                 "reviewer -- recorded as UNATTRIBUTED, not HUMAN, and routed as "
                 "requiring human oversight. Attach a reviewer to the ApprovalRecord "
                 "to have it governed as a person's decision."
             )
 
         content = (
-            f"Innovation approval {approval.approval_id}: "
+            f"Approval {approval.approval_id}: "
             f"reviewer {approval.reviewer} recorded '{approval.decision}' "
             f"on target {approval.target_id}. "
             f"Rationale: {getattr(approval, 'rationale', '') or 'none recorded'}"
         )
 
         metadata = _Metadata(
-            # The record was produced by innovation_os. That is a fact about
+            # The record was produced by an approval system. That is a fact about
             # where it came from and does not change with the verdict.
-            origin_status=_Status("INNOVATION_OS"),
+            origin_status=_Status("APPROVAL_RECORD"),
             # A named person made this call. Preserving that is the whole
             # reason this seam is careful -- and the reason an approval with
             # nobody attached must not be called HUMAN.
@@ -186,14 +190,14 @@ class InnovationGovernanceAdapter:
         how an unattributed approval cleared the gate.
 
         `lineage_hash` is passed through so a downstream verifier can tie the
-        chain's own record back to innovation_os's lineage chain rather than
+        chain's own record back to the source's lineage chain rather than
         having to trust that they refer to the same event.
         """
-        reviewer = InnovationGovernanceAdapter.named_reviewer(approval)
+        reviewer = ApprovalGovernanceAdapter.named_reviewer(approval)
         context: Dict[str, Any] = {
             "subject_id": getattr(approval, "target_id", None),
-            "innovation_decision": getattr(approval, "decision", None),
-            "innovation_lineage_hash": getattr(approval, "lineage_hash", None),
+            "approval_decision": getattr(approval, "decision", None),
+            "approval_lineage_hash": getattr(approval, "lineage_hash", None),
             "requires_human_oversight": reviewer is None,
             "human_reviewed": reviewer is not None,
             # The reviewer's own rationale IS the justification PERCEIVE's
@@ -217,11 +221,11 @@ class InnovationGovernanceAdapter:
         operation_type: str = "approve",
         context: Optional[Dict[str, Any]] = None,
     ) -> dict:
-        """Run one innovation_os approval through the full governance chain.
+        """Run one approval record through the full governance chain.
 
         `operation_type` defaults to "approve", which the chain maps to its
         APPROVE_DECISION request type -- the neutral path. It is not mapped to
-        "modify" or "override": an innovation approval is not a rule change or
+        "modify" or "override": an approval record is not a rule change or
         an emergency, and routing it through those gate sets would apply
         checks written for a different kind of act.
         """

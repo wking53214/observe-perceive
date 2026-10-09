@@ -24,7 +24,7 @@ quietly dropping the offending artifact, because a handoff missing one
 artifact is a different handoff and nobody downstream would know.
 
 This is the fourth independent statement of the same principle in this
-ecosystem -- innovation_os's seam constructs it by hand, HERALD's August seam
+ecosystem -- the approval seam constructs it by hand, HERALD's August seam
 test discovered it against a month-old provenance invariant, TIE models it
 natively as `OriginKind.HUMAN_ACCEPTED_AI`, and GEMS makes it constitutional.
 Four codebases, arrived at separately.

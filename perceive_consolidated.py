@@ -953,7 +953,7 @@ class PerceiveGovernanceKernel:
             gates.extend(["micropatch", "sentinel"])
         elif request.request_type == "approve_decision":
             # A named person recording a decision about an artifact (the
-            # innovation_os approval path). citadel checks the reviewer
+            # approval_governance_adapter path). citadel checks the reviewer
             # actually gave a substantive rationale rather than a rubber
             # stamp; invariant_validator checks the governance invariants
             # still hold; sentinel catches anomalous approval behaviour such

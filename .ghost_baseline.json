@@ -1565,7 +1565,7 @@
       "related_files": [
         "/home/wking53214/observe-perceive/test_gems_governance_adapter.py",
         "/home/wking53214/observe-perceive/test_herald_governance_adapter.py",
-        "/home/wking53214/observe-perceive/test_innovation_governance_adapter.py",
+        "/home/wking53214/observe-perceive/test_approval_governance_adapter.py",
         "/home/wking53214/observe-perceive/test_tie_governance_adapter.py"
       ],
       "snippet": null
@@ -1575,7 +1575,7 @@
     "layer": "mechanical",
     "severity": "major",
     "status": "suppressed",
-    "summary": "5 functions share identical AST structure (names/literals differ, control flow and shape don't): test_gateway_admission_adapter.py:91:orchestrator, test_gems_governance_adapter.py:69:orchestrator, test_herald_governance_adapter.py:68:orchestrator, test_innovation_governance_adapter.py:59:orchestrator, test_tie_governance_adapter.py:91:orchestrator"
+    "summary": "5 functions share identical AST structure (names/literals differ, control flow and shape don't): test_gateway_admission_adapter.py:91:orchestrator, test_gems_governance_adapter.py:69:orchestrator, test_herald_governance_adapter.py:68:orchestrator, test_approval_governance_adapter.py:59:orchestrator, test_tie_governance_adapter.py:91:orchestrator"
   },
   {
     "category": "duplication",
@@ -2236,11 +2236,11 @@
     "disposition": null,
     "disposition_note": "",
     "evidence": {
-      "file": "/home/wking53214/observe-perceive/test_innovation_governance_adapter.py",
+      "file": "/home/wking53214/observe-perceive/test_approval_governance_adapter.py",
       "line_end": 124,
       "line_start": 124,
       "related_files": [
-        "/home/wking53214/observe-perceive/test_innovation_governance_adapter.py:127-127"
+        "/home/wking53214/observe-perceive/test_approval_governance_adapter.py:127-127"
       ],
       "snippet": null
     },

@@ -36,7 +36,7 @@ silence. Silence reads as "nothing to report", which is exactly wrong here.
 The origin distinction TIE already models
 -----------------------------------------
 `OriginKind` has a value most systems lack: HUMAN_ACCEPTED_AI, separate from
-both HUMAN and AI. That is the same distinction the innovation_os seam had to
+both HUMAN and AI. That is the same distinction the approval seam had to
 construct by hand -- a human accepting machine output does not make the
 output human-authored -- and TIE models it natively. It is mapped through
 intact rather than collapsed into HUMAN, because collapsing it is precisely
