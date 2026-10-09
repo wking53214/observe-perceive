@@ -13,12 +13,16 @@
 # repository when this demo was recorded), so a later push to a branch cannot
 # change what gets installed.
 #
+# CCC is the exception: it was bumped on 2026-10-09 to 4aa1826, the commit the
+# package's own pyproject pins, so the repository names one CCC. The demo's
+# tests and printed output were identical on the old and new commits.
+#
 # CNS is pinned to the commit of tag v1.4.0. Each library's [cns] extra pins
 # the same commit, so the lines below agree with each other.
 
 cns @ git+https://github.com/wking53214/cns.git@3b465dbcc1a6a4ab6f1040f93d44483196abd737
 governance-gateway[cns] @ git+https://github.com/wking53214/governance_gateway.git@d2cb0b6f6dcc7dfad1e4cf25dbb06dbdd81deb48
-cognitive-continuity-constitution[cns] @ git+https://github.com/wking53214/ccc.git@3728858ca2fe8a3d70debc122d508e7d171928f2
+cognitive-continuity-constitution[cns] @ git+https://github.com/wking53214/ccc.git@4aa182659dee69efaaab7376c7eba3378eb670e2
 augur[cns] @ git+https://github.com/wking53214/augur.git@1fc76118f75024be5ebebed227c2d9a4530c78b7
 dit[cns] @ git+https://github.com/wking53214/dit.git@087b0c70ea29457a9795ff6b0cb14d5d93711b86
 conservation-kernel[cns] @ git+https://github.com/wking53214/conservation_kernel.git@5f35dfe01960f3da2577d6b922d55538f9ec2891
