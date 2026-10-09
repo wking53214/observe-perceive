@@ -194,7 +194,7 @@ def test_coverage_completeness_is_carried_not_inferred_from_the_ratio():
 
 def test_human_accepted_ai_is_carried_as_itself():
     """TIE models HUMAN_ACCEPTED_AI separately from HUMAN and AI, which is the
-    same distinction the innovation_os seam had to construct by hand. Mapping
+    same distinction the approval seam had to construct by hand. Mapping
     it to HUMAN is how machine output acquires human provenance; mapping it to
     AI discards that a person signed off. Neither is honest."""
     handoff = _handoff(provenance=_Provenance(origin=_Enum("HUMAN_ACCEPTED_AI")))

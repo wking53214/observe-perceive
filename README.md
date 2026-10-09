@@ -70,7 +70,9 @@ Integrity ≠ authenticity: anyone in-process can recompute hashes. With a signe
 
 ### Adapters (vocabulary translation at seams)
 
-`gateway_admission_adapter` · `augur_screen_adapter` · `fortress_perceive_adapter` · `perceive_conservation_adapter` · `gsa815_observe_adapter` · `sentinel_perceive_adapter` · `gems_governance_adapter` · `herald_governance_adapter` · `innovation_governance_adapter` · `tie_governance_adapter` · `orchestrator_ccc_adapter` · `conservation_gsa815_adapter`
+`gateway_admission_adapter` · `augur_screen_adapter` · `fortress_perceive_adapter` · `perceive_conservation_adapter` · `gsa815_observe_adapter` · `sentinel_perceive_adapter` · `gems_governance_adapter` · `herald_governance_adapter` · `approval_governance_adapter` · `tie_governance_adapter` · `orchestrator_ccc_adapter` · `conservation_gsa815_adapter`
+
+`approval_governance_adapter` has **no caller yet**: nothing in this repo or the rest of the stack feeds it records, so it does nothing until a caller is added. It was written for innovation_os approvals (that repo is retired) and is kept as a general seam for approval records, for example CCC decision records. It reads a record by shape and does not import its source. The rule that an approval with no named reviewer is not human review is built in.
 
 Sibling checkout first, installed package second; tests skip when neither is present.
 
