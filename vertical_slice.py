@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -84,8 +84,15 @@ def _perceive(ledger_path=None) -> PerceiveGovernanceKernel:
     return kernel
 
 
+# Relative to now, not a fixed date: the chain flags an event time more than 30
+# days before ingestion, so a fixed date made this slice report an anomaly once
+# it aged past that window. Fixed once at import so the re-run in run_action sees
+# the same event time as the first pass.
+_EVENT_TIME = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(hours=1)
+
+
 def _vitals() -> VitalsSnapshot:
-    return VitalsSnapshot(patient_id="P001", timestamp=datetime(2026, 9, 8, 12, 5, tzinfo=timezone.utc),
+    return VitalsSnapshot(patient_id="P001", timestamp=_EVENT_TIME + timedelta(minutes=5),
                           heart_rate=142, oxygen_saturation=91, respiratory_rate=28, temperature=38.9)
 
 
@@ -127,7 +134,7 @@ def run_action(workdir: Path, *, artifact_id: str = "feed-icu-3-0042", execution
     executor = guarded(actuator, ledger, kernel=kernel, consumer="on-call-pager")
 
     # SOURCE + PRESERVE
-    occurred = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    occurred = _EVENT_TIME
     artifact = FeedArtifact(artifact_id, "escalate P001: sustained tachycardia, SpO2 91", occurred)
     from gateway_admission_adapter import GatewayAdmissionAdapter, GatewayEpistemicStatus
     gateway = GatewayAdmissionAdapter()
@@ -259,7 +266,7 @@ def attack_after_restart(workdir: Path, explained: Dict[str, Any]) -> Dict[str, 
                                           profile="strict", source_signers=[SOURCE], execution_ledger=ledger,
                                           receipts=ReceiptLog(paths.receipts, signer=DEPLOYER))
     from gateway_admission_adapter import GatewayAdmissionAdapter, GatewayEpistemicStatus
-    artifact = FeedArtifact("feed-icu-3-0042", "escalate P001: sustained tachycardia, SpO2 91", datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc))
+    artifact = FeedArtifact("feed-icu-3-0042", "escalate P001: sustained tachycardia, SpO2 91", _EVENT_TIME)
     sealed = GatewayAdmissionAdapter.seal(artifact_id=artifact.artifact_id, payload={"content": artifact.content},
                                           provenance={"source": "SENTINEL"}, epistemic_status=GatewayEpistemicStatus.INFERENCE,
                                           authority_actor="CHARGE_NURSE", authority_grant="unit-escalation", execute=True)
