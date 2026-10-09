@@ -47,5 +47,12 @@ jobs:
           python -m pip install -r requirements.txt
       - name: Test
         run: python -m pytest -q
+      - name: Test on a future clock
+        # The same suite on a clock four months ahead, so a test that only
+        # passes while a fixed date is recent fails here on the day it is
+        # written, not weeks later. See future_clock_plugin.py.
+        run: |
+          OBSERVE_PERCEIVE_FAKE_NOW="$(date -u -d '+120 days' +%F)" \
+            python -m pytest -q -p future_clock_plugin
       - name: Lint (hard gate)
         run: ruff check .
