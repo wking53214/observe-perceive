@@ -197,7 +197,10 @@ class _Attested(ChainArtifact):
             signer, attest_id or artifact_id, when.isoformat())
 
 
-WHEN = dt.datetime(2026, 9, 8, 12, 0, tzinfo=dt.timezone.utc)
+# Relative to now, not a fixed date: the chain flags an event time more than
+# 30 days before ingestion, so a fixed date turns these tests red on the day it
+# ages past that window (2026-09-08 did, on 2026-10-08).
+WHEN = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0) - dt.timedelta(hours=1)
 
 
 def test_an_attested_event_time_is_recorded_committed_and_named(perceive, kernel):
