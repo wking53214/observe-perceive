@@ -60,6 +60,17 @@ ORIGIN_MIXED = "MIXED"
 ORIGIN_UNKNOWN = "UNKNOWN"
 
 
+# What TIE's coverage statuses mean for a reader. NOT_INSPECTED and MISSING use
+# the exact wording TIE's own build_package writes, so a gap is stated once.
+_GAP_LABELS = {
+    "NOT_INSPECTED": "not inspected",
+    "MISSING": "missing from the source",
+    "DUPLICATE": "duplicates of other segments",
+}
+
+NO_COVERAGE_STATEMENT = "no coverage record was reported, so how much of the source was read is unknown"
+
+
 @dataclass
 class _Status:
     value: str
@@ -116,22 +127,31 @@ class TieGovernanceAdapter:
         stated = list(getattr(handoff, "known_uncertainty", None) or ())
 
         segments = getattr(coverage, "segments", None) or () if coverage else ()
-        if segments:
-            by_status: Dict[str, int] = {}
-            for segment in segments:
-                status = getattr(getattr(segment, "status", None), "value", "UNKNOWN")
-                by_status[status] = by_status.get(status, 0) + 1
-            for status, label in (
-                ("NOT_INSPECTED", "not inspected"),
-                ("MISSING", "missing from the source"),
-            ):
-                if by_status.get(status):
-                    line = f"{by_status[status]} of {len(segments)} source segments {label}"
-                    # TIE now states its own coverage gaps in known_uncertainty
-                    # (TIE commit 29c2989) in exactly these words. Saying it
-                    # once is the point; saying it twice reads as two gaps.
-                    if line not in stated:
-                        stated.append(line)
+        if not segments:
+            # No coverage record, or one with no segments, says nothing about
+            # what was read. Left silent, a handoff with no uncertainty of its
+            # own arrives looking fully covered and EXPLICIT.
+            if NO_COVERAGE_STATEMENT not in stated:
+                stated.append(NO_COVERAGE_STATEMENT)
+            return stated
+
+        by_status: Dict[str, int] = {}
+        for segment in segments:
+            status = getattr(getattr(segment, "status", None), "value", "UNKNOWN")
+            by_status[status] = by_status.get(status, 0) + 1
+        # Every status other than INSPECTED is a statement that the segment
+        # does not count as read. coverage_ratio already excludes them, so
+        # each must be explained or the ratio shows a gap nothing accounts for.
+        for status in sorted(by_status, key=lambda v: (v not in _GAP_LABELS, v)):
+            if status == "INSPECTED":
+                continue
+            label = _GAP_LABELS.get(status, f"with status {status.lower()}")
+            line = f"{by_status[status]} of {len(segments)} source segments {label}"
+            # TIE now states its own coverage gaps in known_uncertainty
+            # (TIE commit 29c2989) in exactly these words. Saying it
+            # once is the point; saying it twice reads as two gaps.
+            if line not in stated:
+                stated.append(line)
         return stated
 
     @classmethod
