@@ -49,7 +49,7 @@ test = ["pytest>=8", "hypothesis", "freezegun"]
 # Flat layout: every module sits at the repository root.
 py-modules = [
   "adversarial_sensor_faults", "augur_screen_adapter", "capacity_planning",
-  "clinical_governance_system", "cns_governed_decision", "compliance_exporters",
+  "clinical_governance_system", "cns_connector", "cns_governed_decision", "compliance_exporters",
   "conservation_gsa815_adapter", "demo_why", "deterioration_simulator",
   "execution_guard",
   "fda_510k_checklist", "fortress_perceive_adapter", "gateway_admission_adapter",
