@@ -19,7 +19,7 @@ from conservation_kernel import ConservationKernel
 from governance_orchestrator import GovernanceOrchestrator
 from observe_consolidated import ObserveClinicalEngine
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
-from tie_governance_adapter import TieGovernanceAdapter
+from tie_governance_adapter import TieGovernanceAdapter, NO_COVERAGE_STATEMENT
 
 
 # --- structural stand-ins for TIE's models (not imported: duck-typed seam) --
@@ -160,6 +160,55 @@ def test_the_uncertainty_is_visible_in_the_governed_content():
     back to TIE."""
     artifact = TieGovernanceAdapter.handoff_to_artifact(_handoff())
     assert "Payment 3 has no stated date" in artifact.content
+
+
+# ---------------------------------------------------------------------------
+# Silence about coverage must not read as full coverage
+# ---------------------------------------------------------------------------
+
+def test_a_handoff_with_no_coverage_record_is_not_reported_explicit():
+    """Measured before the fix: no uncertainty of its own plus no coverage
+    record came out EXPLICIT, which says the source was read in full when the
+    adapter was never told how much was read."""
+    artifact = TieGovernanceAdapter.handoff_to_artifact(_handoff(known_uncertainty=()))
+    assert artifact.metadata.epistemic_status.value == "INFERRED"
+    assert "no coverage record" in artifact.content
+
+
+def test_an_empty_coverage_record_is_treated_like_none():
+    empty = _Coverage(source_id="doc-77", segments=())
+    context = TieGovernanceAdapter.handoff_context(_handoff(known_uncertainty=()), empty)
+    assert any("no coverage record" in u for u in context["known_uncertainty"])
+    assert context["coverage_ratio"] is None
+
+
+def test_the_no_coverage_statement_is_made_once():
+    handoff = _handoff(known_uncertainty=(NO_COVERAGE_STATEMENT,))
+    context = TieGovernanceAdapter.handoff_context(handoff)
+    assert context["known_uncertainty"].count(NO_COVERAGE_STATEMENT) == 1
+
+
+def test_duplicate_segments_are_explained_not_silently_dropped_from_the_ratio():
+    """Measured before the fix: 3 DUPLICATE + 1 INSPECTED gave ratio 0.25, no
+    uncertainty line, and EXPLICIT. The ratio showed a gap nothing accounted
+    for."""
+    segments = (_Segment("s0", _Enum("INSPECTED")),) + tuple(
+        _Segment(f"d{i}", _Enum("DUPLICATE")) for i in range(3)
+    )
+    coverage = _Coverage("doc-77", segments)
+    handoff = _handoff(known_uncertainty=())
+    context = TieGovernanceAdapter.handoff_context(handoff, coverage)
+    assert context["coverage_ratio"] == 0.25
+    assert "3 of 4 source segments duplicates of other segments" in context["known_uncertainty"]
+    assert TieGovernanceAdapter.handoff_to_artifact(handoff, coverage).metadata.epistemic_status.value == "INFERRED"
+
+
+def test_an_unrecognised_segment_status_is_still_stated():
+    segments = (_Segment("s0", _Enum("INSPECTED")), _Segment("x0", _Enum("QUARANTINED")))
+    context = TieGovernanceAdapter.handoff_context(
+        _handoff(known_uncertainty=()), _Coverage("doc-77", segments)
+    )
+    assert "1 of 2 source segments with status quarantined" in context["known_uncertainty"]
 
 
 # ---------------------------------------------------------------------------
