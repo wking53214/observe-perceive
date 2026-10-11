@@ -26,15 +26,17 @@ dependencies = [
 # default branch was that day. GEMS bb4cf40 (2026-09-20) deleted
 # HumanAuthorityGuard, HandoffValidator and governance/constitution.py, which
 # gems_governance_adapter.py imports, and every fresh install then errored 16
-# tests. 273aeea is its parent, the last GEMS commit that has them. The other
-# pins are the default-branch commits the full suite passed against on
-# 2026-09-24. Bump deliberately, and re-run the suite on the new SHA.
+# tests. The adapter now uses GEMS' GovernanceValidator instead, which first
+# appears in GEMS 701aa74 (the HUMAN-origin allowlist fix, GEMS PR #13). Pinned
+# to that commit. Re-pin to GEMS main once PR #13 merges. The other pins are
+# the default-branch commits the full suite passed against on 2026-09-24. Bump
+# deliberately, and re-run the suite on the new SHA.
 chain = [
   "cognitive-continuity-constitution @ git+https://github.com/wking53214/CCC@4aa182659dee69efaaab7376c7eba3378eb670e2",
   # CCCb: the text matcher current CCC requires before it records a finding.
   "cccb @ git+https://github.com/wking53214/CCCb@23911917e25f48522da7318b2e250d119536591f",
   "augur @ git+https://github.com/wking53214/AUGUR@1fc76118f75024be5ebebed227c2d9a4530c78b7",
-  "gems-infrastructure @ git+https://github.com/wking53214/GEMS@273aeea29463b2bc7b940757726f16fea825bf06",
+  "gems-infrastructure @ git+https://github.com/wking53214/GEMS@701aa74",
   "governance-gateway @ git+https://github.com/wking53214/Governance_Gateway@c507be7279c4488f98404514fcea2c900c53168e",
 ]
 # Opt-in strict stage; numpy comes in through its own metadata.
