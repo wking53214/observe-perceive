@@ -18,13 +18,22 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "CCC"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "CCCb"))
 
-ccc_available = True
+# No skip guard on purpose: these tests are the contract for recording into CCC.
+# If CCC or CCCb is missing, every test here FAILS with a clear message instead
+# of being skipped silently. The import error is caught so it fails these tests
+# only, rather than aborting collection of the whole repository's suite.
 try:
-    from ccc import ActorType
-except ImportError:  # pragma: no cover - CCC and CCCb are sibling checkouts
-    ccc_available = False
+    from ccc import ActorType  # noqa: E402
+    _CCC_IMPORT_ERROR = None
+except ImportError as _exc:  # pragma: no cover - exercised only without CCC
+    ActorType = None
+    _CCC_IMPORT_ERROR = _exc
 
-pytestmark = pytest.mark.skipif(not ccc_available, reason="CCC or CCCb checkout not available")
+
+@pytest.fixture(autouse=True)
+def _require_ccc():
+    if _CCC_IMPORT_ERROR is not None:
+        pytest.fail(f"CCC and CCCb must be importable to check this seam: {_CCC_IMPORT_ERROR}")
 
 from herald_ccc_adapter import (  # noqa: E402
     HeraldCCCAdapter,
@@ -87,8 +96,9 @@ def rejecting(export):
 class FakeCCC:
     """Stands in for CCCSystem and records what the adapter would have sent."""
 
-    def __init__(self):
+    def __init__(self, private_source_markers=()):
         self.recorded = []
+        self.private_source_markers = tuple(private_source_markers)
 
     def record_external_finding(self, finding, *, actor, allow_private_source=False):
         self.recorded.append((finding, actor, allow_private_source))
@@ -147,7 +157,8 @@ def test_finding_is_verified_and_carries_confidence_and_excerpt():
     assert finding.verified is True
     assert finding.confidence == 0.88
     assert finding.source_material == ("inv-1",)
-    assert finding.evidence == (("inv-1", "2026-11-01"),)
+    # Evidence is span offsets, never the matched text (privacy: see module docs).
+    assert finding.evidence == (("inv-1", "span 48-58"),)
     assert finding.method.startswith("HERALD extraction")
 
 
@@ -164,6 +175,45 @@ def test_two_documents_give_distinguishable_conclusions():
     first = finding_from_claim(ADMITTED).conclusion
     second = finding_from_claim(dict(ADMITTED, source_id="inv-2")).conclusion
     assert first != second
+
+
+def test_evidence_never_carries_the_matched_text():
+    finding = finding_from_claim(ADMITTED)
+    assert "2026-11-01" not in repr(finding.evidence)
+
+
+@pytest.mark.parametrize("reading", ["HUMAN_CONFIRMED", "WEIRD", "", None])
+def test_only_machine_readings_become_findings(reading):
+    # A person's sign-off is not a machine discovery, and an unknown reading
+    # fails closed. Only EXTRACTED and INFERRED are recorded.
+    export = export_with(admitted=(dict(ADMITTED, reading=reading),))
+    assert findings_from_export(export, verify=accepting) == []
+
+
+@pytest.mark.parametrize("reading", ["EXTRACTED", "INFERRED"])
+def test_machine_readings_are_recorded(reading):
+    export = export_with(admitted=(dict(ADMITTED, reading=reading),))
+    assert len(findings_from_export(export, verify=accepting)) == 1
+
+
+def test_private_source_anywhere_in_batch_records_nothing():
+    # Regression: one private source must not leave earlier findings recorded.
+    fake = FakeCCC(private_source_markers=("Resume_OS",))
+    adapter = HeraldCCCAdapter(ccc_system=fake)
+    export = export_with(admitted=(ADMITTED, dict(ADMITTED, source_id="Resume_OS-x")))
+    export["admitted"][1]["source_id"] = "Resume_OS-x"
+    with pytest.raises(ValueError, match="nothing was recorded"):
+        adapter.record_export(export, verify=accepting)
+    assert fake.recorded == []
+
+
+def test_private_source_is_allowed_only_when_the_caller_says_so():
+    fake = FakeCCC(private_source_markers=("Resume_OS",))
+    adapter = HeraldCCCAdapter(ccc_system=fake)
+    export = export_with(source_id="Resume_OS-invoice")
+    adapter.record_export(export, verify=accepting, allow_private_source=True)
+    assert len(fake.recorded) == 1
+    assert fake.recorded[0][2] is True
 
 
 def test_each_admitted_claim_is_recorded_as_a_model_actor():
