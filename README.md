@@ -100,7 +100,7 @@ From `CLAUDE_ARCHITECTURE_STATE.md` and `docs/audit/COMMERCIAL_RED_TEAM_2026-09-
 | Dual spine | Extracted α-ζ-β-δ is not the orchestrator. Two decision stories. |
 | Advisory PERCEIVE default | Strict profile exists; default does not fail-closed on policy. |
 | Pediatric misses | Known missed/late detections and sensor-fault gaps filed as **skipped tests**. Not a clinical product. |
-| GEMS pin | `701aa74` (GEMS PR #13). The adapter uses GEMS' `GovernanceValidator`. GEMS `bb4cf40` deleted the classes the adapter used before, so the old pin `273aeea` is no longer used. Re-pin to GEMS main once PR #13 merges. |
+| GEMS pin | `f70da70` (GEMS PR #13). The adapter uses GEMS' `GovernanceValidator`. GEMS `bb4cf40` deleted the classes the adapter used before, so the old pin `273aeea` is no longer used. Re-pin to GEMS main once PR #13 merges. |
 | Key holder residual | Closure proven against external caller, file editor without the key, second process on shared ledger, restart. **Not** proven against the key holder, a callable invoked outside the orchestrator, or processes that do not share the file. |
 | Untyped orchestrator output | Commercial audit: result is an untyped dict. |
 | No actor registry / grant lifecycle | Architecture epic, missing. |
@@ -130,7 +130,7 @@ Duck-typed sentinel artifact with event time → orchestrator result dict + rece
                     ┌── Governance_Gateway (opt, extra `chain`)
                     ├── CCC (opt)
                     ├── AUGUR (opt, veto-only)
-                    ├── GEMS @701aa74 (opt; pinned, see pyproject)
+                    ├── GEMS @f70da70 (opt; pinned, see pyproject)
                     └── fortress-kernel (opt, extra `fortress`)
 observe-perceive ───┤
                     ├── Conservation_Kernel @25145aa   HARD
