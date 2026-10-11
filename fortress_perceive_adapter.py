@@ -25,15 +25,13 @@ from typing import Dict, List, Optional, Any
 
 
 def _import_fortress_types():
-    """Resolve fortress-kernel the same way sentinel_perceive_adapter resolves
-    sentinel_os: a sibling-checkout path insert, with pip as the fallback.
+    """Resolve fortress-kernel from a sibling checkout (../fortress-kernel),
+    with an installed package as the fallback.
 
     The original version of this adapter required `pip install -e` of a
     fortress-kernel checkout that lived in /tmp. That install is long gone, so
-    the adapter would not import at all -- which is why this file sat in a
-    stale fork instead of the repo. Resolving a sibling checkout first makes it
-    work from a plain clone, matching how every other cross-repo dependency in
-    this package is handled.
+    the adapter would not import at all. Resolving a sibling checkout first
+    lets it work from a plain clone.
     """
     fortress_path = os.path.join(os.path.dirname(__file__), "..", "fortress-kernel")
     if os.path.isdir(fortress_path) and fortress_path not in sys.path:
