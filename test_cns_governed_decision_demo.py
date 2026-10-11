@@ -41,7 +41,7 @@ RECORDED = HERE / "docs" / "CNS_GOVERNED_DECISION_DEMO.md"
 LIBRARY_MODULES = ("governance_gateway", "ccc", "augur", "dit", "conservation_kernel")
 CNS_MODULES = ("cns", "cns.gate")
 BRANCH = "claude/lean-technical-review-9n6xwk"
-CNS_PIN = "3b465dbcc1a6a4ab6f1040f93d44483196abd737"
+CNS_PIN = "da9ab8c8c47097b38ad9792dec23fed45d31ae3f"
 
 EM_DASH, EN_DASH = chr(0x2014), chr(0x2013)
 
