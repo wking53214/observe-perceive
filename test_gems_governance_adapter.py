@@ -19,7 +19,10 @@ from governance_orchestrator import GovernanceOrchestrator
 from observe_consolidated import ObserveClinicalEngine
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
 
+# No silent skip: if GEMS cannot be imported, these tests fail with the real
+# reason. A skipped module would hide that the seam is broken.
 gems_available = True
+_GEMS_IMPORT_ERROR = None
 try:
     # The adapter is imported first on purpose: it is what resolves the GEMS
     # sibling checkout onto sys.path, so importing gems' own types before it
@@ -27,14 +30,15 @@ try:
     from gems_governance_adapter import GemsGovernanceAdapter
     from gems import Artifact, Authority, Handoff, Origin, Provenance
     from gems.contracts import EpistemicStatus
-except (ModuleNotFoundError, ImportError):  # pragma: no cover
+except (ModuleNotFoundError, ImportError) as exc:  # pragma: no cover
     gems_available = False
+    _GEMS_IMPORT_ERROR = exc
 
-# Module-level skip rather than a skipif mark: the parametrize decorators
-# below use GEMS types at collection time, so a mark alone still raised
-# NameError from a checkout without GEMS.
-if not gems_available:
-    pytest.skip("GEMS checkout not available", allow_module_level=True)
+
+@pytest.fixture(autouse=True)
+def _require_gems():
+    if not gems_available:
+        pytest.fail(f"GEMS must be importable to check this seam: {_GEMS_IMPORT_ERROR}")
 
 
 def _artifact(artifact_id="art-1", origin=None, authority=None, status=None):
@@ -53,15 +57,15 @@ def _artifact(artifact_id="art-1", origin=None, authority=None, status=None):
 
 def _handoff(artifacts=None, **overrides):
     base = dict(
-        handoff_id="ho-1",
         task_id="task-9",
         sender="analyst-gem",
         recipient="reviewer-gem",
         artifacts=tuple(artifacts if artifacts is not None else [_artifact()]),
-        routing_signal="servicing.dispute",
     )
     base.update(overrides)
-    return Handoff(**base)
+    # routing_signal and handoff_id existed in an older GEMS; GEMS HEAD's Handoff
+    # has only the four fields above. Fields are passed through only if present.
+    return Handoff(**{k: v for k, v in base.items() if k in Handoff.__dataclass_fields__})
 
 
 @pytest.fixture

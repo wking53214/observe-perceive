@@ -6,14 +6,15 @@ workflow -- into the orchestrated chain.
 
 The rule GEMS already enforces, and this adapter must not undo
 ------------------------------------------------------------------
-GEMS carries a `HumanAuthorityGuard` with a constitutional rule:
+GEMS carries a `GovernanceValidator` with a constitutional rule:
 
     AI/joint/uncertain material cannot silently become human authorization
 
-It refuses an artifact claiming `Authority.HUMAN_AUTHORIZATION` whose origin
-is not `Origin.HUMAN`, and it provides `authorize()` as the *explicit*
-crossing -- which records the new origin, the human source id, the parent it
-came from, and a note naming the boundary that was crossed.
+It refuses an artifact claiming `Authority.HUMAN_AUTHORIZATION` unless its
+origin is exactly `Origin.HUMAN`. (This replaces an older `HumanAuthorityGuard`
+and `authorize()` crossing, which GEMS HEAD no longer provides. An explicit,
+recorded crossing from AI to human authority does not exist in GEMS anymore,
+so this adapter has no such path to offer.)
 
 That rule is enforced here rather than assumed, because this seam is exactly
 where it could be lost. An adapter that reads `authority` and passes it along
@@ -42,20 +43,36 @@ from typing import Any, Dict, List, Optional
 
 
 def _import_gems():
-    """Resolve GEMS: sibling checkout first, installed second."""
+    """Resolve GEMS: sibling checkout first, installed second.
+
+    Returns None when GEMS or its governance validator cannot be imported. The
+    failure is then reported with its real cause, not as "GEMS not found".
+    """
     gems_src = os.path.join(os.path.dirname(__file__), "..", "GEMS", "src")
     if os.path.isdir(gems_src) and gems_src not in sys.path:
         sys.path.insert(0, gems_src)
     try:
-        from gems import Authority, HandoffValidator, HumanAuthorityGuard, Origin
-        from gems.governance.constitution import ConstitutionalViolation
-    except (ModuleNotFoundError, ImportError):
-        return (None,) * 5
-    return Authority, HandoffValidator, HumanAuthorityGuard, Origin, ConstitutionalViolation
+        from gems.governance import GovernanceValidator
+    except (ModuleNotFoundError, ImportError) as exc:
+        return None, exc
+    return GovernanceValidator, None
 
 
-(Authority, HandoffValidator, HumanAuthorityGuard, Origin,
- ConstitutionalViolation) = _import_gems()
+GovernanceValidator, _GEMS_IMPORT_ERROR = _import_gems()
+
+
+def _structural_problem(handoff) -> str:
+    """The structural checks GEMS' handoff validator used to make, kept here
+    because GEMS HEAD no longer provides them. Returns "" when the handoff is
+    structurally sound."""
+    if not str(getattr(handoff, "sender", "") or "").strip():
+        return "handoff has no sender"
+    if not str(getattr(handoff, "recipient", "") or "").strip():
+        return "handoff has no recipient"
+    for artifact in getattr(handoff, "artifacts", ()) or ():
+        if getattr(artifact, "provenance", None) is None:
+            return f"artifact {getattr(artifact, 'artifact_id', '?')!r} has no provenance"
+    return ""
 
 
 @dataclass
@@ -90,12 +107,13 @@ class GemsGovernanceAdapter:
     """Converts GEMS handoffs into governed chain requests."""
 
     def __init__(self):
-        if HumanAuthorityGuard is None:
+        if GovernanceValidator is None:
             raise ImportError(
-                "GEMS not found. Clone it beside this repo (../GEMS)."
+                "GEMS governance validator not importable "
+                f"({_GEMS_IMPORT_ERROR}). Clone GEMS beside this repo (../GEMS) "
+                "at a commit that provides gems.governance.GovernanceValidator."
             )
-        self.guard = HumanAuthorityGuard()
-        self.handoff_validator = HandoffValidator()
+        self.validator = GovernanceValidator()
 
     # ------------------------------------------------------------------
     # GEMS' own rules, run rather than assumed
@@ -108,15 +126,14 @@ class GemsGovernanceAdapter:
         validity first (sender, recipient, every artifact has provenance),
         then the constitutional authority rule on each artifact.
         """
-        try:
-            self.handoff_validator.validate(handoff)
-        except ValueError as e:
-            return HandoffRefusal(reason=f"GEMS handoff validation failed: {e}")
+        problem = _structural_problem(handoff)
+        if problem:
+            return HandoffRefusal(reason=f"GEMS handoff validation failed: {problem}")
 
         for artifact in getattr(handoff, "artifacts", ()) or ():
             try:
-                self.guard.assert_not_human_authorization(artifact)
-            except ConstitutionalViolation as e:
+                self.validator.validate_artifact(artifact)
+            except ValueError as e:
                 # The whole handoff is refused, not just this artifact. A
                 # handoff missing one artifact is a different handoff, and
                 # nobody downstream would know which one went missing.
