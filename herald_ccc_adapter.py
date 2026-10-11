@@ -32,6 +32,12 @@ class HeraldExportNotVerified(Exception):
 #: Machine actor recorded on every HERALD-originated finding.
 DEFAULT_ACTOR_ID = "herald-intake"
 
+#: HERALD readings that are machine output and may become CCC findings.
+#: HUMAN_CONFIRMED is deliberately absent: CCC records machine-originated
+#: findings only, and a person's sign-off is not a machine discovery. Any
+#: reading not listed here is also refused (fail closed).
+MACHINE_READINGS = frozenset({"EXTRACTED", "INFERRED"})
+
 #: The method string CCC stores on each record. It names what produced the
 #: finding so a recurrence query can tell HERALD's output from other sources.
 METHOD = "HERALD extraction, OMEGA confidence gate, export MAC verified"
@@ -71,8 +77,10 @@ def finding_from_claim(entry: Mapping[str, Any]) -> HeraldFinding:
     authority, plus the source it came from. Those words repeat across runs,
     so occurrences of the same kind cluster. The source id makes each document
     distinguishable, which keeps one run from looking like another's duplicate.
-    The claim's value is left out of the conclusion so the excerpt, not the
-    value, carries the content.
+    The claim's value is left out of the conclusion. The evidence carries the
+    span offsets, not the matched text: CCC's private-source guard checks only
+    source names, so raw document text in evidence would reach the audit trail
+    unchecked.
     """
     conclusion = (
         f"HERALD admitted a {entry['kind']} claim from {entry['standing']} source "
@@ -84,7 +92,7 @@ def finding_from_claim(entry: Mapping[str, Any]) -> HeraldFinding:
         source_material=(str(entry["source_id"]),),
         confidence=float(entry["confidence"]),
         verified=True,
-        evidence=((str(entry["source_id"]), str(entry["raw"])),),
+        evidence=((str(entry["source_id"]), f"span {entry['span'][0]}-{entry['span'][1]}"),),
     )
 
 
@@ -96,10 +104,15 @@ def findings_from_export(
     """Findings for every admitted claim, once the export has verified.
 
     Raises HeraldExportNotVerified before reading any claim if the export does
-    not verify. Refused entries never become findings.
+    not verify. Refused entries never become findings, and neither do claims
+    whose reading is not machine output (see MACHINE_READINGS).
     """
     _verified_export(export, verify)
-    return [finding_from_claim(entry) for entry in export["admitted"]]
+    return [
+        finding_from_claim(entry)
+        for entry in export["admitted"]
+        if entry.get("reading") in MACHINE_READINGS
+    ]
 
 
 class HeraldCCCAdapter:
@@ -132,6 +145,17 @@ class HeraldCCCAdapter:
         verify. CCC's own refusals (private source, duplicate policy) propagate.
         """
         findings = findings_from_export(export, verify=verify)
+        if not allow_private_source:
+            # Check the whole batch before recording anything, so one private
+            # source cannot leave the earlier findings recorded and the rest not.
+            markers = tuple(getattr(self.ccc, "private_source_markers", ()) or ())
+            for finding in findings:
+                for source in finding.source_material:
+                    if any(marker in source for marker in markers):
+                        raise ValueError(
+                            f"source {source!r} is a known-private source; the whole "
+                            "batch is refused and nothing was recorded"
+                        )
         return [
             self.ccc.record_external_finding(
                 finding,
