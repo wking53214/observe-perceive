@@ -43,8 +43,8 @@ chain = [
 fortress = ["fortress-kernel @ git+https://github.com/wking53214/fortress-kernel@4105ccb5fec2806f3f1ab5aeb0f88151e6a6fdc0"]
 # Optional: lets cns_governed_decision combine gates from any library under the
 # cns.gate contract. Nothing imports CNS unless that module's pipeline is used.
-# Pinned to the commit of tag v1.4.0. Not a runtime dependency.
-cns = ["cns @ git+https://github.com/wking53214/cns.git@3b465dbcc1a6a4ab6f1040f93d44483196abd737"]
+# Pinned to the commit of tag v1.5.1. Not a runtime dependency.
+cns = ["cns @ git+https://github.com/wking53214/cns.git@da9ab8c8c47097b38ad9792dec23fed45d31ae3f"]
 test = ["pytest>=8", "hypothesis", "freezegun"]
 
 [tool.setuptools]
