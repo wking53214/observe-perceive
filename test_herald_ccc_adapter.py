@@ -19,9 +19,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "CCCb"))
 
 # No skip guard on purpose: these tests are the contract for recording into CCC.
-# If CCC or CCCb is missing, this module fails to import instead of being skipped
-# silently (a silent skip here would hide that nothing is being checked).
-from ccc import ActorType  # noqa: E402
+# If CCC or CCCb is missing, every test here FAILS with a clear message instead
+# of being skipped silently. The import error is caught so it fails these tests
+# only, rather than aborting collection of the whole repository's suite.
+try:
+    from ccc import ActorType  # noqa: E402
+    _CCC_IMPORT_ERROR = None
+except ImportError as _exc:  # pragma: no cover - exercised only without CCC
+    ActorType = None
+    _CCC_IMPORT_ERROR = _exc
+
+
+@pytest.fixture(autouse=True)
+def _require_ccc():
+    if _CCC_IMPORT_ERROR is not None:
+        pytest.fail(f"CCC and CCCb must be importable to check this seam: {_CCC_IMPORT_ERROR}")
 
 from herald_ccc_adapter import (  # noqa: E402
     HeraldCCCAdapter,
