@@ -236,9 +236,11 @@ def test_requirements_demo_names_cns_and_each_library_at_its_branch():
     }
     for dist, repo in repos.items():
         # Each library is pinned to an exact 40-hex commit, never a branch name,
-        # so a later push cannot change what the demo installs.
+        # so a later push cannot change what the demo installs. AUGUR is installed
+        # without its [cns] extra, which pins a CNS that conflicts with CNS_PIN.
+        extra = "" if dist == "augur" else "[cns]"
         assert re.fullmatch(
-            re.escape(f"{dist}[cns] @ git+https://github.com/wking53214/{repo}.git@")
+            re.escape(f"{dist}{extra} @ git+https://github.com/wking53214/{repo}.git@")
             + r"[0-9a-f]{40}",
             by_name[dist],
         ), by_name[dist]
