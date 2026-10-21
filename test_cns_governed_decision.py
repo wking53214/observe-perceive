@@ -43,7 +43,7 @@ HERE = Path(__file__).resolve().parent
 MODULE_PATH = HERE / "cns_governed_decision.py"
 PYPROJECT = HERE / "pyproject.toml"
 
-CNS_PIN = "da9ab8c8c47097b38ad9792dec23fed45d31ae3f"
+CNS_PIN = "v1.9.0"
 HINT = "pip install 'observe-perceive[cns]'"
 
 
@@ -169,7 +169,7 @@ def test_the_packaging_adds_no_runtime_dependency():
     assert not any("cns" in d.lower() for d in deps)
     extras = project["optional-dependencies"]
     assert set(extras) == {"chain", "fortress", "test", "cns"}
-    assert extras["cns"] == [f"cns @ git+https://github.com/wking53214/cns.git@{CNS_PIN}"]
+    assert extras["cns"] == [f"cns @ git+https://github.com/wking53214/CNS.git@{CNS_PIN}"]
     for name in ("chain", "fortress", "test"):
         assert not any("cns" in d.lower().split("@")[0] for d in extras[name]), name
     assert "cns_governed_decision" in data["tool"]["setuptools"]["py-modules"]
