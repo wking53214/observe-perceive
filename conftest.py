@@ -3,7 +3,13 @@
 Kept deliberately small: a PERCEIVE kernel with an empty manifest, a duck-typed
 artifact shaped exactly as the chain's de facto input contract, vitals, and a
 runner that returns the result plus whether the action ran.
+
+Also ``importorskip_cns``, the one rule for tests that need CNS or a library's
+CNS connector: they skip where it is missing, unless
+OBSERVE_PERCEIVE_REQUIRE_CNS=1, which turns a missing module into an error.
 """
+import importlib
+import os
 from datetime import datetime, timezone
 
 import pytest
@@ -12,6 +18,17 @@ from conservation_kernel import ConservationKernel
 from governance_orchestrator import GovernanceOrchestrator
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
+
+
+def importorskip_cns(modname, reason=None):
+    """``pytest.importorskip``, except that OBSERVE_PERCEIVE_REQUIRE_CNS=1 makes a missing module an error.
+
+    CI's CNS job installs requirements-demo.txt and sets the variable, so there
+    the CNS layer and its demo cannot silently skip.
+    """
+    if os.environ.get("OBSERVE_PERCEIVE_REQUIRE_CNS") == "1":  # CI: a missing module is a failure, not a skip
+        return importlib.import_module(modname)
+    return pytest.importorskip(modname, reason=reason)
 
 
 class _Status:

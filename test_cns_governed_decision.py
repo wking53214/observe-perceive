@@ -12,6 +12,8 @@ The connected half needs ``cns.gate`` (``pip install 'observe-perceive[cns]'``)
 and skips without it. Its fake gates declare a position and return what they
 are told, so every rule R1 to R8 is exercised without any library behind it,
 and one test drives the real DIT connector (``pip install 'dit[cns]'``).
+With OBSERVE_PERCEIVE_REQUIRE_CNS=1 (CI's CNS job), a missing ``cns.gate`` or
+``dit.cns_connector`` is an error instead of a skip.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from pathlib import Path
 import pytest
 
 import cns_governed_decision as cgd
+from conftest import importorskip_cns
 from cns_governed_decision import (
     PLACEMENT_GATE,
     SYNTHETIC_SUBJECT_PREFIX,
@@ -194,7 +197,7 @@ _UNSET = object()
 
 @pytest.fixture(scope="module")
 def cg():
-    return pytest.importorskip(
+    return importorskip_cns(
         "cns.gate", reason="cns not installed; run in an environment with observe-perceive[cns]"
     )
 
@@ -895,7 +898,7 @@ DIT_AFFECTIVE = "Queue depth fell 22% because the window widened, and we hope it
 
 @pytest.fixture
 def dit(cg):
-    connector = pytest.importorskip(
+    connector = importorskip_cns(
         "dit.cns_connector", reason="dit[cns] not installed; the real-connector tests need it")
     import dit as dit_pkg
 

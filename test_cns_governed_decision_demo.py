@@ -12,10 +12,19 @@ The connected half runs the real demo against the real libraries and asserts
 every scenario's verdicts, its not-evaluated list, how often each gate was
 asked, and how often the work ran. It skips cleanly, with a reason, when CNS or
 any of the five libraries (or a version of one that has no CNS connector) is
-not installed:
+not installed, unless OBSERVE_PERCEIVE_REQUIRE_CNS=1 (CI's CNS job), which
+makes each of those a failure instead:
 
     pip install -r requirements-demo.txt
+    export AUGUR_AUDIT_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"
     PYTHONPATH=. python -m pytest test_cns_governed_decision_demo.py
+
+AUGUR_AUDIT_KEY must be set (to a fresh random value; never a fixed one) for
+the test that runs the demo as a script and requires empty stderr. Without it,
+AUGUR warns on stderr that it signs its audit log with a key held only by that
+process, and the test fails saying so. The script runs in a minimal
+environment, which carries AUGUR_AUDIT_KEY through and nothing else from the
+caller's. CI's CNS job generates one per run.
 """
 
 from __future__ import annotations
@@ -30,6 +39,8 @@ import textwrap
 from pathlib import Path
 
 import pytest
+
+from conftest import importorskip_cns
 
 HERE = Path(__file__).resolve().parent
 DEMO = HERE / "examples" / "cns_governed_decision_demo.py"
@@ -61,6 +72,8 @@ def _block(*modules: str) -> str:
 
 def _python(code: str, *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     env = {"PYTHONPATH": str(HERE), "PATH": os.environ.get("PATH", ""), "PYTHONDONTWRITEBYTECODE": "1"}
+    if os.environ.get("AUGUR_AUDIT_KEY"):  # the caller's key, never a fixed one: see the module docstring
+        env["AUGUR_AUDIT_KEY"] = os.environ["AUGUR_AUDIT_KEY"]
     return subprocess.run(
         [sys.executable, "-c", textwrap.dedent(code)],
         capture_output=True,
@@ -292,10 +305,10 @@ def test_the_recorded_run_is_the_demo_output_with_every_scenario_as_expected():
 @pytest.fixture(scope="module")
 def demo():
     """The demo module, loaded from its file. Skips unless everything it needs is here."""
-    pytest.importorskip("cns.gate", reason="CNS is not installed (pip install -r requirements-demo.txt)")
+    importorskip_cns("cns.gate", reason="CNS is not installed (pip install -r requirements-demo.txt)")
     for library in LIBRARY_MODULES:
-        pytest.importorskip(library, reason=f"{library} is not installed")
-        pytest.importorskip(
+        importorskip_cns(library, reason=f"{library} is not installed")
+        importorskip_cns(
             f"{library}.cns_connector",
             reason=f"the installed {library} has no CNS connector",
         )
@@ -640,6 +653,13 @@ def test_a_missing_library_is_reported_and_exits_2_when_cns_is_present(tmp_path,
 
 
 def test_run_as_a_script_it_exits_0_prints_the_same_thing_twice_and_leaves_no_files(tmp_path, demo):
+    if not os.environ.get("AUGUR_AUDIT_KEY"):
+        pytest.fail(
+            "AUGUR_AUDIT_KEY is not set, so AUGUR warns on stderr that it signs its audit log "
+            "with a key held only by this process, and this test requires empty stderr. Set it "
+            "to a fresh random value: export AUGUR_AUDIT_KEY=\"$(python -c 'import secrets; "
+            "print(secrets.token_hex(32))')\""
+        )
     first = _run_script(cwd=tmp_path)
     second = _run_script(cwd=tmp_path)
     assert first.returncode == 0, first.stderr
