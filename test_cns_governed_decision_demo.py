@@ -16,7 +16,15 @@ not installed, unless OBSERVE_PERCEIVE_REQUIRE_CNS=1 (CI's CNS job), which
 makes each of those a failure instead:
 
     pip install -r requirements-demo.txt
+    export AUGUR_AUDIT_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"
     PYTHONPATH=. python -m pytest test_cns_governed_decision_demo.py
+
+AUGUR_AUDIT_KEY must be set (to a fresh random value; never a fixed one) for
+the test that runs the demo as a script and requires empty stderr. Without it,
+AUGUR warns on stderr that it signs its audit log with a key held only by that
+process, and the test fails saying so. The script runs in a minimal
+environment, which carries AUGUR_AUDIT_KEY through and nothing else from the
+caller's. CI's CNS job generates one per run.
 """
 
 from __future__ import annotations
@@ -64,6 +72,8 @@ def _block(*modules: str) -> str:
 
 def _python(code: str, *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     env = {"PYTHONPATH": str(HERE), "PATH": os.environ.get("PATH", ""), "PYTHONDONTWRITEBYTECODE": "1"}
+    if os.environ.get("AUGUR_AUDIT_KEY"):  # the caller's key, never a fixed one: see the module docstring
+        env["AUGUR_AUDIT_KEY"] = os.environ["AUGUR_AUDIT_KEY"]
     return subprocess.run(
         [sys.executable, "-c", textwrap.dedent(code)],
         capture_output=True,
@@ -643,6 +653,13 @@ def test_a_missing_library_is_reported_and_exits_2_when_cns_is_present(tmp_path,
 
 
 def test_run_as_a_script_it_exits_0_prints_the_same_thing_twice_and_leaves_no_files(tmp_path, demo):
+    if not os.environ.get("AUGUR_AUDIT_KEY"):
+        pytest.fail(
+            "AUGUR_AUDIT_KEY is not set, so AUGUR warns on stderr that it signs its audit log "
+            "with a key held only by this process, and this test requires empty stderr. Set it "
+            "to a fresh random value: export AUGUR_AUDIT_KEY=\"$(python -c 'import secrets; "
+            "print(secrets.token_hex(32))')\""
+        )
     first = _run_script(cwd=tmp_path)
     second = _run_script(cwd=tmp_path)
     assert first.returncode == 0, first.stderr

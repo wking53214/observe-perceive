@@ -99,6 +99,13 @@ jobs:
           python -m pip install -r requirements-demo.txt
           python -m pip install -r requirements.txt
       - name: Test with CNS and the demo libraries required
+        # AUGUR warns on stderr when AUGUR_AUDIT_KEY is unset, and the demo's
+        # script test requires empty stderr. The key is a fresh random value
+        # made in this step and masked in the log; no key is stored anywhere.
         env:
           OBSERVE_PERCEIVE_REQUIRE_CNS: "1"
-        run: python -m pytest -q -rs
+        run: |
+          AUGUR_AUDIT_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"
+          echo "::add-mask::$AUGUR_AUDIT_KEY"
+          export AUGUR_AUDIT_KEY
+          python -m pytest -q -rs
