@@ -8,21 +8,22 @@
 # pyproject pins older commits of some of these libraries. The demo imports
 # only the flat module cns_governed_decision, which needs nothing but CNS.
 #
-# The five libraries are installed from the exact commits that carry their CNS
-# connector (the tips of branch claude/lean-technical-review-9n6xwk in each
-# repository when this demo was recorded), so a later push to a branch cannot
-# change what gets installed.
+# The libraries are installed from exact commits, so a later push to a branch
+# cannot change what gets installed. Governance Gateway, CCC, DIT and the
+# Conservation Kernel are at the commits on their main branches whose own [cns]
+# extras pin CNS v1.9.0 (2026-10-21), so they agree with the CNS line below and
+# pip can resolve the set.
 #
-# CCC is the exception: it was bumped on 2026-10-09 to 4aa1826, the commit the
-# package's own pyproject pins, so the repository names one CCC. The demo's
-# tests and printed output were identical on the old and new commits.
+# AUGUR is the exception. Its main branch no longer carries code, so it stays at
+# the commit below, whose [cns] extra pins CNS v1.4.0, which cannot be installed
+# together with v1.9.0. It is installed without that extra. Its
+# connector imports cns only when used, and gets the CNS installed here.
 #
-# CNS is pinned to the tag v1.9.0. The libraries below carry their own [cns]
-# extras, which pin an older CNS commit (3b465db, CNS 1.4.0).
+# CNS is pinned to the tag v1.9.0.
 
 cns @ git+https://github.com/wking53214/CNS.git@v1.9.0
-governance-gateway[cns] @ git+https://github.com/wking53214/governance_gateway.git@d2cb0b6f6dcc7dfad1e4cf25dbb06dbdd81deb48
-cognitive-continuity-constitution[cns] @ git+https://github.com/wking53214/ccc.git@4aa182659dee69efaaab7376c7eba3378eb670e2
-augur[cns] @ git+https://github.com/wking53214/augur.git@1fc76118f75024be5ebebed227c2d9a4530c78b7
-dit[cns] @ git+https://github.com/wking53214/dit.git@087b0c70ea29457a9795ff6b0cb14d5d93711b86
-conservation-kernel[cns] @ git+https://github.com/wking53214/conservation_kernel.git@5f35dfe01960f3da2577d6b922d55538f9ec2891
+governance-gateway[cns] @ git+https://github.com/wking53214/governance_gateway.git@a02f7383b13d4ccb748227a817c1eed862503cf9
+cognitive-continuity-constitution[cns] @ git+https://github.com/wking53214/ccc.git@14a76381b1cbea164efabf74de76d1d11224e1cf
+augur @ git+https://github.com/wking53214/augur.git@1fc76118f75024be5ebebed227c2d9a4530c78b7
+dit[cns] @ git+https://github.com/wking53214/dit.git@5763f1acc1c65dde575bbc03ab980d623e6f0ad5
+conservation-kernel[cns] @ git+https://github.com/wking53214/conservation_kernel.git@97ed6f42010ac107591f2ad67551bd03b9929e54
