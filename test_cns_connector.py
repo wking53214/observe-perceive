@@ -5,7 +5,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-pytest.importorskip("cns.gate", reason="needs the pinned CNS package")
+from conftest import importorskip_cns
+
+# Skips without CNS, unless OBSERVE_PERCEIVE_REQUIRE_CNS=1, which makes it an error.
+importorskip_cns("cns.gate", reason="needs the pinned CNS package")
 
 import cns_connector  # noqa: E402
 from cns.gate import GateOutcome, GatePosition  # noqa: E402

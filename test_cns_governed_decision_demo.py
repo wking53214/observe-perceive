@@ -12,7 +12,8 @@ The connected half runs the real demo against the real libraries and asserts
 every scenario's verdicts, its not-evaluated list, how often each gate was
 asked, and how often the work ran. It skips cleanly, with a reason, when CNS or
 any of the five libraries (or a version of one that has no CNS connector) is
-not installed:
+not installed, unless OBSERVE_PERCEIVE_REQUIRE_CNS=1 (CI's CNS job), which
+makes each of those a failure instead:
 
     pip install -r requirements-demo.txt
     PYTHONPATH=. python -m pytest test_cns_governed_decision_demo.py
@@ -30,6 +31,8 @@ import textwrap
 from pathlib import Path
 
 import pytest
+
+from conftest import importorskip_cns
 
 HERE = Path(__file__).resolve().parent
 DEMO = HERE / "examples" / "cns_governed_decision_demo.py"
@@ -292,10 +295,10 @@ def test_the_recorded_run_is_the_demo_output_with_every_scenario_as_expected():
 @pytest.fixture(scope="module")
 def demo():
     """The demo module, loaded from its file. Skips unless everything it needs is here."""
-    pytest.importorskip("cns.gate", reason="CNS is not installed (pip install -r requirements-demo.txt)")
+    importorskip_cns("cns.gate", reason="CNS is not installed (pip install -r requirements-demo.txt)")
     for library in LIBRARY_MODULES:
-        pytest.importorskip(library, reason=f"{library} is not installed")
-        pytest.importorskip(
+        importorskip_cns(library, reason=f"{library} is not installed")
+        importorskip_cns(
             f"{library}.cns_connector",
             reason=f"the installed {library} has no CNS connector",
         )

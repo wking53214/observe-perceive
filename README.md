@@ -158,7 +158,7 @@ pip install -r requirements-demo.txt
 PYTHONPATH=. python examples/cns_governed_decision_demo.py
 ```
 
-`requirements-demo.txt` installs each library from the branch that carries its connector. Those are branch refs, not commit SHAs, and should be pinned once the branches are final. A recorded run is in `docs/CNS_GOVERNED_DECISION_DEMO.md`. The tests are in `test_cns_governed_decision_demo.py` and skip cleanly, with a reason, where CNS or a library is missing.
+`requirements-demo.txt` installs each library from the branch that carries its connector. Those are branch refs, not commit SHAs, and should be pinned once the branches are final. A recorded run is in `docs/CNS_GOVERNED_DECISION_DEMO.md`. The tests are in `test_cns_governed_decision_demo.py` and skip cleanly, with a reason, where CNS or a library is missing. CI's `cns` job installs `requirements-demo.txt` and sets `OBSERVE_PERCEIVE_REQUIRE_CNS=1`, which turns each of those skips into a failure.
 
 Limits of the demo. The work is a stub, not a model. Two scenarios (a required library is missing) are simulated by leaving a slot empty; nothing stands in for the missing gate. AUGUR's gate appends audit lines to a log, and the demo sends them to a temporary file that is not deleted. The digests are tamper-evidence, not tamper-proofing: someone who rebuilds a verdict with a recomputed digest is not caught by the digest alone, and the demo shows that too.
 

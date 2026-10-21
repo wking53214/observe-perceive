@@ -56,3 +56,49 @@ jobs:
             python -m pytest -q -p future_clock_plugin
       - name: Lint (hard gate)
         run: ruff check .
+
+  cns:
+    # The optional CNS combining layer (cns_connector.py, cns_governed_decision.py)
+    # and its demo, run against CNS and the five libraries in
+    # requirements-demo.txt. The job above does not install them, so there
+    # those tests skip. OBSERVE_PERCEIVE_REQUIRE_CNS=1 turns a missing cns, a
+    # missing library or a library without a CNS connector into a failure, so
+    # here they cannot silently skip.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Authorise reads of the library's private repos
+        # Same as the job above: every repo in the library is private.
+        env:
+          LIBRARY_READ_TOKEN: ${{ secrets.LIBRARY_READ_TOKEN }}
+        run: |
+          if [ -z "$LIBRARY_READ_TOKEN" ]; then
+            echo "::error::LIBRARY_READ_TOKEN secret is not set; the library's private dependencies cannot be fetched"
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${LIBRARY_READ_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install
+        # requirements-demo.txt first. The two files pin some of the same
+        # libraries at different commits, so one pip command cannot resolve
+        # them. Installed in this order, pip keeps the demo's commits (the ones
+        # that carry a CNS connector) and treats the repo's pins of the same
+        # versions as already satisfied. If that ever changes, the CNS tests
+        # fail here rather than skip.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-demo.txt
+          python -m pip install -r requirements.txt
+      - name: Test with CNS and the demo libraries required
+        env:
+          OBSERVE_PERCEIVE_REQUIRE_CNS: "1"
+        run: python -m pytest -q -rs
