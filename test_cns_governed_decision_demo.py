@@ -41,7 +41,7 @@ RECORDED = HERE / "docs" / "CNS_GOVERNED_DECISION_DEMO.md"
 LIBRARY_MODULES = ("governance_gateway", "ccc", "augur", "dit", "conservation_kernel")
 CNS_MODULES = ("cns", "cns.gate")
 BRANCH = "claude/lean-technical-review-9n6xwk"
-CNS_PIN = "da9ab8c8c47097b38ad9792dec23fed45d31ae3f"
+CNS_PIN = "v1.9.0"
 
 EM_DASH, EN_DASH = chr(0x2014), chr(0x2013)
 
@@ -226,7 +226,7 @@ def test_requirements_demo_names_cns_and_each_library_at_its_branch():
         "dit",
         "conservation-kernel",
     }
-    assert by_name["cns"] == f"cns @ git+https://github.com/wking53214/cns.git@{CNS_PIN}"
+    assert by_name["cns"] == f"cns @ git+https://github.com/wking53214/CNS.git@{CNS_PIN}"
     repos = {
         "governance-gateway": "governance_gateway",
         "cognitive-continuity-constitution": "ccc",
