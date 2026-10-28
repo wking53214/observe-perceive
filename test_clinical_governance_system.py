@@ -104,7 +104,7 @@ class TestMultiHospital(unittest.TestCase):
 
     def test_emergency_triggers_multi_node_consensus(self):
         system = build_multi_hospital_system(["nch", "partner-a", "partner-b"])
-        d = system.process_vitals(vitals(pid="P004", hr=170, o2=82.0, rr=48, temp=39.8, age=9, force_heavy=True))
+        d = system.process_vitals(vitals(pid="P004", hr=170, o2=82.0, rr=48, temp=39.8, age=9, force_heavy=True, physician_approved=True))
         self.assertEqual(d.regime, "critical")
         self.assertTrue(d.used_multi_node_consensus)
         self.assertIsNotNone(d.consensus_detail)
@@ -202,6 +202,15 @@ class TestGovernanceFailOpen(unittest.TestCase):
                                 context={"age_months": 24})
         decision = system.process_vitals(stable)  # must not raise
         self.assertEqual(decision.action, "continue_monitoring")
+
+    def test_emergency_override_without_physician_context_is_blocked(self):
+        """No physician_approved key in context means not approved (fail closed)."""
+        system = build_single_hospital_system()
+        crit = VitalsSnapshot("P9", datetime.now(timezone.utc), 168, 83.0, 46, 39.5,
+                              context={"age_months": 12, "force_heavy": True})
+        d = system.process_vitals(crit)
+        self.assertEqual(d.action, "escalate_blocked")
+        self.assertTrue(any("Physician approval required" in v for v in d.governance_violations))
 
 
 if __name__ == "__main__":
