@@ -293,7 +293,7 @@ class ClinicalGovernanceSystem:
                     **base_context,
                     "emergency_reason": justification,
                     "override_type": "patient_safety",
-                    "physician_approved": vitals.context.get("physician_approved", True),
+                    "physician_approved": vitals.context.get("physician_approved", False),
                     "can_notify_stakeholders": True,
                     "escalated_to_physician": True,
                 },

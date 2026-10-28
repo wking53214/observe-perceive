@@ -1275,8 +1275,12 @@ class ObserveClinicalEngine:
         # state forever. We cap tracked patients and evict the least-recently-assessed
         # patient (LRU) once the cap is hit. Eviction only drops cooldown/entropy state,
         # never audit records (those live in the immutable ledger). A re-appearing patient
-        # simply starts with a fresh clean policy — safe, since a stale 5-min cooldown for
-        # a patient not seen in thousands of readings should not persist anyway.
+        # starts with a fresh STABLE policy, so only a patient whose policy already IS a
+        # fresh STABLE baseline (STABLE regime, no escalation lock) may be evicted: evicting
+        # a CRITICAL or escalation-locked patient would silently reset its tracked state.
+        # If no such patient exists the cap is exceeded rather than reset a tracked
+        # patient (memory over a silent safety reset). Each eviction is written to the
+        # audit ledger as STATE_EVICTED.
         self._max_tracked_patients = max_tracked_patients
         self._patient_policies: "OrderedDict[str, EscalationPolicy]" = OrderedDict()
         self._patient_entropy: Dict[str, float] = {}
@@ -1314,15 +1318,33 @@ class ObserveClinicalEngine:
             return self._patient_kalman[patient_id]
 
     def _touch_patient(self, patient_id: str) -> None:
-        """Mark patient as most-recently-used and evict LRU if over capacity."""
+        """Mark patient as most-recently-used and evict evictable LRU patients if over capacity.
+
+        Only a patient (other than the current one) whose policy is a fresh STABLE
+        baseline (STABLE regime, escalation lock clear) is evicted. If none exists,
+        every patient is kept: memory over a silent safety reset.
+        """
         with self._state_lock:
             if patient_id in self._patient_policies:
                 self._patient_policies.move_to_end(patient_id)
             while len(self._patient_policies) > self._max_tracked_patients:
-                evicted_id, _ = self._patient_policies.popitem(last=False)  # drop LRU
+                evicted_id = next(
+                    (pid for pid, pol in self._patient_policies.items()
+                     if pid != patient_id
+                     and pol.current_regime == OperationalRegime.STABLE
+                     and not pol.escalation_locked),
+                    None,
+                )
+                if evicted_id is None:
+                    break  # nothing safely evictable: keep them all
+                del self._patient_policies[evicted_id]
                 self._patient_entropy.pop(evicted_id, None)
                 self._state_commitments.pop(evicted_id, None)
                 self._patient_fault_paged.pop(evicted_id, None)
+                self.audit_ledger.append(
+                    evicted_id, "STATE_EVICTED",
+                    {"reason": "lru_capacity", "cap": self._max_tracked_patients},
+                )
 
     def _get_policy(self, patient_id: str) -> EscalationPolicy:
         with self._state_lock:
