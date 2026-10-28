@@ -214,16 +214,27 @@ class ClinicalGovernanceSystem:
         try:
             gov_verdict: PolicyVerdict = self.perceive.evaluate_request(request)
         except Exception as e:
-            # FAIL-OPEN (new learning): a governance *crash* must never suppress a clinical
-            # escalation. The failure mode of an escalation request is "an extra clinician
-            # alert," not "a missed block," so failing open is the safe direction here. The
-            # fallback is flagged explicitly so it is never mistaken for a clean approval.
-            logger.error(f"GOVERNANCE FAILURE for {vitals.patient_id}: {e} — failing open (escalation proceeds)")
-            decision.governance_approved = True
-            decision.governance_confidence = 0.0
-            decision.governance_violations = [f"GOVERNANCE_FAILURE_FALLBACK: {e}"]
+            # Preserve the clinical escalation, but an unavailable governance result
+            # is not approval and cannot authorize downstream action.
+            logger.error(
+                f"GOVERNANCE UNAVAILABLE for {vitals.patient_id}: {e} — "
+                "clinical escalation is preserved without approval"
+            )
+            decision.governance_approved = None
+            decision.governance_confidence = None
+            decision.governance_violations = [f"GOVERNANCE_UNAVAILABLE: {e}"]
             decision.applied_gates = []
-            decision.action = "escalate_approved_fallback"
+            decision.action = "escalate_governance_unavailable"
+            try:
+                decision.perceive_audit_hash = self.perceive.record_evaluation_failure(request, e)
+            except Exception as audit_error:
+                # Audit failure must not suppress the clinical escalation either.
+                decision.governance_violations.append(
+                    f"GOVERNANCE_FAILURE_AUDIT_UNAVAILABLE: {audit_error}"
+                )
+                logger.error(
+                    f"GOVERNANCE FAILURE AUDIT unavailable for {vitals.patient_id}: {audit_error}"
+                )
             return decision
 
         decision.governance_approved = gov_verdict.approved

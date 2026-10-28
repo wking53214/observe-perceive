@@ -1026,6 +1026,32 @@ class PerceiveGovernanceKernel:
                                      self.enforcement.enforce_rule_modification,
                                      violations, "rule_modification")
 
+    def record_evaluation_failure(self, request: PolicyRequest, error: Exception) -> str:
+        """Record an unavailable evaluation as non-approving audit evidence."""
+        manifest = self.manifest_registry.get_current_manifest()
+        failure = {
+            "approved": False,
+            "status": "unavailable",
+            "error": f"{type(error).__name__}: {error}",
+            # The audit hash covers final_verdict, so include the request here too.
+            "request_snapshot": asdict(request),
+        }
+        entry = self.audit_ledger.append_decision(
+            request_snapshot=asdict(request),
+            evaluated_gates=[],
+            policy_outputs=[],
+            final_verdict=failure,
+            manifest_version=manifest.version if manifest else "",
+            manifest_hash=manifest.manifest_hash if manifest else "",
+        )
+        self.event_store.append_event(
+            event_type="policy_evaluation_unavailable",
+            request_snapshot=asdict(request),
+            actor_id=request.actor_id,
+            details=failure,
+        )
+        return entry.immutable_hash
+
     def evaluate_request(self, request: PolicyRequest) -> PolicyVerdict:
         """Main evaluation loop: gates → consensus → DGK (if critical) → audit."""
         logger.info(f"Evaluating request {request.request_id} ({request.request_type})")

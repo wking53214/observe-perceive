@@ -169,10 +169,10 @@ class TestAuditIntegrity(unittest.TestCase):
         self.assertIn("action", as_dict)
 
 
-class TestGovernanceFailOpen(unittest.TestCase):
-    """A governance crash must not suppress a clinical escalation (fail-open, flagged)."""
+class TestGovernanceUnavailable(unittest.TestCase):
+    """A governance crash preserves escalation without creating approval."""
 
-    def test_governance_exception_fails_open_for_escalation(self):
+    def test_governance_exception_preserves_escalation_without_approval(self):
         system = build_single_hospital_system()
 
         def _boom(_request):
@@ -186,10 +186,50 @@ class TestGovernanceFailOpen(unittest.TestCase):
         decision = system.process_vitals(crit)
 
         self.assertTrue(decision.escalation_required)
-        self.assertEqual(decision.action, "escalate_approved_fallback")
-        self.assertTrue(decision.governance_approved)            # failed open
-        self.assertEqual(decision.governance_confidence, 0.0)    # but with zero confidence
-        self.assertTrue(any("GOVERNANCE_FAILURE_FALLBACK" in v for v in decision.governance_violations))
+        self.assertTrue(decision.governance_evaluated)
+        self.assertEqual(decision.action, "escalate_governance_unavailable")
+        self.assertIsNone(decision.governance_approved)
+        self.assertIsNone(decision.governance_confidence)
+        self.assertEqual(decision.applied_gates, [])
+        self.assertTrue(any("GOVERNANCE_UNAVAILABLE" in v for v in decision.governance_violations))
+        self.assertIsNotNone(decision.perceive_audit_hash)
+
+        audit = system.export_perceive_audit()
+        self.assertEqual(len(audit), 1)
+        self.assertFalse(audit[0]["final_verdict"]["approved"])
+        self.assertEqual(audit[0]["final_verdict"]["status"], "unavailable")
+        self.assertEqual(
+            audit[0]["final_verdict"]["request_snapshot"],
+            audit[0]["request_snapshot"],
+        )
+        self.assertEqual(
+            system.perceive.event_store.events[-1].event_type,
+            "policy_evaluation_unavailable",
+        )
+        self.assertTrue(system.verify_all_audits()["perceive_chain_valid"])
+
+    def test_audit_failure_does_not_suppress_escalation_or_create_approval(self):
+        system = build_single_hospital_system()
+
+        def _boom(_request):
+            raise RuntimeError("simulated PERCEIVE failure")
+
+        def _audit_boom(_request, _error):
+            raise OSError("simulated audit storage failure")
+
+        system.perceive.evaluate_request = _boom
+        system.perceive.record_evaluation_failure = _audit_boom
+        crit = VitalsSnapshot("P1", datetime.now(timezone.utc), 168, 83.0, 46, 39.5,
+                              context={"age_months": 12, "force_heavy": True})
+        decision = system.process_vitals(crit)
+
+        self.assertTrue(decision.escalation_required)
+        self.assertEqual(decision.action, "escalate_governance_unavailable")
+        self.assertIsNone(decision.governance_approved)
+        self.assertIsNone(decision.perceive_audit_hash)
+        self.assertTrue(
+            any("GOVERNANCE_FAILURE_AUDIT_UNAVAILABLE" in v for v in decision.governance_violations)
+        )
 
     def test_non_escalation_never_reaches_governance(self):
         system = build_single_hospital_system()
