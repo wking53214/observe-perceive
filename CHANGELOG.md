@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- PERCEIVE evaluation exceptions are unavailable, not approved. A
+  clinical escalation still proceeds, but ClinicalDecision.governance_approved
+  remains None, the action is escalate_governance_unavailable, and PERCEIVE
+  records a non-approving failure entry bound to the request in its hash-chained
+  audit ledger. If audit storage also fails, the escalation remains visible and
+  the returned decision records that audit evidence is unavailable. Consumers
+  that handled the former escalate_approved_fallback action must handle the new
+  unavailable action explicitly; it never represents authorization.
+
+
 - **OBSERVE partial-assessment fault overlay** (ported from the OBSERVE
   fork, its T2b findings). A reading with a faulted channel is no longer
   left unscored when the cassette can say which channel is bad. A cassette
@@ -215,7 +225,7 @@ hardened system without regressing it.
 | ID | Learning | Decision | File(s) | Test |
 |----|----------|----------|---------|------|
 | NL-KAL | **Kalman trajectory engine** — constant-velocity state-space filter per vital; exposes smoothed velocity + innovation ("surprise") signals | **Integrated, opt-in** (`enable_kalman=True`, default OFF). Adapted to the `VitalsSnapshot` channels, made per-patient + deterministic. Corrected the prototype's ad-hoc velocity nudge to a proper 2-state update. Abstains during warm-up | `kalman_trajectory.py`; `observe_consolidated.py` (`enable_kalman`, `_get_kalman`, fusion hook) | `test_kalman_trajectory.py` |
-| NL-FAILOPEN | **Fail-open on governance crash** — a PERCEIVE exception must not suppress a clinical escalation | **Integrated.** Scoped to the escalation path (failure mode is "extra alert," not "missed block"); flagged as `escalate_approved_fallback` with zero confidence so it is never mistaken for a clean approval | `clinical_governance_system.py` (`process_vitals`) | `TestGovernanceFailOpen` |
+| NL-FAILOPEN | Clinical escalation continues after governance failure | Historical behavior, superseded by the Unreleased PERCEIVE unavailable outcome above. A governance exception preserves the clinical escalation without setting approval. | clinical_governance_system.py (process_vitals) | TestGovernanceUnavailable |
 | NL-CTX | **Richer governance request context** (risk/regime/top-triggers) | **Integrated** — improves the SOX/PERCEIVE audit trail (records *why* an escalation fired) | `clinical_governance_system.py` (`_build_governance_request`) | covered by integration tests |
 | NL-OBS-SLIM | Slimmed OBSERVE rewrite | **Rejected.** Drops the 7th engine, syndrome floor, clinical-safety bypass, hysteresis/dwell, and the audit chain. Would fail the suite and lose safety-critical machinery; contained no fix not already present | — | — |
 | NL-PERC-SLIM | Slimmed PERCEIVE rewrite | **Rejected.** Un-wires the three governance policies, drops DGK consensus + content-bound manifest hash, and its audit `verify()` is a stub (`return True`) | — | — |
