@@ -698,6 +698,18 @@ class TestPerPatientIsolation(unittest.TestCase):
         self.assertIn("P0", tracked)
         self.assertNotIn("P1", tracked)
 
+    def test_eviction_never_drops_a_patient_with_tracked_regime_or_lock(self):
+        """A CRITICAL or escalation-locked patient is never evicted for capacity."""
+        from datetime import timedelta
+        engine = ObserveClinicalEngine(max_tracked_patients=2)
+        t0 = datetime.now(timezone.utc)
+        engine.evaluate(make_vitals(patient_id="P0", heart_rate=160, oxygen_saturation=84.0, timestamp=t0))
+        self.assertEqual(engine._patient_policies["P0"].current_regime, OperationalRegime.CRITICAL)
+        for i in range(1, 4):
+            engine.evaluate(make_vitals(patient_id=f"P{i}", timestamp=t0 + timedelta(seconds=i)))
+        self.assertIn("P0", engine._patient_policies)
+        self.assertTrue(any(e["action"] == "STATE_EVICTED" for e in engine.audit_ledger.entries))
+
 
 class TestFusionAbstentionAndSyndrome(unittest.TestCase):
     """Hardening: abstainers excluded from fusion; dangerous syndromes floor the risk."""
