@@ -1,5 +1,11 @@
 """Optional CNS combining layer: one fail-closed decision from gates of any library.
 
+Relationship to the orchestrator: ``GovernanceOrchestrator`` is the live path and the only one
+that gates a consequential action. This layer is an optional, separate check for a caller who
+wants CNS-level composition; being on it does not substitute for the orchestrator's execution
+guard, and passing the orchestrator does not mean this layer ran. See README, "Which path is
+authoritative".
+
 observe-perceive is independent of CNS. This module imports nothing from CNS
 when it loads, imports no sibling library, and sits next to
 ``governance_orchestrator`` without touching it: the orchestrator's chain is

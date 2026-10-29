@@ -143,6 +143,14 @@ observe-perceive ───┤
 
 Reports: `docs/closure/ARCHITECTURE_CLOSURE_REPORT.md`, `GOVERNANCE_BYPASS_REPORT.md`, `docs/audit/COMMERCIAL_RED_TEAM_2026-09-08.md`.
 
+## Which path is authoritative
+
+`GovernanceOrchestrator` is the live path. It is the only one that decides whether a consequential action runs, and the protected setup is its `strict` profile. In order: request and source-time checks, the behaviour-simulation screen, PERCEIVE, optional containment, Conservation Kernel verification (a root is registered only if the kernel's root guard allows it; with `RootAdmission` as that guard, a CNS roster must approve it), execution approval, the scope check, the executor behind `execution_guard`, OBSERVE, and the audit-chain link.
+
+The CNS pipeline below is not on that path. Nothing in the orchestrator calls it. It is an optional extra check for a caller who wants gates from several libraries combined under CNS, and it neither replaces nor substitutes for the orchestrator's guard.
+
+What `strict` guarantees: a kernel with a root guard, an executor guarded for the orchestrator's own ledger (an executor cannot declare itself guarded), and the guard switched on. What it does not: a caller who invokes the raw action function directly bypasses everything, and OBSERVE runs after the action, so it can warn but not prevent. If the action runs and its receipt then fails to append, the action has happened and a person is alerted; nothing is undone.
+
 ## Governed decision across libraries (optional)
 
 `cns_governed_decision.py` takes the verdicts of gates from separate libraries and turns them into one decision. You give it two lists of gates. The first list (ALPHA) is judged before your work function runs, and if any of them refuses, the work is never called. The second list (OMEGA) is judged on what the work returned, and if any of them refuses, the result is withheld. Every verdict goes through `cns.gate.resolve`, and the answer is a `GovernedDecision`: the outcome (`pass`, `retry` or `terminal_breach`), every verdict, which gates were not evaluated and why, whether the work ran, and a digest of the record.
