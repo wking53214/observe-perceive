@@ -151,10 +151,19 @@ class ClinicalGovernanceSystem:
         capacity_forecaster: Optional["ErlangCapacityForecaster"] = None,
         accuracy_monitor: Optional["AccuracyMonitor"] = None,
         alert_human: Optional[Callable[["ClinicalDecision"], None]] = None,
+        allow_no_alert_channel: bool = False,
     ):
         # Called when an escalation cannot be governed (PERCEIVE failed). It must reach a
         # person (page, dashboard, phone). If it raises, the failure is recorded on the
         # decision and logged at CRITICAL; the escalation itself is never suppressed.
+        # Required: a system with no channel cannot tell anyone its governance broke, so
+        # construction is refused unless the caller opts out on purpose.
+        if alert_human is None and not allow_no_alert_channel:
+            raise ValueError(
+                "ClinicalGovernanceSystem needs an alert channel: pass alert_human=<callable that "
+                "reaches a clinician>, or pass allow_no_alert_channel=True to run without one "
+                "(a governance failure is then only logged at CRITICAL and marked no_channel)"
+            )
         self.alert_human = alert_human
         self.observe = ObserveClinicalEngine()
         # WS2a: enforcement defaults to advisory inside the kernel (baseline unchanged).
@@ -398,17 +407,26 @@ class ClinicalGovernanceSystem:
 # FACTORY HELPERS
 # ============================================================================
 
-def build_single_hospital_system() -> ClinicalGovernanceSystem:
+def build_single_hospital_system(
+    alert_human: Optional[Callable[[ClinicalDecision], None]] = None,
+    allow_no_alert_channel: bool = False,
+) -> ClinicalGovernanceSystem:
     """Single-site deployment: no multi-node consensus needed."""
-    return ClinicalGovernanceSystem()
+    return ClinicalGovernanceSystem(alert_human=alert_human, allow_no_alert_channel=allow_no_alert_channel)
 
 
-def build_multi_hospital_system(hospital_ids: List[str]) -> ClinicalGovernanceSystem:
+def build_multi_hospital_system(
+    hospital_ids: List[str],
+    alert_human: Optional[Callable[[ClinicalDecision], None]] = None,
+    allow_no_alert_channel: bool = False,
+) -> ClinicalGovernanceSystem:
     """Multi-site deployment: emergency overrides require DGK quorum across sites."""
     import secrets
     nodes = {hid: GovernanceNode(hid, secrets.token_bytes(32)) for hid in hospital_ids}
     dgk = DGKGateway(nodes, ConsensusDecider(quorum_fraction=2 / 3))
-    return ClinicalGovernanceSystem(dgk_gateway=dgk)
+    return ClinicalGovernanceSystem(
+        dgk_gateway=dgk, alert_human=alert_human, allow_no_alert_channel=allow_no_alert_channel
+    )
 
 
 # ============================================================================
@@ -420,8 +438,8 @@ if __name__ == "__main__":
     print("CLINICAL GOVERNANCE SYSTEM — UNIFIED PIPELINE DEMO")
     print("=" * 70)
 
-    # Single-hospital deployment
-    system = build_single_hospital_system()
+    # Single-hospital deployment (the demo has no pager, so it opts out of the alert channel)
+    system = build_single_hospital_system(allow_no_alert_channel=True)
 
     print("\n--- Scenario 1: Stable patient (fast path, no governance) ---")
     stable = VitalsSnapshot("P001", datetime.now(timezone.utc), 110, 98.0, 24, 37.0,
@@ -446,7 +464,7 @@ if __name__ == "__main__":
     print(f"  OBSERVE audit={d3.observe_audit_hash[:16]} <-> PERCEIVE audit={(d3.perceive_audit_hash or '')[:16]}")
 
     print("\n--- Scenario 4: Multi-hospital deployment (DGK consensus on emergency) ---")
-    multi = build_multi_hospital_system(["nch", "partner-a", "partner-b"])
+    multi = build_multi_hospital_system(["nch", "partner-a", "partner-b"], allow_no_alert_channel=True)
     d4 = multi.process_vitals(
         VitalsSnapshot("P004", datetime.now(timezone.utc), 170, 82.0, 48, 39.8,
                        context={"age_months": 9, "force_heavy": True})
