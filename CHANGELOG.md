@@ -39,10 +39,24 @@
   probe. Under `raise_on_stage_error` it is called before the exception is
   raised. The record of such a stage error gains `human_alert` ("delivered",
   "failed" or "no_channel"); a failing or missing channel is logged at CRITICAL
-  and never suppresses or alters the rejection. Ordinary refusals, successes and
-  `EXECUTION_FAILED` records never call it and gain no field, and the handoff
-  stamp is unchanged, so their records (and receipt hashes) are identical to
-  before. Optional, not required. No existing test was edited.
+  and never suppresses or alters the rejection. Ordinary refusals and
+  successes never call it and gain no field, and the handoff stamp is
+  unchanged, so their records (and receipt hashes) are identical to before.
+  Optional, not required. No existing test was edited. (The executor-crash and
+  lost-receipt cases are covered by the next entry.)
+
+- **The orchestrator also tells a person when the executor crashes or a receipt
+  is lost.** Two failures that were left out of the entry above now call
+  `alert_human` too, with the same dict and the same `delivered` / `failed` /
+  `no_channel` record. (1) The caller's own executor raising after approval
+  (stage `execution`): the alert comes before any `raise_on_execution_error`
+  re-raise, and the `EXECUTION_FAILED` record gains `human_alert`. (2) A failure
+  appending the receipt after the action already ran (stage `receipt_append`):
+  the result keeps its outcome, nothing is undone or retried, and it gains
+  `human_alert`, or `receipt_human_alert` when a stage-error alert is already on
+  it, so neither is lost. A failing or missing channel is logged at CRITICAL
+  and never changes the outcome. Records on every other path, and the handoff
+  stamp, are unchanged. No existing test was edited.
 - **BREAKING: a ClinicalGovernanceSystem needs an alert channel.**
   Constructing one without `alert_human` now raises `ValueError`, unless
   `allow_no_alert_channel=True` is passed. `build_single_hospital_system` and
