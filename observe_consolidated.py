@@ -313,11 +313,16 @@ def sanitize_context(
 # (engine selection, hard-rule threshold) is bound through the cassette name
 # and version recorded in the same decision payload, not through this hash.
 #
+# Label history. v1 named two different parameter sets: this core's, and OBSERVE's
+# own engine (which also declared heavy_path_entropy_trigger and
+# heuristic_hard_rule_threshold, and lacked unassessable_confidence_penalty).
+# This core is v2 so the same label never names different content.
+#
 # copy.deepcopy so this is a snapshot taken at import, not a live alias of the
 # module dicts: a runtime mutation of PEDIATRIC_NORMS would otherwise shift the
 # effective config while the version stamp stayed byte-identical.
 PARAMETER_SET: Dict[str, Any] = copy.deepcopy({
-    "schema": "observe.parameters/v1",
+    "schema": "observe.parameters/v2",
     "pediatric_norms": PEDIATRIC_NORMS,
     "drift_sigma_threshold": DRIFT_SIGMA_THRESHOLD,
     "vitals_physical_bounds": {k: list(v) for k, v in VITALS_PHYSICAL_BOUNDS.items()},
