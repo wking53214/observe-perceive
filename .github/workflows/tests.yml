@@ -102,10 +102,12 @@ jobs:
         # root_admission needs CNS v2.2.0 (DecisionGuard and the issuance proof
         # on Decision). The libraries in requirements-demo.txt pin CNS v1.9.0 in
         # their [cns] extras, which predates both, so one resolver pass cannot
-        # take the newer CNS. --no-deps swaps only this package. Remove this step
-        # when the [cns] extras of the demo libraries follow a tag at or after v2.2.0
+        # take the newer CNS. --no-deps swaps only this package. --force-reinstall
+        # is kept: a build with the same version string as the one installed is
+        # otherwise skipped and reported as a success. Remove this step when the
+        # [cns] extras of the demo libraries follow a tag at or after v2.2.0
         # (they still pin v1.9.0, so this step cannot go yet).
-        run: python -m pip install --no-deps "cns @ git+https://github.com/wking53214/CNS.git@v2.2.0"
+        run: python -m pip install --no-deps --force-reinstall "cns @ git+https://github.com/wking53214/CNS.git@v2.2.0"
       - name: Test with CNS and the demo libraries required
         # AUGUR warns on stderr when AUGUR_AUDIT_KEY is unset, and the demo's
         # script test requires empty stderr. The key is a fresh random value

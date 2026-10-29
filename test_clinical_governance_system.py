@@ -14,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 
 from observe_consolidated import VitalsSnapshot
 from clinical_governance_system import (
+    ClinicalGovernanceSystem,
     GovernanceStatus,
     build_single_hospital_system,
     build_multi_hospital_system,
@@ -33,7 +34,7 @@ def vitals(pid="P001", hr=110, o2=98.0, rr=24, temp=37.0, age=24, ts=None, **ctx
 class TestRouting(unittest.TestCase):
 
     def setUp(self):
-        self.system = build_single_hospital_system()
+        self.system = build_single_hospital_system(allow_no_alert_channel=True)
 
     def test_stable_takes_fast_path_no_governance(self):
         d = self.system.process_vitals(vitals(hr=110, o2=98.0))
@@ -68,7 +69,7 @@ class TestRouting(unittest.TestCase):
 class TestEscalationTypeSelection(unittest.TestCase):
 
     def setUp(self):
-        self.system = build_single_hospital_system()
+        self.system = build_single_hospital_system(allow_no_alert_channel=True)
 
     def test_critical_uses_emergency_override_path(self):
         d = self.system.process_vitals(vitals(hr=170, o2=82.0, rr=48, temp=39.8, age=9, force_heavy=True))
@@ -104,7 +105,7 @@ class TestEscalationTypeSelection(unittest.TestCase):
 class TestMultiHospital(unittest.TestCase):
 
     def test_emergency_triggers_multi_node_consensus(self):
-        system = build_multi_hospital_system(["nch", "partner-a", "partner-b"])
+        system = build_multi_hospital_system(["nch", "partner-a", "partner-b"], allow_no_alert_channel=True)
         d = system.process_vitals(vitals(pid="P004", hr=170, o2=82.0, rr=48, temp=39.8, age=9, force_heavy=True, physician_approved=True))
         self.assertEqual(d.regime, "critical")
         self.assertTrue(d.used_multi_node_consensus)
@@ -113,7 +114,7 @@ class TestMultiHospital(unittest.TestCase):
         self.assertEqual(d.consensus_detail["total_proposals"], 3)
 
     def test_single_hospital_no_consensus(self):
-        system = build_single_hospital_system()
+        system = build_single_hospital_system(allow_no_alert_channel=True)
         d = system.process_vitals(vitals(pid="P004", hr=170, o2=82.0, rr=48, temp=39.8, age=9, force_heavy=True))
         self.assertEqual(d.regime, "critical")
         self.assertFalse(d.used_multi_node_consensus)
@@ -127,7 +128,7 @@ class TestMultiHospital(unittest.TestCase):
 class TestOrchestratorIsolation(unittest.TestCase):
 
     def test_two_critical_patients_both_escalate(self):
-        system = build_single_hospital_system()
+        system = build_single_hospital_system(allow_no_alert_channel=True)
         t0 = datetime.now(timezone.utc)
         dA = system.process_vitals(vitals(pid="PA", hr=160, o2=84.0, rr=42, temp=39.0, age=18, ts=t0, force_heavy=True))
         dB = system.process_vitals(vitals(pid="PB", hr=165, o2=83.0, rr=44, temp=39.5, age=12, ts=t0 + timedelta(seconds=1), force_heavy=True))
@@ -144,7 +145,7 @@ class TestOrchestratorIsolation(unittest.TestCase):
 class TestAuditIntegrity(unittest.TestCase):
 
     def test_both_chains_valid_after_mixed_traffic(self):
-        system = build_single_hospital_system()
+        system = build_single_hospital_system(allow_no_alert_channel=True)
         cases = [
             ("P001", 110, 98.0, 24, 37.0, 24),   # stable
             ("P002", 168, 83.0, 46, 39.5, 12),   # critical
@@ -162,7 +163,7 @@ class TestAuditIntegrity(unittest.TestCase):
         self.assertEqual(len(system.export_perceive_audit()), 2)
 
     def test_decision_serializes_to_dict(self):
-        system = build_single_hospital_system()
+        system = build_single_hospital_system(allow_no_alert_channel=True)
         d = system.process_vitals(vitals())
         as_dict = d.to_dict()
         self.assertIn("patient_id", as_dict)
@@ -174,7 +175,7 @@ class TestGovernanceUnavailable(unittest.TestCase):
     """A governance crash preserves escalation without creating approval."""
 
     def test_governance_exception_preserves_escalation_without_approval(self):
-        system = build_single_hospital_system()
+        system = build_single_hospital_system(allow_no_alert_channel=True)
 
         def _boom(_request):
             raise RuntimeError("simulated PERCEIVE failure")
@@ -210,7 +211,7 @@ class TestGovernanceUnavailable(unittest.TestCase):
         self.assertTrue(system.verify_all_audits()["perceive_chain_valid"])
 
     def test_audit_failure_does_not_suppress_escalation_or_create_approval(self):
-        system = build_single_hospital_system()
+        system = build_single_hospital_system(allow_no_alert_channel=True)
 
         def _boom(_request):
             raise RuntimeError("simulated PERCEIVE failure")
@@ -234,7 +235,7 @@ class TestGovernanceUnavailable(unittest.TestCase):
 
     def test_unavailable_governance_alerts_a_human_and_names_its_status(self):
         alerts = []
-        system = build_single_hospital_system()
+        system = build_single_hospital_system(allow_no_alert_channel=True)
         system.alert_human = alerts.append
 
         def _boom(_request):
@@ -252,7 +253,7 @@ class TestGovernanceUnavailable(unittest.TestCase):
         self.assertEqual(decision.to_dict()["governance_status"], "unavailable")
 
     def test_alert_channel_failure_is_recorded_and_never_suppresses_the_escalation(self):
-        system = build_single_hospital_system()
+        system = build_single_hospital_system(allow_no_alert_channel=True)
 
         def _pager_down(_decision):
             raise ConnectionError("pager unreachable")
@@ -273,7 +274,7 @@ class TestGovernanceUnavailable(unittest.TestCase):
         self.assertIsNone(decision.governance_approved)
 
     def test_no_alert_channel_is_loud_and_visible_on_the_decision(self):
-        system = build_single_hospital_system()
+        system = build_single_hospital_system(allow_no_alert_channel=True)
 
         def _boom(_request):
             raise RuntimeError("simulated PERCEIVE failure")
@@ -289,7 +290,7 @@ class TestGovernanceUnavailable(unittest.TestCase):
 
     def test_status_is_named_on_every_normal_path_and_no_alert_fires(self):
         alerts = []
-        system = build_single_hospital_system()
+        system = build_single_hospital_system(allow_no_alert_channel=True)
         system.alert_human = alerts.append
         calm = vitals(pid="P2", hr=110, o2=98.0)
         d = system.process_vitals(calm)
@@ -305,8 +306,42 @@ class TestGovernanceUnavailable(unittest.TestCase):
         self.assertIsNone(d.human_alert)
         self.assertEqual(alerts, [])
 
+    def test_a_system_without_an_alert_channel_is_refused_at_construction(self):
+        with self.assertRaises(ValueError) as ctx:
+            build_single_hospital_system()
+        message = str(ctx.exception)
+        self.assertIn("alert_human", message)
+        self.assertIn("allow_no_alert_channel", message)
+        with self.assertRaises(ValueError):
+            build_multi_hospital_system(["nch", "partner-a", "partner-b"])
+        with self.assertRaises(ValueError):
+            ClinicalGovernanceSystem()
+
+    def test_a_system_with_an_alert_channel_needs_no_opt_out(self):
+        alerts = []
+        system = build_single_hospital_system(alert_human=alerts.append)
+        multi = build_multi_hospital_system(["nch", "partner-a", "partner-b"], alert_human=alerts.append)
+        self.assertIs(system.alert_human.__self__, alerts)
+        self.assertIsNotNone(multi.alert_human)
+
+    def test_the_explicit_opt_out_runs_without_a_channel_and_stays_loud(self):
+        system = build_single_hospital_system(allow_no_alert_channel=True)
+        self.assertIsNone(system.alert_human)
+
+        def _boom(_request):
+            raise RuntimeError("simulated PERCEIVE failure")
+
+        system.perceive.evaluate_request = _boom
+        crit = VitalsSnapshot("P1", datetime.now(timezone.utc), 168, 83.0, 46, 39.5,
+                              context={"age_months": 12, "force_heavy": True})
+        with self.assertLogs("CLINICAL_GOVERNANCE", level="CRITICAL"):
+            decision = system.process_vitals(crit)
+        self.assertEqual(decision.governance_status, GovernanceStatus.UNAVAILABLE)
+        self.assertEqual(decision.human_alert, "no_channel")
+        self.assertEqual(decision.action, "escalate_governance_unavailable")
+
     def test_non_escalation_never_reaches_governance(self):
-        system = build_single_hospital_system()
+        system = build_single_hospital_system(allow_no_alert_channel=True)
 
         def _boom(_request):
             raise RuntimeError("should not be called")
@@ -319,7 +354,7 @@ class TestGovernanceUnavailable(unittest.TestCase):
 
     def test_emergency_override_without_physician_context_is_blocked(self):
         """No physician_approved key in context means not approved (fail closed)."""
-        system = build_single_hospital_system()
+        system = build_single_hospital_system(allow_no_alert_channel=True)
         crit = VitalsSnapshot("P9", datetime.now(timezone.utc), 168, 83.0, 46, 39.5,
                               context={"age_months": 12, "force_heavy": True})
         d = system.process_vitals(crit)
