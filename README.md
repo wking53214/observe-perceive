@@ -1,6 +1,6 @@
 # observe-perceive
 
-**Hub of the governed action stack.** Version `1.3.0`. Python ≥ 3.11. Hard dependency: [`Conservation_Kernel`](https://github.com/wking53214/Conservation_Kernel) `@7b08c79`. Optional extras: Gateway, CCC, AUGUR, GEMS (pinned to last commit that still has `HumanAuthorityGuard`), fortress-kernel.
+**Hub of the governed action stack.** Version `1.3.0`. Python ≥ 3.11. Hard dependency: [`Conservation_Kernel`](https://github.com/wking53214/Conservation_Kernel) `@4e7c0d9`. Optional extras: Gateway, CCC, AUGUR, GEMS (pinned to last commit that still has `HumanAuthorityGuard`), fortress-kernel.
 
 Pediatric sepsis monitoring is the **reference domain**, not the product boundary.
 
@@ -134,7 +134,7 @@ Duck-typed sentinel artifact with event time → orchestrator result dict + rece
                     ├── GEMS @f70da70 (opt; pinned, see pyproject)
                     └── fortress-kernel (opt, extra `fortress`)
 observe-perceive ───┤
-                    ├── Conservation_Kernel @7b08c79   HARD
+                    ├── Conservation_Kernel @4e7c0d9   HARD
                     ├── observe_consolidated + perceive_consolidated  (in-tree)
                     └── execution_guard ledger (JSONL)
                          │
