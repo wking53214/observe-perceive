@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 from governance_contracts import CONTRACT_VERSION
 from governance_chain import verify_result
-from execution_guard import ExecutionLedger, ExecutionRefusal as LedgerRefusal
+from execution_guard import ExecutionLedger, ExecutionRefusal as LedgerRefusal, guard_ledger_of
 
 logger = logging.getLogger("GovernanceOrchestrator")
 
@@ -119,6 +119,11 @@ class GovernanceOrchestrator:
             raise ValueError(f"unknown profile {profile!r}; use 'advisory' or 'strict'")
         self.profile = profile
         strict = profile == "strict"
+        # Strict is the protected profile. A kernel with no root guard registers any root it admits, so the
+        # roster that decides what may become ancestry would be advisory. Refuse it here, not at the first root.
+        if strict and conservation_kernel is not None and not getattr(conservation_kernel, "has_root_guard", False):
+            raise ValueError("the strict profile needs a Conservation Kernel built with a root guard; this one "
+                             "would register any root it admits (use profile='advisory' for an unguarded kernel)")
         self.require_declared_scope = require_declared_scope or strict
         self.require_vitals = require_vitals or strict
         self.require_attested_event_time = require_attested_event_time or strict
@@ -864,7 +869,9 @@ class GovernanceOrchestrator:
 
         logger.info("[Orchestrator] Phase 5: GSA-815 execution")
         executor = gsa815_operation_func
-        if self.guard_executor and not getattr(gsa815_operation_func, "execution_guard", False):
+        # Only a wrapper `guarded` made, for THIS orchestrator's ledger, counts as already guarded. The
+        # `execution_guard` attribute is a label any function can carry, so it is not trusted.
+        if self.guard_executor and guard_ledger_of(gsa815_operation_func) is not self.execution_ledger:
             from execution_guard import guarded
             executor = guarded(gsa815_operation_func, self.execution_ledger,
                                kernel=self.conservation_kernel, consumer="orchestrator")
