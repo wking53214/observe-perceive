@@ -31,6 +31,18 @@
   that handled the former escalate_approved_fallback action must handle the new
   unavailable action explicitly; it never represents authorization.
 
+- **BREAKING: a ClinicalGovernanceSystem needs an alert channel.**
+  Constructing one without `alert_human` now raises `ValueError`, unless
+  `allow_no_alert_channel=True` is passed. `build_single_hospital_system` and
+  `build_multi_hospital_system` take both arguments. The opt-out keeps the
+  earlier behaviour: a governance failure is logged at CRITICAL and the
+  decision records `human_alert == "no_channel"`. Test edits (setup only, no
+  assertion changed): the 15 `build_single_hospital_system()` and
+  `build_multi_hospital_system(...)` calls in `test_clinical_governance_system.py`
+  and the one in `test_compliance_exporters.py` pass the opt-out; the two demos
+  (`clinical_governance_system.py`, `compliance_exporters.py`) pass it too
+  because they have no pager. Three new tests cover the refusal, a system with
+  a channel, and the opt-out staying loud.
 - **Fail loud when governance is unavailable.** `ClinicalDecision` now carries
   `governance_status` (`not_evaluated`, `approved`, `blocked`, `unavailable`),
   the field to read instead of the true/false/blank `governance_approved`.
