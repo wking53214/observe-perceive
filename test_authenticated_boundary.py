@@ -234,7 +234,7 @@ def test_a_claimed_event_time_is_not_attested_and_not_an_anomaly_by_itself(orche
 # ---------------------------------------------------------------- R5: strict profile
 
 def test_strict_refuses_what_advisory_records(perceive, kernel, tmp_path):
-    strict = _orch(perceive, kernel, profile="strict", source_signers=[SOURCE])
+    strict = _orch(perceive, ConservationKernel(root_guard=lambda artifact: True), profile="strict", source_signers=[SOURCE])
     assert strict.require_declared_scope and strict.require_vitals and strict.require_attested_event_time and strict.enforce_advisory_violations
     unattested, ran = run_chain(strict, "st1", vitals=True, context={"gateway_scope": "EXECUTE"})
     assert unattested["status"] == "REJECTED" and unattested["refused_by"] == "source_attestation" and ran == []
@@ -246,7 +246,7 @@ def test_strict_refuses_what_advisory_records(perceive, kernel, tmp_path):
 def test_strict_executes_when_everything_is_in_place(perceive, kernel):
     from gateway_admission_adapter import GatewayAdmissionAdapter
     gw = pytest.importorskip("governance_gateway.models")
-    strict = _orch(perceive, kernel, profile="strict", source_signers=[SOURCE])
+    strict = _orch(perceive, ConservationKernel(root_guard=lambda artifact: True), profile="strict", source_signers=[SOURCE])
     sealed = GatewayAdmissionAdapter.seal(artifact_id="st4", payload={"content": "escalate P001"}, provenance={"source": "SENTINEL"},
                                           epistemic_status=gw.EpistemicStatus.INFERENCE, authority_actor="CHARGE_NURSE",
                                           authority_grant="unit-escalation", execute=True)
@@ -266,7 +266,7 @@ def test_strict_executes_when_everything_is_in_place(perceive, kernel):
 
 
 def test_strict_enforces_violations_perceive_only_advised(perceive, kernel, monkeypatch):
-    strict = _orch(perceive, kernel, profile="strict", source_signers=[SOURCE])
+    strict = _orch(perceive, ConservationKernel(root_guard=lambda artifact: True), profile="strict", source_signers=[SOURCE])
     original = strict.sentinel_adapter.evaluate_through_perceive
     def advising(p, request):
         decision = original(p, request)

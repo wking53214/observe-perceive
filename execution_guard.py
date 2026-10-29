@@ -42,6 +42,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -456,6 +457,23 @@ def authorize_execution(execution_context, ledger: ExecutionLedger, *, kernel=No
     )
 
 
+#: Every wrapper `guarded` has made, mapped to the ledger it checks. An attribute on a function proves nothing,
+#: since any function can carry one; membership here can only come from calling `guarded`. Process-local, like
+#: the CNS decision proof: it settles where a wrapper came from only inside this process.
+_ISSUED_GUARDS: "weakref.WeakKeyDictionary[Any, ExecutionLedger]" = weakref.WeakKeyDictionary()
+
+
+def guard_ledger_of(executor) -> Optional[ExecutionLedger]:
+    """The ledger `executor` checks if `guarded` wrapped it in this process, else None.
+
+    The orchestrator asks this instead of trusting the `execution_guard` attribute, so an executor cannot
+    declare itself guarded."""
+    try:
+        return _ISSUED_GUARDS.get(executor)
+    except TypeError:  # not weak-referenceable, so not something `guarded` made
+        return None
+
+
 def guarded(func, ledger: ExecutionLedger, *, kernel=None, consumer: str = "executor"):
     """Wrap an executor so it runs only after `authorize_execution` passes.
 
@@ -472,4 +490,5 @@ def guarded(func, ledger: ExecutionLedger, *, kernel=None, consumer: str = "exec
         return result
     run.__name__ = f"guarded_{getattr(func, '__name__', 'executor')}"
     run.execution_guard = True
+    _ISSUED_GUARDS[run] = ledger
     return run

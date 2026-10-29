@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **An executor cannot declare itself guarded, and strict needs a guarded kernel.**
+  The orchestrator used to skip wrapping an executor whose `execution_guard`
+  attribute was truthy, so a function carrying that label ran with no ledger check.
+  `guarded()` now records each wrapper it makes, and the orchestrator skips wrapping
+  only for a wrapper made for its own ledger (`execution_guard.guard_ledger_of`); the
+  attribute is kept for compatibility but no longer trusted. A wrapper made for a
+  different ledger is wrapped again, so it fails closed. The strict profile now
+  refuses, at construction, a Conservation Kernel with no root guard (advisory is
+  unchanged). Three strict tests in `test_authenticated_boundary.py` built their
+  strict orchestrator on the unguarded fixture kernel; they now use a kernel with a
+  permissive root guard, which is the only change to them. New:
+  `test_guard_provenance.py`.
 - **The examples run the real root guard.** `demo_why.py` and `vertical_slice.py`
   build the kernel with `RootAdmission` and pass it to the orchestrator, in place of
   `allow_unguarded_roots=True`. The slice's reloaded kernel holds a closed guard: a
