@@ -1560,6 +1560,8 @@ class ObserveClinicalEngine:
             "verdict": {"risk_score": fused_risk, "regime": final_regime.value, "escalation_required": escalation, "entropy": entropy},
             **self._provenance(),
         }
+        if all_triggered_bypass_note:  # present only then, so a clean entry keeps its shape
+            decision_data["safety_bypass"] = list(all_triggered_bypass_note)
         if unassessable:  # present only then, so a clean entry keeps its shape
             decision_data["validation_faults"] = list(faults)
             decision_data["verdict"]["unassessable"] = True
@@ -1619,8 +1621,8 @@ class ObserveClinicalEngine:
             policy.escalation_locked = True
             policy.last_escalation_time = vitals.timestamp
 
-        triggered = [f'{cassette_label(self._cassette, "safety_bypass")}: '
-                     "data-integrity fault skipped scoring"]
+        bypass_note = f'{cassette_label(self._cassette, "safety_bypass")}: data-integrity fault skipped scoring'
+        triggered = [bypass_note]
         triggered += [f"DATA_INTEGRITY_FAULT: {f}" for f in faults]
 
         decision_data = {
@@ -1629,6 +1631,7 @@ class ObserveClinicalEngine:
             "outputs": [],
             "verdict": {"risk_score": 0.0, "regime": "warning", "escalation_required": escalation,
                         "entropy": 0.0, "data_integrity_fault": True},
+            "safety_bypass": [bypass_note],
             **self._provenance(),
         }
         fingerprint = decision_fingerprint(decision_data)
