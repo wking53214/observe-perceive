@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **The parameter-set label is `observe.parameters/v2`, and the safety-bypass
+  note is fingerprinted.** Two engines used `observe.parameters/v1` for different
+  content (this core's, and OBSERVE's own engine), so the same label named two
+  parameter sets. This core is now `v2`. In the same change, the safety-bypass note
+  (`CLINICAL_SAFETY_BYPASS: ...`) is recorded in the decision data under
+  `safety_bypass` and so is part of `decision_fingerprint`. It is present only when
+  a bypass note exists, so a clean entry keeps its shape; both decision-data
+  builders (`evaluate` and the no-overlay fault verdict) carry it. Because the
+  label feeds `PARAMETER_SET_VERSION`, every fingerprint and every
+  `parameter_set_version` changes once, and bypass entries change again because of
+  the note. A verifier that recomputes the fingerprint from a stored audit entry
+  still agrees, since the note is inside the audit data. Fingerprint inputs are not
+  rounded (unchanged). **Assumption:** no persisted evidence from before this change
+  exists that a verifier must still recognize; if any does, it carries the `v1`
+  label or the older version hash and needs an era-aware verifier. Consumers
+  elsewhere in the stack (the beta engine, the delta ledger, OBSERVE's risk adapter)
+  hash their own inputs and do not depend on this payload. New tests in
+  `test_parameters_v2_and_bypass_note.py`; no existing test changed.
+
 - **A root can be registered only after a roster approves that document.**
   New `root_admission.py`: `RootAdmission` is the callable a kernel holds as its
   `root_guard`. It is closed. For one request the adapter asks a CNS roster
