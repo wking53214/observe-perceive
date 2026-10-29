@@ -46,7 +46,7 @@ HERE = Path(__file__).resolve().parent
 MODULE_PATH = HERE / "cns_governed_decision.py"
 PYPROJECT = HERE / "pyproject.toml"
 
-CNS_PIN = "3ec3ffc53c50b02bbb37b9f5c911de9a80f9e824"
+CNS_PIN = "v2.2.0"
 HINT = "pip install 'observe-perceive[cns]'"
 
 
