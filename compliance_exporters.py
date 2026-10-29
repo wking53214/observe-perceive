@@ -317,7 +317,7 @@ if __name__ == "__main__":
     from observe_consolidated import VitalsSnapshot
 
     print("Generating sample traffic through the unified system...\n")
-    system = build_single_hospital_system()
+    system = build_single_hospital_system(allow_no_alert_channel=True)  # demo: no pager
 
     sample_cases = [
         ("P001", 110, 98.0, 24, 37.0, 24),    # stable

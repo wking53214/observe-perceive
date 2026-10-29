@@ -37,7 +37,8 @@ class GovernanceOrchestrator:
                  source_signers=None,
                  require_attested_event_time: bool = False,
                  enforce_advisory_violations: bool = False,
-                 root_admission=None):
+                 root_admission=None,
+                 alert_human=None):
         """
         Initialize orchestrator with all governance systems.
 
@@ -91,6 +92,15 @@ class GovernanceOrchestrator:
                 root is registered only after a CNS roster approves that
                 document. Needs the `cns` extra. Without it a kernel that has
                 a guard refuses every root.
+            alert_human: optional callable, called with a dict (stage,
+                stage_error, request_id, artifact_id) when a stage RAISES
+                instead of reaching a verdict, so a person hears about a
+                crashed stage and not only a log reader. It must reach a
+                human (page, dashboard, phone). Ordinary refusals and
+                successes never call it. The record of a stage error carries
+                `human_alert` ("delivered", "failed" or "no_channel"); a
+                failing or missing channel is logged at CRITICAL and never
+                suppresses or alters the rejection. Not required.
         """
         # 1.3.0 profile. "advisory" is the historical default: every check
         # runs and records, only refusals refuse. "strict" turns every
@@ -115,6 +125,7 @@ class GovernanceOrchestrator:
         # {key_id: Signer} or an iterable of Signers.
         self.source_signers = source_signers
         self.raise_on_stage_error = raise_on_stage_error
+        self.alert_human = alert_human
         # The execution stage (Phase 5) used to call the caller's function
         # unguarded: an exception there left NO record at all, after
         # Conservation had verified and execution had been approved. Now a
@@ -252,6 +263,40 @@ class GovernanceOrchestrator:
         if problem:
             anomalies.append(f"event_time attestation rejected: {problem}")
         return anomalies
+
+    def _alert_stage_error(self, stage: str, error: Exception, governance_request) -> str:
+        """Tell a person that a stage raised instead of reaching a verdict.
+
+        Returns "delivered", "failed" or "no_channel". Never raises: the
+        rejection (or the re-raise under raise_on_stage_error) happens
+        whatever this does.
+        """
+        request_id = getattr(governance_request, "request_id", None)
+        if self.alert_human is None:
+            logger.critical(
+                f"[Orchestrator] HUMAN ALERT NOT SENT: {stage} stage raised {type(error).__name__}: {error} "
+                f"on request {request_id}; no alert_human channel is configured."
+            )
+            return "no_channel"
+        try:
+            self.alert_human({
+                "stage": stage,
+                "stage_error": f"{type(error).__name__}: {error}",
+                "request_id": request_id,
+                "artifact_id": getattr(governance_request, "artifact_id", None),
+            })
+        except Exception as alert_error:  # noqa: BLE001 - never alter the rejection
+            logger.critical(
+                f"[Orchestrator] HUMAN ALERT FAILED: {stage} stage raised {type(error).__name__}: {error} "
+                f"on request {request_id}; the alert channel raised {type(alert_error).__name__}: {alert_error}."
+            )
+            return "failed"
+        return "delivered"
+
+    @staticmethod
+    def _alert_field(human_alert):
+        """The record field for a stage error. Other records never get it."""
+        return {} if human_alert is None else {"human_alert": human_alert}
 
     def _stamp(self, result: dict, governance_request=None) -> dict:
         """Attach the handoff record and the request to every result.
@@ -433,6 +478,7 @@ class GovernanceOrchestrator:
                     f"it raised {type(e).__name__}: {e}. Recording REJECTED with "
                     "stage_refused=False."
                 )
+                human_alert = self._alert_stage_error("simulation_screen", e, governance_request)
                 if self.raise_on_stage_error:
                     raise
                 return self._stamp({
@@ -441,6 +487,7 @@ class GovernanceOrchestrator:
                     "refused_by": None,
                     "stage_refused": False,
                     "stage_error": f"{type(e).__name__}: {e}",
+                    **self._alert_field(human_alert),
                     "simulation_screen": None,
                     "governance_decision": None,
                     "audit_chain": None,
@@ -480,6 +527,7 @@ class GovernanceOrchestrator:
                 "[Orchestrator] PERCEIVE stage did not run to a verdict -- "
                 f"it raised {type(e).__name__}: {e}. Recording REJECTED with stage_refused=False."
             )
+            human_alert = self._alert_stage_error("perceive", e, governance_request)
             if self.raise_on_stage_error:
                 raise
             return self._stamp({
@@ -488,6 +536,7 @@ class GovernanceOrchestrator:
                 "refused_by": None,
                 "stage_refused": False,
                 "stage_error": f"{type(e).__name__}: {e}",
+                **self._alert_field(human_alert),
                 "governance_decision": None,
                 "audit_chain": None,
             }, governance_request)
@@ -559,6 +608,7 @@ class GovernanceOrchestrator:
         except Exception as e:
             from perceive_conservation_adapter import ConservationRefusal
             refused = isinstance(e, ConservationRefusal)
+            human_alert = None
             if not refused:
                 # The stage did not refuse -- it was absent or it crashed. The
                 # record below still says REJECTED (unchanged), but now says
@@ -571,6 +621,7 @@ class GovernanceOrchestrator:
                     "construct the orchestrator with raise_on_stage_error=True to "
                     "raise instead of filing a stage failure as a rejection."
                 )
+                human_alert = self._alert_stage_error("conservation", e, governance_request)
                 if self.raise_on_stage_error:
                     raise
             logger.error(f"[Orchestrator] Conservation Kernel rejected: {e}")
@@ -581,6 +632,7 @@ class GovernanceOrchestrator:
                 "refused_by": "conservation" if refused else None,
                 "stage_refused": refused,
                 "stage_error": None if refused else f"{type(e).__name__}: {e}",
+                **self._alert_field(human_alert),
                 "conservation_enforced": refused,
                 "audit_chain": None,
             }, governance_request)
@@ -594,12 +646,14 @@ class GovernanceOrchestrator:
                 self.receipts.probe()
             except Exception as e:  # noqa: BLE001
                 logger.error(f"[Orchestrator] Refusing: receipt store unavailable ({type(e).__name__}: {e})")
+                human_alert = self._alert_stage_error("receipt_store", e, governance_request)
                 return self._stamp({
                     "status": "REJECTED",
                     "reason": f"receipt store unavailable before execution: {type(e).__name__}: {e}",
                     "refused_by": "receipt_store",
                     "stage_refused": True,
                     "stage_error": f"{type(e).__name__}: {e}",
+                    **self._alert_field(human_alert),
                     "governance_decision": perceive_decision,
                     "conservation_decision": conservation_decision,
                     "audit_chain": None,
@@ -634,6 +688,7 @@ class GovernanceOrchestrator:
             from conservation_gsa815_adapter import ExecutionRefusal
             from governance_contracts import GovernanceApproval
             refused = isinstance(e, (ExecutionRefusal, LedgerRefusal))
+            human_alert = None
             if isinstance(e, LedgerRefusal):
                 refused_by = "execution_ledger"
             elif refused:
@@ -656,6 +711,7 @@ class GovernanceOrchestrator:
                     "stage_refused=False. Construct the orchestrator with "
                     "raise_on_stage_error=True to raise instead."
                 )
+                human_alert = self._alert_stage_error("execution_approval", e, governance_request)
                 if self.raise_on_stage_error:
                     raise
             logger.error(f"[Orchestrator] Execution rejected: {e}")
@@ -667,6 +723,7 @@ class GovernanceOrchestrator:
                 "refused_by": refused_by,
                 "stage_refused": refused,
                 "stage_error": None if refused else f"{type(e).__name__}: {e}",
+                **self._alert_field(human_alert),
                 "conservation_enforced": True,
                 "audit_chain": None,
             }, governance_request)

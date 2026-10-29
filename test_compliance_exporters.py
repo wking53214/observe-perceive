@@ -34,7 +34,7 @@ from compliance_exporters import (
 
 def build_traffic():
     """Run sample traffic and return (system, observe_entries, perceive_entries, audits)."""
-    system = build_single_hospital_system()
+    system = build_single_hospital_system(allow_no_alert_channel=True)
     cases = [
         ("PATIENT-SECRET-001", 110, 98.0, 24, 37.0, 24),  # stable; raw ID is sensitive
         ("PATIENT-SECRET-002", 168, 83.0, 46, 39.5, 12),  # critical

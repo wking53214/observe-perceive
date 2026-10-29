@@ -36,6 +36,8 @@ explicitly and says so. Nothing swallows an exception into a success.
 | F21 | CCC semantic provider crashes or returns malformed similarity | Provider failure becomes a `semantic_provider_failed` audit event; non-finite or out-of-range values are rejected; recording continues without the semantic match | n/a | CCC audit event | CCC test_semantic_hardening |
 | F22 | ghost_tools scan of zero files, or corrupt baseline | Exit code 2 with the reason on stderr (was exit 0 / 1) | n/a | exit 2 | ghost_tools test_baseline_integrity |
 
+A stage that RAISES (F1, F2, the execution-approval stage, the receipt-store probe and the simulation screen) also calls the orchestrator's optional `alert_human` channel, before any re-raise, and the record gains `human_alert` (`delivered`, `failed` or `no_channel`). A stage that merely refuses does not. A failing or missing channel is logged at CRITICAL and never changes the rejection. Tests: test_orchestrator_alert_channel.
+
 ## Rows that are the remaining risk
 
 - F10 is the honest limit of "no silent action": if the receipt store is
