@@ -78,3 +78,16 @@ def test_advisory_profile_still_accepts_an_unguarded_kernel(perceive):
     orchestrator = GovernanceOrchestrator(perceive, ConservationKernel(allow_unguarded_roots=True),
                                           ObserveClinicalEngine(), profile="advisory")
     assert orchestrator.profile == "advisory"
+
+
+def test_strict_profile_refuses_to_switch_the_pre_action_guard_off(perceive):
+    # Strict is the protected profile, and its pre-action authorization is the executor guard. Turning that
+    # off would leave only the after-the-fact consume, so strict refuses it at construction.
+    with pytest.raises(ValueError, match="guard_executor"):
+        GovernanceOrchestrator(perceive, ConservationKernel(root_guard=lambda artifact: True), ObserveClinicalEngine(),
+                               profile="strict", guard_executor=False)
+
+
+def test_advisory_profile_may_still_switch_the_guard_off(perceive, kernel):
+    off = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), guard_executor=False)
+    assert off.guard_executor is False
