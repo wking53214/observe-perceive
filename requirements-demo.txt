@@ -19,11 +19,11 @@
 # together with v1.9.0. It is installed without that extra. Its
 # connector imports cns only when used, and gets the CNS installed here.
 #
-# CNS is pinned to the tag v1.9.0.
+# CNS is pinned to the tag v2.2.0.
 
-cns @ git+https://github.com/wking53214/CNS.git@v1.9.0
-governance-gateway[cns] @ git+https://github.com/wking53214/governance_gateway.git@a02f7383b13d4ccb748227a817c1eed862503cf9
-cognitive-continuity-constitution[cns] @ git+https://github.com/wking53214/ccc.git@14a76381b1cbea164efabf74de76d1d11224e1cf
+cns @ git+https://github.com/wking53214/CNS.git@v2.2.0
+governance-gateway[cns] @ git+https://github.com/wking53214/governance_gateway.git@ad8b644ca2edffc2b2de5e30e54f0157c288d925
+cognitive-continuity-constitution[cns] @ git+https://github.com/wking53214/ccc.git@98065733ee1afa22dc80db3c8dcfd0e1a3094909
 augur @ git+https://github.com/wking53214/augur.git@1fc76118f75024be5ebebed227c2d9a4530c78b7
-dit[cns] @ git+https://github.com/wking53214/dit.git@5763f1acc1c65dde575bbc03ab980d623e6f0ad5
-conservation-kernel[cns] @ git+https://github.com/wking53214/conservation_kernel.git@7b08c79db1b36c97c0de312165f8002b19baf6ae
+dit[cns] @ git+https://github.com/wking53214/dit.git@c801374757411f0975a71d1b794f2711d680985e
+conservation-kernel[cns] @ git+https://github.com/wking53214/conservation_kernel.git@4e7c0d9fbf6a40fd1f9a81896a7e2db00a63c47a
