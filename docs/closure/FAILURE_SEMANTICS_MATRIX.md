@@ -36,7 +36,7 @@ explicitly and says so. Nothing swallows an exception into a success.
 | F21 | CCC semantic provider crashes or returns malformed similarity | Provider failure becomes a `semantic_provider_failed` audit event; non-finite or out-of-range values are rejected; recording continues without the semantic match | n/a | CCC audit event | CCC test_semantic_hardening |
 | F22 | ghost_tools scan of zero files, or corrupt baseline | Exit code 2 with the reason on stderr (was exit 0 / 1) | n/a | exit 2 | ghost_tools test_baseline_integrity |
 
-A stage that RAISES (F1, F2, the execution-approval stage, the receipt-store probe and the simulation screen) also calls the orchestrator's optional `alert_human` channel, before any re-raise, and the record gains `human_alert` (`delivered`, `failed` or `no_channel`). A stage that merely refuses does not. A failing or missing channel is logged at CRITICAL and never changes the rejection. Tests: test_orchestrator_alert_channel.
+A stage that RAISES (F1, F2, the execution-approval stage, the receipt-store probe and the simulation screen) also calls the orchestrator's optional `alert_human` channel, before any re-raise, and the record gains `human_alert` (`delivered`, `failed` or `no_channel`). A stage that merely refuses does not. A failing or missing channel is logged at CRITICAL and never changes the rejection. The same channel is also called when the caller's own executor raises after approval (stage `execution`, before any `raise_on_execution_error` re-raise; the `EXECUTION_FAILED` record gains `human_alert`) and when the receipt of a result cannot be appended after the action ran (stage `receipt_append`; the outcome is untouched and the result gains `human_alert`, or `receipt_human_alert` when a stage-error alert is already on it). Tests: test_orchestrator_alert_channel.
 
 ## Rows that are the remaining risk
 
@@ -46,6 +46,9 @@ A stage that RAISES (F1, F2, the execution-approval stage, the receipt-store pro
   receipt store part of the same durable write as the effect, or refuse to
   execute when the store is unreachable (write a probe entry before Phase 5).
   Classified DOCUMENT here; FIX_WITH_ADAPTER at the deployment boundary.
+  The orchestrator now also tells a person through `alert_human` (stage
+  `receipt_append`), so the lost record is no longer only a log line and a
+  return value; the guarantee is still not stronger than the store.
 - F20 is the cross-process replay: the execution ledger and kernel are
   per-process unless their files are shared. Sharing the files closes it
   (F19 then applies after `ConservationKernel.load`). DOCUMENT.

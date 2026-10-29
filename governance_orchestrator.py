@@ -94,13 +94,20 @@ class GovernanceOrchestrator:
                 a guard refuses every root.
             alert_human: optional callable, called with a dict (stage,
                 stage_error, request_id, artifact_id) when a stage RAISES
-                instead of reaching a verdict, so a person hears about a
-                crashed stage and not only a log reader. It must reach a
+                instead of reaching a verdict, or when the caller's executor
+                raises after approval (stage "execution"), so a person hears
+                about a crash and not only a log reader. It must reach a
                 human (page, dashboard, phone). Ordinary refusals and
-                successes never call it. The record of a stage error carries
+                successes never call it. The record of such a failure carries
                 `human_alert` ("delivered", "failed" or "no_channel"); a
                 failing or missing channel is logged at CRITICAL and never
-                suppresses or alters the rejection. Not required.
+                suppresses or alters the outcome. With raise_on_execution_error
+                or raise_on_stage_error the person is alerted before the
+                re-raise. It is also called when the receipt of a result
+                cannot be appended after the action ran (stage
+                "receipt_append"); the result then carries `human_alert`, or
+                `receipt_human_alert` when a stage-error alert is already on
+                it, and its outcome is unchanged. Not required.
         """
         # 1.3.0 profile. "advisory" is the historical default: every check
         # runs and records, only refusals refuse. "strict" turns every
@@ -355,6 +362,12 @@ class GovernanceOrchestrator:
                 result["receipt"] = None
                 result["receipt_error"] = f"{type(e).__name__}: {e}"
                 logger.critical(f"[Orchestrator] Result NOT receipted: {result['receipt_error']}")
+                # A person hears that the record of what happened was lost.
+                # The outcome is untouched: nothing is undone, retried or
+                # altered. A record that already carries a stage-error alert
+                # keeps it, and this one is recorded beside it.
+                alert = self._alert_stage_error("receipt_append", e, result.get("governance_request"))
+                result["receipt_human_alert" if "human_alert" in result else "human_alert"] = alert
         return result
 
     def _orchestrate(
@@ -861,6 +874,9 @@ class GovernanceOrchestrator:
         except Exception as e:
             executed_at["finished"] = datetime.now(timezone.utc).isoformat()
             logger.error(f"[Orchestrator] Execution FAILED: {type(e).__name__}: {e}")
+            # A person hears about a crashed executor before anything else
+            # happens, including the re-raise below.
+            human_alert = self._alert_stage_error("execution", e, governance_request)
             if self.raise_on_execution_error:
                 raise
             # Everything that led here is kept: the action was approved and
@@ -893,6 +909,7 @@ class GovernanceOrchestrator:
                 "outcome_context": outcome_context,
                 "audit_chain": None,
                 "audit_chain_valid": False,
+                **self._alert_field(human_alert),
             }, governance_request)
             return self._verify_on_the_way_out(failed, None)
         executed_at["finished"] = datetime.now(timezone.utc).isoformat()
