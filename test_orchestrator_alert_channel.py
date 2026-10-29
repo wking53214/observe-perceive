@@ -122,6 +122,80 @@ def test_a_receipted_stage_error_record_still_verifies(kernel, tmp_path):
     ReceiptLog(tmp_path / "r.jsonl")   # reopening verifies the chain; it must not raise
 
 
+# --- the caller's own executor crashes after approval: the person is told ----------------
+
+def _crashing_executor(ctx):
+    raise RuntimeError("downstream unavailable")
+
+
+def test_a_crashed_executor_alerts_and_the_record_says_so(perceive, kernel):
+    pager = Pager()
+    orchestrator = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), alert_human=pager)
+    result, _ = run_chain(orchestrator, "x1", func=_crashing_executor)
+    assert result["status"] == "EXECUTION_FAILED"
+    assert result["human_alert"] == "delivered"
+    assert len(pager.calls) == 1
+    alert = pager.calls[0]
+    assert alert["stage"] == "execution" and "RuntimeError" in alert["stage_error"]
+    assert alert["request_id"] == result["governance_request"].request_id
+    assert alert["artifact_id"] == "x1"
+
+
+def test_an_alert_failure_on_a_crashed_executor_is_recorded_and_changes_nothing_else(perceive, kernel, caplog):
+    plain, _ = run_chain(GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine()), "x2", func=_crashing_executor)
+    from conftest import make_perceive
+    with caplog.at_level(logging.CRITICAL, logger="GovernanceOrchestrator"):
+        failed, _ = run_chain(
+            GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True),
+                                   ObserveClinicalEngine(), alert_human=_broken_pager),
+            "x2", func=_crashing_executor)
+    assert failed["human_alert"] == "failed"
+    assert any("HUMAN ALERT FAILED" in r.getMessage() for r in caplog.records)
+    for key in ("status", "reason", "execution_status", "execution_error", "audit_chain_valid"):
+        assert failed[key] == plain[key], key
+
+
+def test_a_crashed_executor_with_no_channel_is_recorded_and_logged_at_critical(perceive, kernel, caplog):
+    with caplog.at_level(logging.CRITICAL, logger="GovernanceOrchestrator"):
+        result, _ = run_chain(GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine()), "x3",
+                              func=_crashing_executor)
+    assert result["status"] == "EXECUTION_FAILED" and result["human_alert"] == "no_channel"
+    assert any("HUMAN ALERT NOT SENT" in r.getMessage() for r in caplog.records)
+
+
+def test_raise_on_execution_error_still_alerts_before_raising(perceive, kernel):
+    pager = Pager()
+    orchestrator = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(),
+                                          raise_on_execution_error=True, alert_human=pager)
+    with pytest.raises(RuntimeError):
+        run_chain(orchestrator, "x4", func=_crashing_executor)
+    assert [c["stage"] for c in pager.calls] == ["execution"]
+
+
+def test_a_crashed_executor_record_differs_only_by_the_alert_field():
+    from conftest import make_perceive
+
+    def record(alert_human):
+        orchestrator = GovernanceOrchestrator(
+            make_perceive(), ConservationKernel(allow_unguarded_roots=True),
+            ObserveClinicalEngine(), alert_human=alert_human)
+        result, _ = run_chain(orchestrator, "x5", func=_crashing_executor)
+        handoff = dict(result["handoff"])
+        handoff.pop("issued_at")
+        return {k: v for k, v in result.items() if k != "human_alert"}, handoff
+
+    (without, h0), (with_channel, h1) = record(None), record(Pager())
+    assert sorted(without) == sorted(with_channel) and h0 == h1
+
+
+def test_a_receipted_crashed_executor_record_still_verifies(perceive, kernel, tmp_path):
+    log = ReceiptLog(tmp_path / "r.jsonl")
+    orchestrator = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), receipts=log, alert_human=Pager())
+    result, _ = run_chain(orchestrator, "x6", func=_crashing_executor)
+    assert result["human_alert"] == "delivered" and result["receipt"] is not None
+    ReceiptLog(tmp_path / "r.jsonl")   # reopening verifies the chain; it must not raise
+
+
 # --- nothing else changes ----------------------------------------------------------------
 
 def test_a_successful_run_never_alerts_and_its_record_has_no_alert_field(perceive, kernel):
