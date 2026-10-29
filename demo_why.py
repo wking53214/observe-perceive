@@ -38,12 +38,14 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 
+from cns_connector import CnsNotInstalled
 from conservation_kernel import ConservationKernel
 from governance_chain import verify_result
 from governance_contracts import GovernanceApproval
 from governance_orchestrator import GovernanceOrchestrator
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
+from root_admission import RootAdmission, require_root_admission
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -109,9 +111,12 @@ def run_scenario(quiet: bool = False):
     except ImportError:
         screen = False
 
+    # The kernel holds the real root guard: a root registers only after a CNS roster approves that document.
+    require_root_admission()
+    admission = RootAdmission()
     orchestrator = GovernanceOrchestrator(
-        _perceive(), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine(),
-        simulation_screen=screen,
+        _perceive(), ConservationKernel(root_guard=admission), ObserveClinicalEngine(),
+        simulation_screen=screen, root_admission=admission,
     )
 
     def operation(execution_context):
@@ -203,6 +208,11 @@ def main(argv=None) -> int:
     # The components log at INFO; the demo's own lines are the narrative.
     import logging
     logging.disable(logging.INFO)
+    try:
+        require_root_admission()
+    except CnsNotInstalled as exc:
+        print(f"this demo runs the real root guard, which needs CNS: {exc}", file=sys.stderr)
+        return 2
     result, orchestrator, _ = run_scenario(quiet=args.quiet)
     if result["status"] != "APPROVED_AND_EXECUTED":
         print(f"\nscenario did not execute: {result['status']}: {result.get('reason')}")

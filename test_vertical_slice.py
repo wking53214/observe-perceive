@@ -10,12 +10,17 @@ import json
 import pytest
 
 import gateway_admission_adapter  # noqa: F401  (resolves a sibling Gateway checkout onto sys.path)
+from conftest import importorskip_cns
 from vertical_slice import Paths, explain, run_action, run_slice
 
 # The slice is real implementations only: it seals at the Gateway, so it
 # needs the Gateway. Importing the admission adapter first lets it resolve
 # a sibling checkout before this check runs.
 pytest.importorskip("governance_gateway.models", reason="Governance_Gateway checkout not available")
+# The slice's kernel holds the real root guard, so it needs CNS with DecisionGuard (see test_examples_need_cns.py
+# for what happens without it). CI's cns job sets OBSERVE_PERCEIVE_REQUIRE_CNS=1, so there it cannot skip.
+importorskip_cns("cns_composition.decision_guard", "the slice's root guard needs the CNS release with DecisionGuard")
+importorskip_cns("conservation_kernel.cns_connector", "the slice's root guard needs the kernel's CNS connector")
 
 
 def test_one_governed_action_is_explained_after_a_restart_and_cannot_be_replayed(tmp_path):
