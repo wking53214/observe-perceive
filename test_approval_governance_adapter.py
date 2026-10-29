@@ -64,7 +64,7 @@ def orchestrator():
         created_at=datetime.now(timezone.utc),
         policies={},
     ))
-    return GovernanceOrchestrator(kernel, ConservationKernel(), ObserveClinicalEngine())
+    return GovernanceOrchestrator(kernel, ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine())
 
 
 # ---------------------------------------------------------------------------

@@ -102,7 +102,7 @@ def test_a_duplicate_artifact_in_one_process_is_refused_by_the_kernel_not_execut
 
 
 def test_the_same_artifact_seen_by_two_processes_is_two_decisions_not_one():
-    a, _ = run_chain(GovernanceOrchestrator(make_perceive(), ConservationKernel(), ObserveClinicalEngine()), "f11", vitals=False)
-    b, _ = run_chain(GovernanceOrchestrator(make_perceive(), ConservationKernel(), ObserveClinicalEngine()), "f11", vitals=False)
+    a, _ = run_chain(GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine()), "f11", vitals=False)
+    b, _ = run_chain(GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine()), "f11", vitals=False)
     assert a["governance_decision"].decision_id != b["governance_decision"].decision_id
     assert a["governance_request"].state_commitment == b["governance_request"].state_commitment

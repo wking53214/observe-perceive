@@ -113,7 +113,7 @@ def run_action(workdir: Path, *, artifact_id: str = "feed-icu-3-0042", execution
     """The governed action, in the process that performs it."""
     paths = Paths(workdir)
     paths.workdir.mkdir(parents=True, exist_ok=True)
-    kernel = ConservationKernel()
+    kernel = ConservationKernel(allow_unguarded_roots=True)
     ledger = ExecutionLedger(paths.executions, signer=DEPLOYER)
     receipts = ReceiptLog(paths.receipts, signer=DEPLOYER)
     orchestrator = GovernanceOrchestrator(
@@ -174,7 +174,7 @@ def explain(workdir: Path, effect_line: Dict[str, Any]) -> Dict[str, Any]:
     paths = Paths(workdir)
     receipts = ReceiptLog(paths.receipts, signer=DEPLOYER)    # refuses a broken chain or an unsigned/foreign receipt
     ledger = ExecutionLedger(paths.executions, signer=DEPLOYER)   # same for the execution ledger
-    kernel = ConservationKernel.load(paths.kernel, signer=DEPLOYER)   # re-admits roots, re-verifies, checks the signature
+    kernel = ConservationKernel.load(paths.kernel, signer=DEPLOYER, allow_unguarded_roots=True)   # re-admits roots, re-verifies, checks the signature
     perceive = _perceive(paths.perceive)                       # PERCEIVE's own ledger, reopened
 
     execution_id = effect_line["execution_id"]
@@ -262,7 +262,7 @@ def attack_after_restart(workdir: Path, explained: Dict[str, Any]) -> Dict[str, 
     except ExecutionRefusal as e:
         outcomes["forged_context"] = f"refused: {e}"
     # 3. the whole request again, same execution id, new process
-    orchestrator = GovernanceOrchestrator(_perceive(paths.perceive), ConservationKernel(), ObserveClinicalEngine(),
+    orchestrator = GovernanceOrchestrator(_perceive(paths.perceive), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine(),
                                           profile="strict", source_signers=[SOURCE], execution_ledger=ledger,
                                           receipts=ReceiptLog(paths.receipts, signer=DEPLOYER))
     from gateway_admission_adapter import GatewayAdmissionAdapter, GatewayEpistemicStatus
