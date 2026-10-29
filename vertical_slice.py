@@ -35,12 +35,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict
 
+from cns_connector import CnsNotInstalled
 from conservation_kernel import ConservationKernel, HmacSigner
 from execution_guard import ExecutionLedger, ExecutionRefusal, authorize_execution, guarded
 from governance_orchestrator import GovernanceOrchestrator
 from governance_record import ReceiptLog, from_record, verify_record
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
+from root_admission import RootAdmission, require_root_admission
 from sentinel_perceive_adapter import SentinelPerceiveAdapter
 
 # 1.3.0: the durable boundary is signed. These keys stand in for the two a
@@ -113,14 +115,16 @@ def run_action(workdir: Path, *, artifact_id: str = "feed-icu-3-0042", execution
     """The governed action, in the process that performs it."""
     paths = Paths(workdir)
     paths.workdir.mkdir(parents=True, exist_ok=True)
-    kernel = ConservationKernel(allow_unguarded_roots=True)
+    require_root_admission()
+    admission = RootAdmission()                 # the kernel registers a root only after a CNS roster approves it
+    kernel = ConservationKernel(root_guard=admission)
     ledger = ExecutionLedger(paths.executions, signer=DEPLOYER)
     receipts = ReceiptLog(paths.receipts, signer=DEPLOYER)
     orchestrator = GovernanceOrchestrator(
         _perceive(paths.perceive), kernel, ObserveClinicalEngine(),
         profile="strict",                     # sealed scope, vitals, attested event time, advised violations enforced
         source_signers=[SOURCE],              # whose event-time attestations count
-        execution_ledger=ledger, receipts=receipts,
+        execution_ledger=ledger, receipts=receipts, root_admission=admission,
     )
 
     # EXECUTE: the actuator. It will not act on anything the ledger did not issue.
@@ -174,7 +178,9 @@ def explain(workdir: Path, effect_line: Dict[str, Any]) -> Dict[str, Any]:
     paths = Paths(workdir)
     receipts = ReceiptLog(paths.receipts, signer=DEPLOYER)    # refuses a broken chain or an unsigned/foreign receipt
     ledger = ExecutionLedger(paths.executions, signer=DEPLOYER)   # same for the execution ledger
-    kernel = ConservationKernel.load(paths.kernel, signer=DEPLOYER, allow_unguarded_roots=True)   # re-admits roots, re-verifies, checks the signature
+    # Restores the saved roots (they were admitted when first registered; a restore does not ask the guard again),
+    # re-verifies every transformation and checks the signature. The guard is closed, so nothing new can register.
+    kernel = ConservationKernel.load(paths.kernel, signer=DEPLOYER, root_guard=RootAdmission())
     perceive = _perceive(paths.perceive)                       # PERCEIVE's own ledger, reopened
 
     execution_id = effect_line["execution_id"]
@@ -262,9 +268,10 @@ def attack_after_restart(workdir: Path, explained: Dict[str, Any]) -> Dict[str, 
     except ExecutionRefusal as e:
         outcomes["forged_context"] = f"refused: {e}"
     # 3. the whole request again, same execution id, new process
-    orchestrator = GovernanceOrchestrator(_perceive(paths.perceive), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine(),
+    admission = RootAdmission()
+    orchestrator = GovernanceOrchestrator(_perceive(paths.perceive), ConservationKernel(root_guard=admission), ObserveClinicalEngine(),
                                           profile="strict", source_signers=[SOURCE], execution_ledger=ledger,
-                                          receipts=ReceiptLog(paths.receipts, signer=DEPLOYER))
+                                          receipts=ReceiptLog(paths.receipts, signer=DEPLOYER), root_admission=admission)
     from gateway_admission_adapter import GatewayAdmissionAdapter, GatewayEpistemicStatus
     artifact = FeedArtifact("feed-icu-3-0042", "escalate P001: sustained tachycardia, SpO2 91", _EVENT_TIME)
     sealed = GatewayAdmissionAdapter.seal(artifact_id=artifact.artifact_id, payload={"content": artifact.content},
@@ -292,6 +299,11 @@ def run_slice(workdir: Path) -> Dict[str, Any]:
 
 
 def main(argv=None) -> int:
+    try:
+        require_root_admission()
+    except CnsNotInstalled as exc:
+        print(f"this example runs the real root guard, which needs CNS: {exc}", file=sys.stderr)
+        return 2
     workdir = Path((argv or sys.argv[1:])[0]) if (argv or sys.argv[1:]) else Path("slice_run")
     import shutil
     if workdir.exists():

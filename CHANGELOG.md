@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **The examples run the real root guard.** `demo_why.py` and `vertical_slice.py`
+  build the kernel with `RootAdmission` and pass it to the orchestrator, in place of
+  `allow_unguarded_roots=True`. The slice's reloaded kernel holds a closed guard: a
+  restore does not ask the guard about saved roots, and nothing new can register. New
+  `root_admission.require_root_admission()` checks for a CNS with `DecisionGuard` and
+  the kernel's CNS connector up front; without them each example exits 2 and names
+  the install command instead of failing partway through a request. The example tests
+  skip without CNS and run in the `cns` job, where a skip is a failure; the new
+  `test_examples_need_cns.py` runs in both jobs. Test fixtures for other components
+  still use `allow_unguarded_roots=True`.
+
 - **A root can be registered only after a roster approves that document.**
   New `root_admission.py`: `RootAdmission` is the callable a kernel holds as its
   `root_guard`. It is closed. For one request the adapter asks a CNS roster
