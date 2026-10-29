@@ -214,7 +214,7 @@ def _artifact(aid="sim-001"):
 def _orch(screen=True):
     k = PerceiveGovernanceKernel()
     k.register_manifest(PolicyManifest("sim-manifest", "1.0.0", _dt.now(_tz.utc), {}))
-    return GovernanceOrchestrator(k, ConservationKernel(), ObserveClinicalEngine(),
+    return GovernanceOrchestrator(k, ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine(),
                                   simulation_screen=screen)
 
 

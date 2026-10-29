@@ -104,10 +104,10 @@ def test_the_record_hash_is_deterministic_and_covers_timestamps(orchestrator):
 
 def test_a_replayed_scenario_across_restarts_is_receipted_twice_and_refused_once(tmp_path):
     ledger_path, receipts_path = tmp_path / "executions.jsonl", tmp_path / "receipts.jsonl"
-    first = GovernanceOrchestrator(make_perceive(), ConservationKernel(), ObserveClinicalEngine(),
+    first = GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine(),
                                    execution_ledger=ExecutionLedger(ledger_path), receipts=ReceiptLog(receipts_path))
     run_chain(first, "canon")
-    second = GovernanceOrchestrator(make_perceive(), ConservationKernel(), ObserveClinicalEngine(),
+    second = GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine(),
                                     execution_ledger=ExecutionLedger(ledger_path), receipts=ReceiptLog(receipts_path))
     again, ran = run_chain(second, "canon")
     assert again["status"] == "REJECTED" and again["refused_by"] == "execution_ledger" and ran == []

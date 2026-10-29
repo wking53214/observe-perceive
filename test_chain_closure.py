@@ -100,7 +100,7 @@ def test_ingestion_time_is_recorded_but_not_part_of_the_request_identity(perceiv
     # Two processes each see the same artifact once (the kernel refuses a
     # second root under one id within a process, by design).
     a, _ = run_chain(GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine()), "c6", vitals=False)
-    b, _ = run_chain(GovernanceOrchestrator(make_perceive(), ConservationKernel(), ObserveClinicalEngine()), "c6", vitals=False)
+    b, _ = run_chain(GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine()), "c6", vitals=False)
     # Same artifact seen twice: same request commitment, different ingestion times.
     assert a["governance_request"].state_commitment == b["governance_request"].state_commitment
     assert a["governance_request"].ingested_at != b["governance_request"].ingested_at

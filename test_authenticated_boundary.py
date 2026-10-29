@@ -101,14 +101,14 @@ def test_two_ledger_objects_on_one_file_see_one_ledger(perceive, tmp_path):
     def capture(ctx):
         captured["ctx"] = ctx
         return {"status": "done"}
-    result, _ = run_chain(_orch(perceive, ConservationKernel(), execution_ledger=a, guard_executor=False), "p1", func=capture, vitals=False)
+    result, _ = run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True), execution_ledger=a, guard_executor=False), "p1", func=capture, vitals=False)
     assert result["status"] == "APPROVED_AND_EXECUTED"
     assert b.issued("exec-p1") is not None and b.consumed("exec-p1") is not None      # b re-read the file
     with pytest.raises(ExecutionRefusal, match="already consumed"):
         b.consume(captured["ctx"], consumer="process-b")
     # The same artifact governed by the second process: its own kernel has
     # never seen it, so only the shared ledger can say it is a replay.
-    second, ran = run_chain(_orch(perceive, ConservationKernel(), execution_ledger=b), "p1", vitals=False,
+    second, ran = run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True), execution_ledger=b), "p1", vitals=False,
                             context={"execution_id": "exec-p1-b"})
     assert second["status"] == "REJECTED" and second["refused_by"] == "execution_ledger" and ran == []
     assert "already issued an execution" in second["reason"]
@@ -120,8 +120,8 @@ def test_a_file_edited_between_two_refreshes_is_refused(perceive, kernel, tmp_pa
     a = ExecutionLedger(path)
     run_chain(_orch(perceive, kernel, execution_ledger=a), "p2", vitals=False)
     b = ExecutionLedger(path)
-    run_chain(_orch(perceive, ConservationKernel(), execution_ledger=b, one_per_artifact=False) if False else
-              _orch(perceive, ConservationKernel(), execution_ledger=ExecutionLedger(path, one_per_artifact=False)), "p3", vitals=False)
+    run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True), execution_ledger=b, one_per_artifact=False) if False else
+              _orch(perceive, ConservationKernel(allow_unguarded_roots=True), execution_ledger=ExecutionLedger(path, one_per_artifact=False)), "p3", vitals=False)
     lines = path.read_text().splitlines()
     lines[-1] = lines[-1].replace('"consumer": "orchestrator"', '"consumer": "intruder"')
     path.write_text("\n".join(lines) + "\n")
@@ -131,8 +131,8 @@ def test_a_file_edited_between_two_refreshes_is_refused(perceive, kernel, tmp_pa
 
 def test_per_artifact_rule_can_be_turned_off(perceive, tmp_path):
     path = tmp_path / "loose.jsonl"
-    run_chain(_orch(perceive, ConservationKernel(), execution_ledger=ExecutionLedger(path, one_per_artifact=False)), "p4", vitals=False)
-    again, ran = run_chain(_orch(perceive, ConservationKernel(), execution_ledger=ExecutionLedger(path, one_per_artifact=False)), "p4",
+    run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True), execution_ledger=ExecutionLedger(path, one_per_artifact=False)), "p4", vitals=False)
+    again, ran = run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True), execution_ledger=ExecutionLedger(path, one_per_artifact=False)), "p4",
                            vitals=False, context={"execution_id": "exec-p4-b"})
     assert again["status"] == "APPROVED_AND_EXECUTED" and len(ran) == 1
 

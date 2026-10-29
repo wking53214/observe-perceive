@@ -94,7 +94,7 @@ def orchestrator():
         manifest_id="gateway-seam-manifest", version="1.0.0",
         created_at=datetime.now(timezone.utc), policies={},
     ))
-    return GovernanceOrchestrator(kernel, ConservationKernel(), ObserveClinicalEngine())
+    return GovernanceOrchestrator(kernel, ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine())
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +253,7 @@ def test_require_declared_scope_refuses_an_unscoped_request():
         created_at=datetime.now(timezone.utc), policies={},
     ))
     strict = GovernanceOrchestrator(
-        kernel, ConservationKernel(), ObserveClinicalEngine(),
+        kernel, ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine(),
         require_declared_scope=True,
     )
 
@@ -278,7 +278,7 @@ def test_strict_mode_still_allows_a_properly_scoped_request():
         created_at=datetime.now(timezone.utc), policies={},
     ))
     strict = GovernanceOrchestrator(
-        kernel, ConservationKernel(), ObserveClinicalEngine(),
+        kernel, ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine(),
         require_declared_scope=True,
     )
 

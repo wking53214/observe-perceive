@@ -55,7 +55,7 @@ def test_a_sealed_admission_backs_the_scope_in_strict_mode(perceive, kernel):
 
 @pytest.mark.parametrize("strict", [False, True])
 def test_an_admission_whose_scope_was_escalated_after_sealing_is_refused_in_every_mode(strict):
-    orch = GovernanceOrchestrator(make_perceive(), ConservationKernel(), ObserveClinicalEngine(), require_declared_scope=strict)
+    orch = GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine(), require_declared_scope=strict)
     tampered = replace(_sealed("s4", execute=False), scope=gw.Scope.EXECUTE)     # integrity no longer recomputes
     result, ran = run_chain(orch, "s4", vitals=False, context={"gateway_scope": "EXECUTE", "gateway_admission": tampered})
     assert result["status"] == "REJECTED" and ran == []
