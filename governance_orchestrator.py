@@ -36,7 +36,8 @@ class GovernanceOrchestrator:
                  guard_executor: bool = True,
                  source_signers=None,
                  require_attested_event_time: bool = False,
-                 enforce_advisory_violations: bool = False):
+                 enforce_advisory_violations: bool = False,
+                 root_admission=None):
         """
         Initialize orchestrator with all governance systems.
 
@@ -85,6 +86,11 @@ class GovernanceOrchestrator:
                 `refused_by` and `stage_error`; this flag turns the crash
                 case into an exception for callers that would rather not
                 have a stage failure filed as a verdict.
+            root_admission: the `root_admission.RootAdmission` the Conservation
+                Kernel was built with as its `root_guard`. With it, a request's
+                root is registered only after a CNS roster approves that
+                document. Needs the `cns` extra. Without it a kernel that has
+                a guard refuses every root.
         """
         # 1.3.0 profile. "advisory" is the historical default: every check
         # runs and records, only refusals refuse. "strict" turns every
@@ -139,7 +145,7 @@ class GovernanceOrchestrator:
         from gsa815_observe_adapter import GSA815ObserveAdapter
 
         self.sentinel_adapter = SentinelPerceiveAdapter()
-        self.perceive_adapter = PerceiveConservationAdapter(conservation_kernel) if conservation_kernel else None
+        self.perceive_adapter = PerceiveConservationAdapter(conservation_kernel, root_admission) if conservation_kernel else None
         self.conservation_adapter = ConservationGSA815Adapter()
         self.gsa815_adapter = GSA815ObserveAdapter()
 
