@@ -149,7 +149,7 @@ Reports: `docs/closure/ARCHITECTURE_CLOSURE_REPORT.md`, `GOVERNANCE_BYPASS_REPOR
 
 What it is not. It is a verdict-combining layer. It does not replace `GovernanceOrchestrator`, which stays hard-wired and unchanged, and it does not read the orchestrator's ledger or receipts. It only works with libraries that ship a CNS connector (a class that satisfies `cns.gate.Gate`). It makes no gate's judgment better: a library's PASS is "no objection", and the layer says nothing about whether the result is correct.
 
-What it needs. CNS, a private package, through the optional extra `cns` (pinned to CNS commit 3ec3ffc, which has `DecisionGuard`; `requirements-demo.txt` stays on the tag v1.9.0 because the other libraries' `[cns]` extras pin it). This repository imports CNS only when a pipeline is built or run. Without CNS, everything else here works as before and building a pipeline raises `CnsNotInstalled` with the install command. No runtime dependency was added.
+What it needs. CNS, a private package, through the optional extra `cns` (pinned to the tag v2.2.0, which has `DecisionGuard`; `requirements-demo.txt` stays on the tag v1.9.0 because the other libraries' `[cns]` extras pin it). This repository imports CNS only when a pipeline is built or run. Without CNS, everything else here works as before and building a pipeline raises `CnsNotInstalled` with the install command. No runtime dependency was added.
 
 Run the demo. It builds one pipeline from the real CNS gates of five libraries (governance_gateway, ccc and augur before the work; dit and conservation_kernel on the result) and a stub work function, then runs eleven scenarios and prints every verdict, whether the work ran, and the final decision:
 
