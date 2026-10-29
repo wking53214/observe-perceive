@@ -196,6 +196,93 @@ def test_a_receipted_crashed_executor_record_still_verifies(perceive, kernel, tm
     ReceiptLog(tmp_path / "r.jsonl")   # reopening verifies the chain; it must not raise
 
 
+# --- the receipt cannot be appended after the action ran: the person is told ------------
+
+def _broken_receipts(tmp_path, monkeypatch):
+    log = ReceiptLog(tmp_path / "r.jsonl")
+
+    def broken(result):
+        raise OSError("receipt volume gone")
+    monkeypatch.setattr(log, "append", broken)
+    return log
+
+
+def test_a_lost_receipt_alerts_and_leaves_the_outcome_untouched(perceive, kernel, monkeypatch, tmp_path):
+    pager = Pager()
+    log = _broken_receipts(tmp_path, monkeypatch)
+    orchestrator = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), receipts=log, alert_human=pager)
+    result, ran = run_chain(orchestrator, "r1")
+    assert result["status"] == "APPROVED_AND_EXECUTED" and len(ran) == 1, "the action ran and stays run"
+    assert result["receipt"] is None and "OSError" in result["receipt_error"]
+    assert result["human_alert"] == "delivered"
+    assert len(pager.calls) == 1
+    alert = pager.calls[0]
+    assert alert["stage"] == "receipt_append" and "OSError" in alert["stage_error"]
+    assert alert["request_id"] == result["governance_request"].request_id and alert["artifact_id"] == "r1"
+
+
+def test_a_lost_receipt_changes_nothing_but_the_alert_field(monkeypatch, tmp_path):
+    from conftest import make_perceive
+
+    def record(alert_human):
+        orchestrator = GovernanceOrchestrator(
+            make_perceive(), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine(),
+            receipts=_broken_receipts(tmp_path, monkeypatch), alert_human=alert_human)
+        result, ran = run_chain(orchestrator, "r2")
+        return result, ran
+
+    (plain, ran0), (alerted, ran1) = record(None), record(Pager())
+    assert len(ran0) == len(ran1) == 1
+    assert sorted(k for k in plain if k != "human_alert") == sorted(k for k in alerted if k != "human_alert")
+    for key in ("status", "receipt", "receipt_error", "execution_status", "audit_chain_valid"):
+        assert alerted[key] == plain[key], key
+
+
+def test_a_lost_receipt_with_a_failing_channel_is_recorded_and_logged(perceive, kernel, monkeypatch, tmp_path, caplog):
+    log = _broken_receipts(tmp_path, monkeypatch)
+    orchestrator = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), receipts=log,
+                                          alert_human=_broken_pager)
+    with caplog.at_level(logging.CRITICAL, logger="GovernanceOrchestrator"):
+        result, ran = run_chain(orchestrator, "r3")
+    assert result["status"] == "APPROVED_AND_EXECUTED" and len(ran) == 1
+    assert result["human_alert"] == "failed"
+    assert any("HUMAN ALERT FAILED" in r.getMessage() for r in caplog.records)
+
+
+def test_a_lost_receipt_with_no_channel_is_recorded_and_logged(perceive, kernel, monkeypatch, tmp_path, caplog):
+    log = _broken_receipts(tmp_path, monkeypatch)
+    orchestrator = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), receipts=log)
+    with caplog.at_level(logging.CRITICAL, logger="GovernanceOrchestrator"):
+        result, ran = run_chain(orchestrator, "r4")
+    assert result["status"] == "APPROVED_AND_EXECUTED" and len(ran) == 1
+    assert result["human_alert"] == "no_channel"
+    assert any("HUMAN ALERT NOT SENT" in r.getMessage() for r in caplog.records)
+
+
+def test_a_lost_receipt_beside_a_stage_error_keeps_both_alerts(perceive, kernel, tmp_path):
+    pager = Pager()
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x")
+    log = ReceiptLog.__new__(ReceiptLog)
+    log.path = blocker / "receipts.jsonl"
+    log.signer = None
+    log._entries = []
+    orchestrator = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), receipts=log, alert_human=pager)
+    result, ran = run_chain(orchestrator, "r5")
+    assert result["status"] == "REJECTED" and result["refused_by"] == "receipt_store" and ran == []
+    assert result["human_alert"] == "delivered" and result["receipt_human_alert"] == "delivered"
+    assert [c["stage"] for c in pager.calls] == ["receipt_store", "receipt_append"]
+
+
+def test_a_working_receipt_store_never_alerts_and_adds_no_field(perceive, kernel, tmp_path):
+    pager = Pager()
+    log = ReceiptLog(tmp_path / "r.jsonl")
+    orchestrator = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), receipts=log, alert_human=pager)
+    result, ran = run_chain(orchestrator, "r6")
+    assert result["status"] == "APPROVED_AND_EXECUTED" and len(ran) == 1 and result["receipt"] is not None
+    assert pager.calls == [] and "human_alert" not in result and "receipt_human_alert" not in result
+
+
 # --- nothing else changes ----------------------------------------------------------------
 
 def test_a_successful_run_never_alerts_and_its_record_has_no_alert_field(perceive, kernel):

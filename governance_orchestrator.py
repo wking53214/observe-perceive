@@ -103,7 +103,11 @@ class GovernanceOrchestrator:
                 failing or missing channel is logged at CRITICAL and never
                 suppresses or alters the outcome. With raise_on_execution_error
                 or raise_on_stage_error the person is alerted before the
-                re-raise. Not required.
+                re-raise. It is also called when the receipt of a result
+                cannot be appended after the action ran (stage
+                "receipt_append"); the result then carries `human_alert`, or
+                `receipt_human_alert` when a stage-error alert is already on
+                it, and its outcome is unchanged. Not required.
         """
         # 1.3.0 profile. "advisory" is the historical default: every check
         # runs and records, only refusals refuse. "strict" turns every
@@ -358,6 +362,12 @@ class GovernanceOrchestrator:
                 result["receipt"] = None
                 result["receipt_error"] = f"{type(e).__name__}: {e}"
                 logger.critical(f"[Orchestrator] Result NOT receipted: {result['receipt_error']}")
+                # A person hears that the record of what happened was lost.
+                # The outcome is untouched: nothing is undone, retried or
+                # altered. A record that already carries a stage-error alert
+                # keeps it, and this one is recorded beside it.
+                alert = self._alert_stage_error("receipt_append", e, result.get("governance_request"))
+                result["receipt_human_alert" if "human_alert" in result else "human_alert"] = alert
         return result
 
     def _orchestrate(
