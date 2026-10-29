@@ -14,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 
 from observe_consolidated import VitalsSnapshot
 from clinical_governance_system import (
+    GovernanceStatus,
     build_single_hospital_system,
     build_multi_hospital_system,
 )
@@ -186,7 +187,7 @@ class TestGovernanceUnavailable(unittest.TestCase):
         decision = system.process_vitals(crit)
 
         self.assertTrue(decision.escalation_required)
-        self.assertTrue(decision.governance_evaluated)
+        self.assertFalse(decision.governance_evaluated)
         self.assertEqual(decision.action, "escalate_governance_unavailable")
         self.assertIsNone(decision.governance_approved)
         self.assertIsNone(decision.governance_confidence)
@@ -230,6 +231,79 @@ class TestGovernanceUnavailable(unittest.TestCase):
         self.assertTrue(
             any("GOVERNANCE_FAILURE_AUDIT_UNAVAILABLE" in v for v in decision.governance_violations)
         )
+
+    def test_unavailable_governance_alerts_a_human_and_names_its_status(self):
+        alerts = []
+        system = build_single_hospital_system()
+        system.alert_human = alerts.append
+
+        def _boom(_request):
+            raise RuntimeError("simulated PERCEIVE failure")
+
+        system.perceive.evaluate_request = _boom
+        crit = VitalsSnapshot("P1", datetime.now(timezone.utc), 168, 83.0, 46, 39.5,
+                              context={"age_months": 12, "force_heavy": True})
+        decision = system.process_vitals(crit)
+
+        self.assertEqual(decision.governance_status, GovernanceStatus.UNAVAILABLE)
+        self.assertEqual(decision.human_alert, "delivered")
+        self.assertEqual(len(alerts), 1)
+        self.assertIs(alerts[0], decision)
+        self.assertEqual(decision.to_dict()["governance_status"], "unavailable")
+
+    def test_alert_channel_failure_is_recorded_and_never_suppresses_the_escalation(self):
+        system = build_single_hospital_system()
+
+        def _pager_down(_decision):
+            raise ConnectionError("pager unreachable")
+
+        def _boom(_request):
+            raise RuntimeError("simulated PERCEIVE failure")
+
+        system.alert_human = _pager_down
+        system.perceive.evaluate_request = _boom
+        crit = VitalsSnapshot("P1", datetime.now(timezone.utc), 168, 83.0, 46, 39.5,
+                              context={"age_months": 12, "force_heavy": True})
+        with self.assertLogs("CLINICAL_GOVERNANCE", level="CRITICAL"):
+            decision = system.process_vitals(crit)
+
+        self.assertEqual(decision.action, "escalate_governance_unavailable")
+        self.assertEqual(decision.human_alert, "failed")
+        self.assertTrue(any("HUMAN_ALERT_FAILED" in v for v in decision.governance_violations))
+        self.assertIsNone(decision.governance_approved)
+
+    def test_no_alert_channel_is_loud_and_visible_on_the_decision(self):
+        system = build_single_hospital_system()
+
+        def _boom(_request):
+            raise RuntimeError("simulated PERCEIVE failure")
+
+        system.perceive.evaluate_request = _boom
+        crit = VitalsSnapshot("P1", datetime.now(timezone.utc), 168, 83.0, 46, 39.5,
+                              context={"age_months": 12, "force_heavy": True})
+        with self.assertLogs("CLINICAL_GOVERNANCE", level="CRITICAL"):
+            decision = system.process_vitals(crit)
+
+        self.assertEqual(decision.governance_status, GovernanceStatus.UNAVAILABLE)
+        self.assertEqual(decision.human_alert, "no_channel")
+
+    def test_status_is_named_on_every_normal_path_and_no_alert_fires(self):
+        alerts = []
+        system = build_single_hospital_system()
+        system.alert_human = alerts.append
+        calm = vitals(pid="P2", hr=110, o2=98.0)
+        d = system.process_vitals(calm)
+        self.assertEqual(d.governance_status, GovernanceStatus.NOT_EVALUATED)
+        crit = VitalsSnapshot("P1", datetime.now(timezone.utc), 168, 83.0, 46, 39.5,
+                              context={"age_months": 12, "force_heavy": True})
+        d = system.process_vitals(crit)
+        self.assertIn(d.governance_status, (GovernanceStatus.APPROVED, GovernanceStatus.BLOCKED))
+        self.assertTrue(d.governance_evaluated)
+        self.assertEqual(
+            d.governance_status == GovernanceStatus.APPROVED, d.governance_approved is True
+        )
+        self.assertIsNone(d.human_alert)
+        self.assertEqual(alerts, [])
 
     def test_non_escalation_never_reaches_governance(self):
         system = build_single_hospital_system()

@@ -23,7 +23,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from enum import Enum
+from typing import Callable, Dict, List, Optional, Any
 
 from observe_consolidated import (
     ObserveClinicalEngine,
@@ -64,6 +65,15 @@ if not logger.handlers:
 # UNIFIED DECISION RECORD
 # ============================================================================
 
+class GovernanceStatus(str, Enum):
+    """What governance said about an escalation. A caller must handle UNAVAILABLE
+    by name: it is not approval and not a block, it means no verdict exists."""
+    NOT_EVALUATED = "not_evaluated"   # no escalation, governance was not asked
+    APPROVED = "approved"
+    BLOCKED = "blocked"
+    UNAVAILABLE = "unavailable"       # governance was asked and failed; a human is alerted
+
+
 @dataclass
 class ClinicalDecision:
     """
@@ -81,7 +91,10 @@ class ClinicalDecision:
     triggered_rules: List[str]
     observe_audit_hash: str
 
-    # Governance layer (PERCEIVE) -- only populated if escalation occurred
+    # Governance layer (PERCEIVE) -- only populated if escalation occurred.
+    # governance_status is the field to read. governance_evaluated is True only when a
+    # verdict exists (approved or blocked), never when governance crashed.
+    governance_status: GovernanceStatus = GovernanceStatus.NOT_EVALUATED
     governance_evaluated: bool = False
     governance_approved: Optional[bool] = None
     governance_confidence: Optional[float] = None
@@ -93,6 +106,12 @@ class ClinicalDecision:
 
     # Final action the system recommends
     action: str = "continue_monitoring"  # or "escalate_approved" / "escalate_blocked"
+                                         # / "escalate_governance_unavailable"
+
+    # Set only when governance was unavailable: "delivered", "failed" or "no_channel".
+    # Anything other than "delivered" means no human was reached by this system and the
+    # caller must put the decision in front of one.
+    human_alert: Optional[str] = None
 
     # WS3 (opt-in): capacity-modulation annotation. None unless a ReserveModulator is
     # attached AND a utilization is supplied to process_vitals.
@@ -131,7 +150,12 @@ class ClinicalGovernanceSystem:
         reserve_modulator: Optional["ReserveModulator"] = None,
         capacity_forecaster: Optional["ErlangCapacityForecaster"] = None,
         accuracy_monitor: Optional["AccuracyMonitor"] = None,
+        alert_human: Optional[Callable[["ClinicalDecision"], None]] = None,
     ):
+        # Called when an escalation cannot be governed (PERCEIVE failed). It must reach a
+        # person (page, dashboard, phone). If it raises, the failure is recorded on the
+        # decision and logged at CRITICAL; the escalation itself is never suppressed.
+        self.alert_human = alert_human
         self.observe = ObserveClinicalEngine()
         # WS2a: enforcement defaults to advisory inside the kernel (baseline unchanged).
         self.perceive = PerceiveGovernanceKernel(dgk_gateway=dgk_gateway, enforcement=enforcement)
@@ -209,7 +233,6 @@ class ClinicalGovernanceSystem:
             return decision
 
         # --- Escalation: route to governance (baseline OR proactive) ---
-        decision.governance_evaluated = True
         request = self._build_governance_request(vitals, verdict)
         try:
             gov_verdict: PolicyVerdict = self.perceive.evaluate_request(request)
@@ -220,6 +243,7 @@ class ClinicalGovernanceSystem:
                 f"GOVERNANCE UNAVAILABLE for {vitals.patient_id}: {e} — "
                 "clinical escalation is preserved without approval"
             )
+            decision.governance_status = GovernanceStatus.UNAVAILABLE
             decision.governance_approved = None
             decision.governance_confidence = None
             decision.governance_violations = [f"GOVERNANCE_UNAVAILABLE: {e}"]
@@ -235,8 +259,13 @@ class ClinicalGovernanceSystem:
                 logger.error(
                     f"GOVERNANCE FAILURE AUDIT unavailable for {vitals.patient_id}: {audit_error}"
                 )
+            self._alert_human(decision)
             return decision
 
+        decision.governance_evaluated = True
+        decision.governance_status = (
+            GovernanceStatus.APPROVED if gov_verdict.approved else GovernanceStatus.BLOCKED
+        )
         decision.governance_approved = gov_verdict.approved
         decision.governance_confidence = gov_verdict.confidence
         decision.governance_violations = gov_verdict.violations
@@ -255,6 +284,26 @@ class ClinicalGovernanceSystem:
             )
 
         return decision
+
+    def _alert_human(self, decision: ClinicalDecision) -> None:
+        """Fail loud: an escalation that governance could not judge goes to a person."""
+        if self.alert_human is None:
+            decision.human_alert = "no_channel"
+            logger.critical(
+                f"HUMAN ALERT NOT SENT for {decision.patient_id}: no alert_human channel is "
+                "configured. The caller must put this decision in front of a clinician."
+            )
+            return
+        try:
+            self.alert_human(decision)
+            decision.human_alert = "delivered"
+        except Exception as alert_error:  # noqa: BLE001 - never suppress the escalation
+            decision.human_alert = "failed"
+            decision.governance_violations.append(f"HUMAN_ALERT_FAILED: {alert_error}")
+            logger.critical(
+                f"HUMAN ALERT FAILED for {decision.patient_id}: {alert_error}. "
+                "The caller must put this decision in front of a clinician."
+            )
 
     # --- WS3 advisory surfaces (opt-in components) ---
 

@@ -11,6 +11,23 @@
   that handled the former escalate_approved_fallback action must handle the new
   unavailable action explicitly; it never represents authorization.
 
+- **Fail loud when governance is unavailable.** `ClinicalDecision` now carries
+  `governance_status` (`not_evaluated`, `approved`, `blocked`, `unavailable`),
+  the field to read instead of the true/false/blank `governance_approved`.
+  `governance_evaluated` is now True only when a verdict exists, so it is False
+  when PERCEIVE crashed (one existing assertion changed to match). A new optional
+  `alert_human` callback on `ClinicalGovernanceSystem` is called for every
+  escalation that governance could not judge. `ClinicalDecision.human_alert`
+  records the result: `delivered`, `failed` (also recorded as
+  `HUMAN_ALERT_FAILED` in the violations and logged at CRITICAL) or
+  `no_channel` (logged at CRITICAL). A failing alert never suppresses the
+  escalation. Callers that read `governance_evaluated` as "governance was
+  attempted" must read `governance_status` instead.
+- The FDA 510(k) checklist cited `test_governance_exception_fails_open_for_escalation`,
+  which #54 renamed, so its test-name check was failing on main. It now cites
+  `test_governance_exception_preserves_escalation_without_approval`, and its
+  "fails open" wording is corrected to match the behaviour.
+
 
 - **OBSERVE partial-assessment fault overlay** (ported from the OBSERVE
   fork, its T2b findings). A reading with a faulted channel is no longer
