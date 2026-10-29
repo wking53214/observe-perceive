@@ -124,6 +124,11 @@ class GovernanceOrchestrator:
         if strict and conservation_kernel is not None and not getattr(conservation_kernel, "has_root_guard", False):
             raise ValueError("the strict profile needs a Conservation Kernel built with a root guard; this one "
                              "would register any root it admits (use profile='advisory' for an unguarded kernel)")
+        # The executor guard is strict's pre-action authorization. Without it the orchestrator can only consume
+        # the context after the action has run. Advisory may still turn it off, for callers that guard elsewhere.
+        if strict and not guard_executor:
+            raise ValueError("the strict profile needs guard_executor=True: the executor guard is what checks the "
+                             "execution context before the action runs (use profile='advisory' if you guard elsewhere)")
         self.require_declared_scope = require_declared_scope or strict
         self.require_vitals = require_vitals or strict
         self.require_attested_event_time = require_attested_event_time or strict

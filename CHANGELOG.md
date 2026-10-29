@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Strict refuses `guard_executor=False`; the two paths are documented.** The strict
+  profile now refuses, at construction, the switch that turns the pre-action executor
+  guard off (advisory may still use it). README gains "Which path is authoritative":
+  the orchestrator is the live path, the CNS governed-decision pipeline is an optional
+  separate check that the orchestrator does not call, plus what strict does and does
+  not guarantee. `cns_governed_decision.py` says the same in its docstring.
 - **An executor cannot declare itself guarded, and strict needs a guarded kernel.**
   The orchestrator used to skip wrapping an executor whose `execution_guard`
   attribute was truthy, so a function carrying that label ran with no ledger check.
