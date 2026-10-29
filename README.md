@@ -106,7 +106,7 @@ From `CLAUDE_ARCHITECTURE_STATE.md` and `docs/audit/COMMERCIAL_RED_TEAM_2026-09-
 | No actor registry / grant lifecycle | Architecture epic, missing. |
 | sentinel_os / GSA-815 | Never imported. Diagrams that show them as chain stages are conceptual. |
 | Optional stages | AUGUR/CCC/fortress/Gateway/GEMS skipped if absent. A clone without extras is a shorter chain. |
-| Root guard | `root_admission.RootAdmission` makes the kernel register a root only after a CNS roster approves that document (needs the `cns` extra). The examples and test fixtures that run without CNS still build the kernel with `allow_unguarded_roots=True`. The approval proof is process-local, so it does not stop hostile code in the same process or mean anything to another process. |
+| Root guard | `root_admission.RootAdmission` makes the kernel register a root only after a CNS roster approves that document (needs the `cns` extra). The two examples (`demo_why.py`, `vertical_slice.py`) build the kernel with this guard, so they need the `cns` extra and stop at the start, naming the install command, without it. Test fixtures for other components still build the kernel with `allow_unguarded_roots=True`. The approval proof is process-local, so it does not stop hostile code in the same process or mean anything to another process. |
 
 Measured (architecture state): 610 passed / 5 skipped with all packs. `pip install -e ".[test,chain,fortress]" && pytest`.
 
@@ -123,7 +123,7 @@ Measured (architecture state): 610 passed / 5 skipped with all packs. `pip insta
 
 Duck-typed sentinel artifact with event time → orchestrator result dict + receipts. Important types: `GovernanceApproval`, `compute_state_commitment`, `ExecutionContext`, `ExecutionLedger`. See `governance_contracts.py` and `execution_guard.issuance_record()`.
 
-`python demo_why.py` — one governed action + deliberate corruption.
+`python demo_why.py`: one governed action + deliberate corruption. It runs the real root guard, so install the `cns` extra first (`pip install '.[cns]'`).
 
 ## 7. Stack Integration Topology
 

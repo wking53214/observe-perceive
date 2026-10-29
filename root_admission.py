@@ -41,6 +41,7 @@ CNS is imported only when `admit` runs. Without it `admit` raises CnsNotInstalle
 
 from __future__ import annotations
 
+import importlib
 import threading
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -55,6 +56,7 @@ __all__ = [
     "SEAT_REQUEST",
     "SEAT_ROOT",
     "SEAT_RULING",
+    "require_root_admission",
 ]
 
 SEAT_REQUEST = "PERCEIVE:perceive_request"
@@ -83,6 +85,23 @@ class Ruling:
 def _cns() -> Any:
     from cns_connector import _cns_gate  # raises CnsNotInstalled, naming the install command
     return _cns_gate()
+
+
+def require_root_admission() -> None:
+    """Raise CnsNotInstalled, naming the install command, unless this environment can run a root admission.
+
+    The guard needs CNS with `DecisionGuard` (v2.2.0 or later) and the kernel's CNS connector. `admit` finds that
+    out too, but only partway through a request, where it reads as a stage crash. An example calls this first, so
+    a missing or too-old CNS is reported before anything runs."""
+    from cns_connector import INSTALL_HINT, CnsNotInstalled
+    _cns()
+    for module in ("cns_composition.decision_guard", "conservation_kernel.cns_connector"):
+        try:
+            importlib.import_module(module)
+        except ImportError as exc:
+            raise CnsNotInstalled(
+                f"root admission needs {module}, which cannot be imported here. Install it with: {INSTALL_HINT}."
+            ) from exc
 
 
 def _judged(identity: str, digest: str) -> Any:
