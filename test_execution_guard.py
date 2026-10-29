@@ -192,7 +192,7 @@ def test_a_replay_after_restart_is_still_a_replay(tmp_path, perceive, kernel):
     with pytest.raises(ExecutionRefusal, match="already consumed"):
         authorize_execution(issued, reopened)
     # And a new orchestrator over the same file cannot reissue the id.
-    second = GovernanceOrchestrator(make_perceive(), ConservationKernel(), ObserveClinicalEngine(), execution_ledger=reopened)
+    second = GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine(), execution_ledger=reopened)
     again, ran = run_chain(second, "g9-again", vitals=False, context={"execution_id": "exec-g9"})
     assert again["status"] == "REJECTED" and again["refused_by"] == "execution_ledger" and ran == []
 

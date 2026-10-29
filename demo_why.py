@@ -110,7 +110,7 @@ def run_scenario(quiet: bool = False):
         screen = False
 
     orchestrator = GovernanceOrchestrator(
-        _perceive(), ConservationKernel(), ObserveClinicalEngine(),
+        _perceive(), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine(),
         simulation_screen=screen,
     )
 

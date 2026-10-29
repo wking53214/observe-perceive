@@ -28,7 +28,7 @@ from observe_consolidated import ObserveClinicalEngine
 
 
 def _fresh():
-    return GovernanceOrchestrator(make_perceive(), ConservationKernel(), ObserveClinicalEngine())
+    return GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine())
 
 
 def test_canonical_scenario_replays_to_the_same_request_commitment_and_execution_id():

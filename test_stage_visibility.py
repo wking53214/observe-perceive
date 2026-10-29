@@ -64,7 +64,7 @@ def _kernel(with_manifest=True, enforcement=None):
 def _orchestrator(conservation=ConservationKernel, perceive=None, **kw):
     return GovernanceOrchestrator(
         perceive or _kernel(),
-        conservation() if conservation else None,
+        conservation(allow_unguarded_roots=True) if conservation else None,
         ObserveClinicalEngine(),
         **kw,
     )

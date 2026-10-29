@@ -32,7 +32,7 @@ def perceive():
 
 @pytest.fixture
 def conservation_kernel():
-    return ConservationKernel()
+    return ConservationKernel(allow_unguarded_roots=True)
 
 
 @pytest.fixture

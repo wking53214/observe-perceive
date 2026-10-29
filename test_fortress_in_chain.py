@@ -60,7 +60,7 @@ def perceive():
 def _orchestrator(perceive, controller=None):
     return GovernanceOrchestrator(
         perceive,
-        ConservationKernel(),
+        ConservationKernel(allow_unguarded_roots=True),
         ObserveClinicalEngine(),
         fortress_controller=controller,
     )

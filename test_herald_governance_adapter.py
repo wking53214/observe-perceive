@@ -71,7 +71,7 @@ def orchestrator():
         manifest_id="herald-seam-manifest", version="1.0.0",
         created_at=datetime.now(timezone.utc), policies={},
     ))
-    return GovernanceOrchestrator(kernel, ConservationKernel(), ObserveClinicalEngine())
+    return GovernanceOrchestrator(kernel, ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine())
 
 
 # ---------------------------------------------------------------------------

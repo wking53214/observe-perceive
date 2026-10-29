@@ -15,7 +15,7 @@ dependencies = [
   # 0.2.0 (root admission, snapshot restore) is required by the boundary
   # this package now holds. 0.3.0 (signed snapshots, PR #5) pinned to the
   # immutable commit it merged as; a tag cannot be pushed from this session.
-  "conservation-kernel @ git+https://github.com/wking53214/conservation_kernel@25145aa0a10130c710dc71899c0da9930cf7d285",
+  "conservation-kernel @ git+https://github.com/wking53214/conservation_kernel@c4a121a18fa160acb6cfe8f95bc00215fa11b583",
 ]
 
 [project.optional-dependencies]
