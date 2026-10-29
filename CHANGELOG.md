@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **A root can be registered only after a roster approves that document.**
+  New `root_admission.py`: `RootAdmission` is the callable a kernel holds as its
+  `root_guard`. It is closed. For one request the adapter asks a CNS roster
+  (PERCEIVE's request and ruling, the kernel's own root admission, and the
+  super gate's same-document check) for a decision; on a go it opens a fresh
+  one-use `DecisionGuard` for that exact document on the calling thread, and
+  closes it again whatever happened. Pass the same object to the kernel
+  (`ConservationKernel(root_guard=admission)`) and to the orchestrator
+  (`root_admission=admission`). A root written straight to that kernel is
+  refused. The roster's PERCEIVE seat says a ruling exists for the document, not
+  that PERCEIVE approved it, because the orchestrator registers the root of a
+  refused request too and that record is kept. Needs the `cns` extra, now pinned
+  to CNS 3ec3ffc (v1.9.0 predates `DecisionGuard`). `allow_unguarded_roots=True`
+  is still used by the examples and test fixtures that run without CNS.
+- The kernel pin is now 7b08c79, the commit on the kernel's main. PR #56 pinned
+  the PR branch head, which squash-merging left off main, and
+  `requirements-demo.txt` still pinned an older kernel, so CI's `cns` job failed.
+  One existing assertion changed with the CNS pin
+  (`test_cns_governed_decision.py::CNS_PIN`).
+
 - PERCEIVE evaluation exceptions are unavailable, not approved. A
   clinical escalation still proceeds, but ClinicalDecision.governance_approved
   remains None, the action is escalate_governance_unavailable, and PERCEIVE

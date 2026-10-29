@@ -1,6 +1,6 @@
 # observe-perceive
 
-**Hub of the governed action stack.** Version `1.3.0`. Python ≥ 3.11. Hard dependency: [`Conservation_Kernel`](https://github.com/wking53214/Conservation_Kernel) `@c4a121a`. Optional extras: Gateway, CCC, AUGUR, GEMS (pinned to last commit that still has `HumanAuthorityGuard`), fortress-kernel.
+**Hub of the governed action stack.** Version `1.3.0`. Python ≥ 3.11. Hard dependency: [`Conservation_Kernel`](https://github.com/wking53214/Conservation_Kernel) `@7b08c79`. Optional extras: Gateway, CCC, AUGUR, GEMS (pinned to last commit that still has `HumanAuthorityGuard`), fortress-kernel.
 
 Pediatric sepsis monitoring is the **reference domain**, not the product boundary.
 
@@ -106,6 +106,7 @@ From `CLAUDE_ARCHITECTURE_STATE.md` and `docs/audit/COMMERCIAL_RED_TEAM_2026-09-
 | No actor registry / grant lifecycle | Architecture epic, missing. |
 | sentinel_os / GSA-815 | Never imported. Diagrams that show them as chain stages are conceptual. |
 | Optional stages | AUGUR/CCC/fortress/Gateway/GEMS skipped if absent. A clone without extras is a shorter chain. |
+| Root guard | `root_admission.RootAdmission` makes the kernel register a root only after a CNS roster approves that document (needs the `cns` extra). The examples and test fixtures that run without CNS still build the kernel with `allow_unguarded_roots=True`. The approval proof is process-local, so it does not stop hostile code in the same process or mean anything to another process. |
 
 Measured (architecture state): 610 passed / 5 skipped with all packs. `pip install -e ".[test,chain,fortress]" && pytest`.
 
@@ -133,7 +134,7 @@ Duck-typed sentinel artifact with event time → orchestrator result dict + rece
                     ├── GEMS @f70da70 (opt; pinned, see pyproject)
                     └── fortress-kernel (opt, extra `fortress`)
 observe-perceive ───┤
-                    ├── Conservation_Kernel @c4a121a   HARD
+                    ├── Conservation_Kernel @7b08c79   HARD
                     ├── observe_consolidated + perceive_consolidated  (in-tree)
                     └── execution_guard ledger (JSONL)
                          │
@@ -148,7 +149,7 @@ Reports: `docs/closure/ARCHITECTURE_CLOSURE_REPORT.md`, `GOVERNANCE_BYPASS_REPOR
 
 What it is not. It is a verdict-combining layer. It does not replace `GovernanceOrchestrator`, which stays hard-wired and unchanged, and it does not read the orchestrator's ledger or receipts. It only works with libraries that ship a CNS connector (a class that satisfies `cns.gate.Gate`). It makes no gate's judgment better: a library's PASS is "no objection", and the layer says nothing about whether the result is correct.
 
-What it needs. CNS, a private package, through the optional extra `cns` (pinned to the tag v1.9.0). This repository imports CNS only when a pipeline is built or run. Without CNS, everything else here works as before and building a pipeline raises `CnsNotInstalled` with the install command. No runtime dependency was added.
+What it needs. CNS, a private package, through the optional extra `cns` (pinned to CNS commit 3ec3ffc, which has `DecisionGuard`; `requirements-demo.txt` stays on the tag v1.9.0 because the other libraries' `[cns]` extras pin it). This repository imports CNS only when a pipeline is built or run. Without CNS, everything else here works as before and building a pipeline raises `CnsNotInstalled` with the install command. No runtime dependency was added.
 
 Run the demo. It builds one pipeline from the real CNS gates of five libraries (governance_gateway, ccc and augur before the work; dit and conservation_kernel on the result) and a stub work function, then runs eleven scenarios and prints every verdict, whether the work ran, and the final decision:
 

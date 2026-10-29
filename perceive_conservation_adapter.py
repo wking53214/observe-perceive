@@ -6,6 +6,7 @@ Ensures all governance decisions pass through conservation boundary.
 """
 
 from governance_contracts import GovernanceDecision, ConservationDecision
+from root_admission import RootNotAdmitted
 from datetime import datetime, timezone
 import hashlib
 
@@ -57,9 +58,15 @@ class ConservationRefusal(Exception):
 class PerceiveConservationAdapter:
     """Submits PERCEIVE verdicts to Conservation Kernel."""
 
-    def __init__(self, kernel=None):  # ConservationKernel (optional for testing)
-        """Initialize with Conservation Kernel instance."""
+    def __init__(self, kernel=None, root_admission=None):  # ConservationKernel (optional for testing)
+        """Initialize with Conservation Kernel instance.
+
+        `root_admission` is the `root_admission.RootAdmission` the kernel was built with as its
+        `root_guard`. When given, a root is registered only after a CNS roster approves that document;
+        without it a guarded kernel refuses every root and an unguarded one registers whatever it is handed.
+        """
         self.kernel = kernel
+        self.root_admission = root_admission
 
     # --- the spine's vocabulary, mapped onto the kernel's ------------------
     #
@@ -312,6 +319,14 @@ PERCEIVE Governance Decision:
         # looked and said no. Re-raised as ConservationRefusal so the
         # orchestrator records them as such, not as a stage crash.
         try:
+            if self.root_admission is not None:
+                from root_admission import Ruling
+                self.root_admission.admit(self.kernel, Ruling(
+                    decision=governance_decision,
+                    request_id=getattr(request, "request_id", "") or "",
+                    artifact_id=input_artifact_id,
+                    artifact_hash=input_artifact_hash,
+                ), input_artifact)
             self.kernel.register_root(input_artifact)
             verification_result = self.kernel.submit(
                 input_artifact,
@@ -327,6 +342,11 @@ PERCEIVE Governance Decision:
             # was reached (for example, human-adopted output with no
             # authorization). A refusal, not a crash.
             raise ConservationRefusal(f"Conservation Kernel refused the artifact: {e}") from e
+        except RootNotAdmitted as e:
+            raise ConservationRefusal(f"Conservation Kernel root admission refused: {e}") from e
+        finally:
+            if self.root_admission is not None:
+                self.root_admission.close()
 
         # If Kernel rejects, fail closed
         if not verification_result.accepted:

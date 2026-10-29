@@ -26,4 +26,4 @@ governance-gateway[cns] @ git+https://github.com/wking53214/governance_gateway.g
 cognitive-continuity-constitution[cns] @ git+https://github.com/wking53214/ccc.git@14a76381b1cbea164efabf74de76d1d11224e1cf
 augur @ git+https://github.com/wking53214/augur.git@1fc76118f75024be5ebebed227c2d9a4530c78b7
 dit[cns] @ git+https://github.com/wking53214/dit.git@5763f1acc1c65dde575bbc03ab980d623e6f0ad5
-conservation-kernel[cns] @ git+https://github.com/wking53214/conservation_kernel.git@97ed6f42010ac107591f2ad67551bd03b9929e54
+conservation-kernel[cns] @ git+https://github.com/wking53214/conservation_kernel.git@7b08c79db1b36c97c0de312165f8002b19baf6ae
