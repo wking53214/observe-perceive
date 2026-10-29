@@ -46,12 +46,12 @@ chain = [
 fortress = ["fortress-kernel @ git+https://github.com/wking53214/fortress-kernel@4105ccb5fec2806f3f1ab5aeb0f88151e6a6fdc0"]
 # Optional: lets cns_governed_decision combine gates from any library under the
 # cns.gate contract. Nothing imports CNS unless that module's pipeline is used.
-# Pinned to the commit CNS main reached after PR #46 (3ec3ffc). v1.9.0 predates
+# Pinned to the tag v2.2.0 (ce6bd05), the first CNS release with DecisionGuard. v1.9.0 predates
 # DecisionGuard and the issuance proof on Decision, which root_admission needs;
 # there is no tag at or after that commit, and a tag cannot be pushed from this
 # session. Not a runtime dependency: a kernel built with a root guard needs it,
 # and one built with allow_unguarded_roots=True does not.
-cns = ["cns @ git+https://github.com/wking53214/CNS.git@3ec3ffc53c50b02bbb37b9f5c911de9a80f9e824"]
+cns = ["cns @ git+https://github.com/wking53214/CNS.git@v2.2.0"]
 test = ["pytest>=8", "hypothesis", "freezegun"]
 
 [tool.setuptools]
