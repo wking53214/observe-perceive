@@ -102,9 +102,12 @@ jobs:
         # root_admission needs CNS 3ec3ffc (DecisionGuard and the issuance proof
         # on Decision). The libraries in requirements-demo.txt pin CNS v1.9.0 in
         # their [cns] extras, which predates both, so one resolver pass cannot
-        # take the newer CNS. --no-deps swaps only this package. Remove this step
+        # take the newer CNS. --no-deps swaps only this package. --force-reinstall
+        # is required: both builds say version 1.9.0, so without it pip keeps the
+        # v1.9.0 package it already has and reports success (the step passed and
+        # the new tests then failed to import DecisionGuard). Remove this step
         # when CNS has a tag at or after 3ec3ffc and those extras follow it.
-        run: python -m pip install --no-deps "cns @ git+https://github.com/wking53214/CNS.git@3ec3ffc53c50b02bbb37b9f5c911de9a80f9e824"
+        run: python -m pip install --no-deps --force-reinstall "cns @ git+https://github.com/wking53214/CNS.git@3ec3ffc53c50b02bbb37b9f5c911de9a80f9e824"
       - name: Test with CNS and the demo libraries required
         # AUGUR warns on stderr when AUGUR_AUDIT_KEY is unset, and the demo's
         # script test requires empty stderr. The key is a fresh random value
