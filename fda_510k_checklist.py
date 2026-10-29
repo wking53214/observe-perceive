@@ -80,10 +80,10 @@ CHECKLIST = {
         "II.3": {
             "requirement": "Failure modes & mitigation (what if network down, sensor fail, governance crash?)",
             "status": "✅",
-            "evidence": "OBSERVE: data-integrity faults (validate_vitals, sanitize_context); PERCEIVE: governance failure fails open for escalation (clinical_governance_system.py); RED_TEAM_REPORT.md",
-            "tests": ["test_clinical_governance_system.py::test_governance_exception_fails_open_for_escalation", "test_context_sanitization.py"],
+            "evidence": "OBSERVE: data-integrity faults (validate_vitals, sanitize_context); PERCEIVE: a governance failure preserves the escalation without approval, status unavailable, and alerts a human (clinical_governance_system.py); RED_TEAM_REPORT.md",
+            "tests": ["test_clinical_governance_system.py::test_governance_exception_preserves_escalation_without_approval", "test_context_sanitization.py"],
             "sign_off": "Risk management + FMEA lead",
-            "notes": "Single-point failures: PERCEIVE crash (fail-open to approval). Multi-point: network + sensor + governance (documented risk).",
+            "notes": "Single-point failures: PERCEIVE crash (escalation preserved, never approved, human alerted). Multi-point: network + sensor + governance (documented risk).",
         },
         "II.4": {
             "requirement": "Determinism & reproducibility (FDA expects bit-for-bit reproducibility on identical inputs)",
@@ -148,8 +148,8 @@ CHECKLIST = {
         "IV.2": {
             "requirement": "Integration testing (end-to-end OBSERVE → PERCEIVE → audit)",
             "status": "✅",
-            "evidence": "test_integration_consolidated.py (6 tests) and test_governance_orchestrator.py (end-to-end chain, needs the sibling checkouts CI provides); determinism verified; governance fail-open tested",
-            "tests": ["test_integration_consolidated.py", "test_governance_orchestrator.py::test_complete_approval_flow", "test_clinical_governance_system.py::test_governance_exception_fails_open_for_escalation"],
+            "evidence": "test_integration_consolidated.py (6 tests) and test_governance_orchestrator.py (end-to-end chain, needs the sibling checkouts CI provides); determinism verified; governance failure tested (escalation preserved without approval)",
+            "tests": ["test_integration_consolidated.py", "test_governance_orchestrator.py::test_complete_approval_flow", "test_clinical_governance_system.py::test_governance_exception_preserves_escalation_without_approval"],
             "sign_off": "QA",
             "notes": "Tests cover single-node path fully. Multi-node DGK needs separate integration tests (Phase 2).",
         },

@@ -23,6 +23,10 @@
   `no_channel` (logged at CRITICAL). A failing alert never suppresses the
   escalation. Callers that read `governance_evaluated` as "governance was
   attempted" must read `governance_status` instead.
+- The FDA 510(k) checklist cited `test_governance_exception_fails_open_for_escalation`,
+  which #54 renamed, so its test-name check was failing on main. It now cites
+  `test_governance_exception_preserves_escalation_without_approval`, and its
+  "fails open" wording is corrected to match the behaviour.
 
 
 - **OBSERVE partial-assessment fault overlay** (ported from the OBSERVE
