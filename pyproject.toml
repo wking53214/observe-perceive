@@ -15,10 +15,10 @@ dependencies = [
   # 0.2.0 (root admission, snapshot restore) is required by the boundary
   # this package now holds. 0.3.0 (signed snapshots, PR #5) pinned to the
   # immutable commit it merged as; a tag cannot be pushed from this session.
-  # 7b08c79 is Conservation_Kernel main after PR #20 (a kernel needs a root guard
+  # 4e7c0d9 is Conservation_Kernel main after PR #21 (a kernel needs a root guard
   # or an explicit allow_unguarded_roots). PR #56 pinned that PR's branch head,
   # which squash-merging left off main; this is the commit that is.
-  "conservation-kernel @ git+https://github.com/wking53214/conservation_kernel@7b08c79db1b36c97c0de312165f8002b19baf6ae",
+  "conservation-kernel @ git+https://github.com/wking53214/conservation_kernel@4e7c0d9fbf6a40fd1f9a81896a7e2db00a63c47a",
 ]
 
 [project.optional-dependencies]
