@@ -69,11 +69,16 @@ _CHANNEL_CONTEXT_KEYS: Dict[str, Tuple[str, ...]] = {
 #: back to the default.
 ENGINE_GATE_WIDENED_PROVISIONAL = "widened_provisional"
 
+#: The narrower rule OBSERVE's own engine has used: the behavioral engine runs
+#: only for oxygen below 92, or heart rate above 140 or below 90. For a
+#: deployment that has not had a pediatrician sign off the widened rule.
+ENGINE_GATE_CONSERVATIVE_LEGACY = "conservative_legacy"
+
 #: The gate every existing caller gets. Its behaviour, and so every fingerprint
 #: made under it, is unchanged.
 DEFAULT_ENGINE_GATE = ENGINE_GATE_WIDENED_PROVISIONAL
 
-ENGINE_GATES = (ENGINE_GATE_WIDENED_PROVISIONAL,)
+ENGINE_GATES = (ENGINE_GATE_WIDENED_PROVISIONAL, ENGINE_GATE_CONSERVATIVE_LEGACY)
 
 
 class PediatricCassette:
@@ -143,9 +148,12 @@ class PediatricCassette:
         # Behavioral/syndrome analysis must run whenever ANY syndrome could
         # fire, not only on O2/HR. Septic shock keys on RR>35 + fever;
         # respiratory distress on RR>45. Thresholds match the lowest syndrome
-        # cutoffs. PROVISIONAL -- pending pediatrician sign-off.
+        # cutoffs. PROVISIONAL -- pending pediatrician sign-off. The widened
+        # clause (RR and temperature) applies only under the widened_provisional
+        # gate; conservative_legacy keeps the O2/HR rule alone.
         if (obs.oxygen_saturation < 92.0 or obs.heart_rate > 140 or obs.heart_rate < 90
-                or obs.respiratory_rate > 35 or obs.temperature > 38.5):
+                or (self.engine_gate == ENGINE_GATE_WIDENED_PROVISIONAL
+                    and (obs.respiratory_rate > 35 or obs.temperature > 38.5))):
             engines.append("behavioral")
 
         if (recent_entropy > 0.6 or obs.context.get("force_heavy")

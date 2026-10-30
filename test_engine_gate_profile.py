@@ -30,6 +30,7 @@ from types import SimpleNamespace
 from observe_consolidated import PARAMETER_SET_VERSION, ObserveClinicalEngine, VitalsSnapshot
 from pediatric_cassette import (
     DEFAULT_ENGINE_GATE,
+    ENGINE_GATE_CONSERVATIVE_LEGACY,
     ENGINE_GATE_WIDENED_PROVISIONAL,
     ENGINE_GATES,
     PediatricCassette,
@@ -76,6 +77,39 @@ def reference_select_engines_main(obs, recent_entropy):
     return ordered
 
 
+def reference_select_engines_observe(obs, recent_entropy):
+    """A frozen copy of the engine selection in OBSERVE's own observe_consolidated.py
+    (OBSERVE main a4de294, ObserveClinicalEngine.select_engines). The only difference
+    from the upstream rule is the behavioral clause, which has no RR or temperature
+    term. It is the oracle the conservative_legacy profile is held to."""
+    engines = ["heuristic"]
+
+    if recent_entropy > 0.6 or obs.context.get("force_heavy"):
+        engines += ["bayesian", "trajectory", "drift"]
+
+    if "previous_o2" in obs.context or "previous_hr" in obs.context:
+        if "trajectory" not in engines:
+            engines.append("trajectory")
+
+    if obs.context.get("recent_o2_readings"):
+        engines.append("adversarial")
+
+    if obs.oxygen_saturation < 92.0 or obs.heart_rate > 140 or obs.heart_rate < 90:
+        engines.append("behavioral")
+
+    if (recent_entropy > 0.6 or obs.context.get("force_heavy")
+            or _has_physiological_telemetry_reference(obs)):
+        engines.append("physiological_reserve")
+
+    seen = set()
+    ordered = []
+    for e in engines:
+        if e not in seen:
+            seen.add(e)
+            ordered.append(e)
+    return ordered
+
+
 def _obs(hr, o2, rr, temp, **ctx):
     context = {"age_months": 24}
     context.update(ctx)
@@ -93,6 +127,11 @@ _RR = (10, 24, 34.9, 35, 35.1, 45, 60)
 _TEMP = (35.0, 37.0, 38.4, 38.5, 38.6, 40.0, 42.0)
 _CONTEXTS = ({}, {"force_heavy": True}, {"previous_o2": 97.0}, {"recent_o2_readings": [97, 96]})
 _ENTROPY = (0.0, 0.7)
+
+# How many of the grid's points the two profiles disagree on. The grid is
+# synthetic and dense at the cutoffs, so this is the size of the choice, not a
+# clinical rate.
+_EXPECTED_GRID_DISAGREEMENT = (5280, 21168)
 
 
 def _grid():
@@ -212,6 +251,50 @@ class UnknownGateRaises(unittest.TestCase):
             PediatricCassette(engine_gate="nope")
         for name in ENGINE_GATES:
             self.assertIn(name, str(caught.exception))
+
+
+class ConservativeLegacyGate(unittest.TestCase):
+    def test_it_is_a_named_choice(self):
+        self.assertIn(ENGINE_GATE_CONSERVATIVE_LEGACY, ENGINE_GATES)
+        self.assertEqual(PediatricCassette(ENGINE_GATE_CONSERVATIVE_LEGACY).engine_gate, "conservative_legacy")
+        self.assertNotEqual(ENGINE_GATE_CONSERVATIVE_LEGACY, DEFAULT_ENGINE_GATE)
+
+    def test_legacy_selection_equals_OBSERVEs_own_rule_over_the_whole_grid(self):
+        cassette = PediatricCassette(engine_gate=ENGINE_GATE_CONSERVATIVE_LEGACY)
+        checked = 0
+        for obs, entropy in _grid():
+            self.assertEqual(
+                cassette.select_engines(obs, entropy), reference_select_engines_observe(obs, entropy),
+                msg=f"{obs.heart_rate=} {obs.oxygen_saturation=} {obs.respiratory_rate=} "
+                    f"{obs.temperature=} {obs.context=} {entropy=}")
+            checked += 1
+        self.assertGreater(checked, 10000)
+
+    def test_the_two_profiles_differ_only_where_rr_or_temperature_alone_would_pull_the_engine_in(self):
+        widened = PediatricCassette(ENGINE_GATE_WIDENED_PROVISIONAL)
+        legacy = PediatricCassette(ENGINE_GATE_CONSERVATIVE_LEGACY)
+        differing = total = 0
+        for obs, entropy in _grid():
+            total += 1
+            w, g = widened.select_engines(obs, entropy), legacy.select_engines(obs, entropy)
+            if w == g:
+                continue
+            differing += 1
+            # The wider rule only ever ADDS the behavioral engine, and only for a
+            # reading with normal O2 and heart rate but a high RR or temperature.
+            self.assertEqual([e for e in w if e != "behavioral"], g)
+            self.assertIn("behavioral", w)
+            self.assertNotIn("behavioral", g)
+            self.assertTrue(obs.oxygen_saturation >= 92.0 and 90 <= obs.heart_rate <= 140)
+            self.assertTrue(obs.respiratory_rate > 35 or obs.temperature > 38.5)
+        self.assertGreater(differing, 0)
+        self.assertLess(differing, total)
+        # Recorded so a reader can see the size of the choice: how many grid points move.
+        self.assertEqual((differing, total), _EXPECTED_GRID_DISAGREEMENT)
+
+    def test_unknown_names_still_raise_with_two_profiles_defined(self):
+        with self.assertRaises(ValueError):
+            PediatricCassette(engine_gate="widened_provisional ")
 
 
 if __name__ == "__main__":
