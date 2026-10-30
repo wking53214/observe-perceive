@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **The behavioral-engine gate is a named, validated setting.** PR-2a of OBSERVE's
+  `RECONCILE_UPSTREAM_PLAN.md`, the upstream half of the owner's decision to keep OBSERVE's
+  narrower clinical rule until a pediatrician signs off upstream's wider one.
+  `PediatricCassette(engine_gate=...)` takes `widened_provisional` (the default: the
+  existing rule, which also runs the behavioral engine for a respiratory rate above 35 or a
+  temperature above 38.5, and is **provisional, pending pediatrician sign-off**) or
+  `conservative_legacy` (the behavioral engine only for oxygen below 92, or heart rate above
+  140 or below 90, exactly OBSERVE's rule). An unknown name raises and never falls back. The
+  core records a cassette's `identity_extras` under the cassette identity in the stored
+  entry; the cassette supplies `engine_gate` there **only** for a non-default gate, so a
+  decision made under `conservative_legacy` is distinguishable in the audit entry and in the
+  fingerprint and cannot be relabelled as default, while every default entry keeps its exact
+  shape and hash (no new parameter-set era, no change to any existing fingerprint). The two
+  profiles disagree on 5,280 of 21,168 points of a dense synthetic grid, all of them
+  readings with normal oxygen and heart rate but a high respiratory rate or temperature.
+  New tests in `test_engine_gate_profile.py`; no existing test changed.
 - **Strict refuses `guard_executor=False`; the two paths are documented.** The strict
   profile now refuses, at construction, the switch that turns the pre-action executor
   guard off (advisory may still use it). README gains "Which path is authoritative":
