@@ -63,11 +63,31 @@ _CHANNEL_CONTEXT_KEYS: Dict[str, Tuple[str, ...]] = {
 }
 
 
+#: How `select_engines` decides to run the behavioral (syndrome) engine.
+#: The profile is chosen once, where the cassette is built:
+#: `PediatricCassette(engine_gate=...)`. An unknown name raises; it never falls
+#: back to the default.
+ENGINE_GATE_WIDENED_PROVISIONAL = "widened_provisional"
+
+#: The gate every existing caller gets. Its behaviour, and so every fingerprint
+#: made under it, is unchanged.
+DEFAULT_ENGINE_GATE = ENGINE_GATE_WIDENED_PROVISIONAL
+
+ENGINE_GATES = (ENGINE_GATE_WIDENED_PROVISIONAL,)
+
+
 class PediatricCassette:
     """Pediatric deterioration: the original domain, behind the seam."""
 
     name = "pediatric_deterioration"
     version = "1.1.0"  # 1.1.0: supplies mask_faults
+
+    def __init__(self, engine_gate: str = DEFAULT_ENGINE_GATE) -> None:
+        if engine_gate not in ENGINE_GATES:
+            raise ValueError(
+                f"unknown engine_gate {engine_gate!r}; expected one of {sorted(ENGINE_GATES)}"
+            )
+        self.engine_gate = engine_gate
 
     # -- identity -----------------------------------------------------
     def subject_id(self, obs: Any) -> str:
