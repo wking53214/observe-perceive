@@ -63,11 +63,45 @@ _CHANNEL_CONTEXT_KEYS: Dict[str, Tuple[str, ...]] = {
 }
 
 
+#: How `select_engines` decides to run the behavioral (syndrome) engine.
+#: The profile is chosen once, where the cassette is built:
+#: `PediatricCassette(engine_gate=...)`. An unknown name raises; it never falls
+#: back to the default.
+ENGINE_GATE_WIDENED_PROVISIONAL = "widened_provisional"
+
+#: The narrower rule OBSERVE's own engine has used: the behavioral engine runs
+#: only for oxygen below 92, or heart rate above 140 or below 90. For a
+#: deployment that has not had a pediatrician sign off the widened rule.
+ENGINE_GATE_CONSERVATIVE_LEGACY = "conservative_legacy"
+
+#: The gate every existing caller gets. Its behaviour, and so every fingerprint
+#: made under it, is unchanged.
+DEFAULT_ENGINE_GATE = ENGINE_GATE_WIDENED_PROVISIONAL
+
+ENGINE_GATES = (ENGINE_GATE_WIDENED_PROVISIONAL, ENGINE_GATE_CONSERVATIVE_LEGACY)
+
+
 class PediatricCassette:
     """Pediatric deterioration: the original domain, behind the seam."""
 
     name = "pediatric_deterioration"
     version = "1.1.0"  # 1.1.0: supplies mask_faults
+
+    def __init__(self, engine_gate: str = DEFAULT_ENGINE_GATE) -> None:
+        if engine_gate not in ENGINE_GATES:
+            raise ValueError(
+                f"unknown engine_gate {engine_gate!r}; expected one of {sorted(ENGINE_GATES)}"
+            )
+        self.engine_gate = engine_gate
+
+    @property
+    def identity_extras(self) -> Dict[str, str]:
+        """What the core records under this cassette's identity beyond name and
+        version. Empty for the default gate, so default entries and fingerprints
+        are exactly what they were; the gate's name for any other."""
+        if self.engine_gate == DEFAULT_ENGINE_GATE:
+            return {}
+        return {"engine_gate": self.engine_gate}
 
     # -- identity -----------------------------------------------------
     def subject_id(self, obs: Any) -> str:
@@ -123,9 +157,12 @@ class PediatricCassette:
         # Behavioral/syndrome analysis must run whenever ANY syndrome could
         # fire, not only on O2/HR. Septic shock keys on RR>35 + fever;
         # respiratory distress on RR>45. Thresholds match the lowest syndrome
-        # cutoffs. PROVISIONAL -- pending pediatrician sign-off.
+        # cutoffs. PROVISIONAL -- pending pediatrician sign-off. The widened
+        # clause (RR and temperature) applies only under the widened_provisional
+        # gate; conservative_legacy keeps the O2/HR rule alone.
         if (obs.oxygen_saturation < 92.0 or obs.heart_rate > 140 or obs.heart_rate < 90
-                or obs.respiratory_rate > 35 or obs.temperature > 38.5):
+                or (self.engine_gate == ENGINE_GATE_WIDENED_PROVISIONAL
+                    and (obs.respiratory_rate > 35 or obs.temperature > 38.5))):
             engines.append("behavioral")
 
         if (recent_entropy > 0.6 or obs.context.get("force_heavy")
