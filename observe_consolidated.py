@@ -1360,11 +1360,22 @@ class ObserveClinicalEngine:
 
     def _provenance(self) -> Dict[str, Any]:
         """What produced a decision besides its inputs: the core's calibration
-        version and the cassette's identity. Part of the fingerprinted payload."""
+        version and the cassette's identity. Part of the fingerprinted payload.
+
+        A cassette that was built with a non-default setting may expose
+        `identity_extras` (a dict); it is recorded under the cassette identity so a
+        decision made under that setting is distinguishable in the stored entry and
+        in the fingerprint. A cassette with no extras, or none at all, adds nothing,
+        so every existing entry keeps its exact shape and hash."""
+        identity = {"name": str(getattr(self._cassette, "name", "")),
+                    "version": str(getattr(self._cassette, "version", ""))}
+        extras = getattr(self._cassette, "identity_extras", None)
+        if isinstance(extras, dict):
+            for key in sorted(extras):
+                identity[str(key)] = str(extras[key])
         return {
             "parameter_set_version": PARAMETER_SET_VERSION,
-            "cassette": {"name": str(getattr(self._cassette, "name", "")),
-                         "version": str(getattr(self._cassette, "version", ""))},
+            "cassette": identity,
         }
 
     def _commit_state(self, subject: str, decision_fingerprint: str) -> Tuple[str, str]:

@@ -94,6 +94,15 @@ class PediatricCassette:
             )
         self.engine_gate = engine_gate
 
+    @property
+    def identity_extras(self) -> Dict[str, str]:
+        """What the core records under this cassette's identity beyond name and
+        version. Empty for the default gate, so default entries and fingerprints
+        are exactly what they were; the gate's name for any other."""
+        if self.engine_gate == DEFAULT_ENGINE_GATE:
+            return {}
+        return {"engine_gate": self.engine_gate}
+
     # -- identity -----------------------------------------------------
     def subject_id(self, obs: Any) -> str:
         return obs.patient_id

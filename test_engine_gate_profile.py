@@ -27,7 +27,12 @@ import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from observe_consolidated import PARAMETER_SET_VERSION, ObserveClinicalEngine, VitalsSnapshot
+from observe_consolidated import (
+    PARAMETER_SET_VERSION,
+    ObserveClinicalEngine,
+    VitalsSnapshot,
+    decision_fingerprint,
+)
 from pediatric_cassette import (
     DEFAULT_ENGINE_GATE,
     ENGINE_GATE_CONSERVATIVE_LEGACY,
@@ -295,6 +300,99 @@ class ConservativeLegacyGate(unittest.TestCase):
     def test_unknown_names_still_raise_with_two_profiles_defined(self):
         with self.assertRaises(ValueError):
             PediatricCassette(engine_gate="widened_provisional ")
+
+
+_PROVENANCE_KEYS = ("decision_fingerprint", "predecessor_state_commitment", "state_commitment")
+_NAN = float("nan")
+_IDENTITY = {"name": "pediatric_deterioration", "version": "1.1.0"}
+
+
+def _decide(gate, pid, hr, o2, rr, temp, **ctx):
+    """One reading on a fresh engine built with the named gate; returns (verdict, stored entry data)."""
+    cassette = PediatricCassette() if gate is None else PediatricCassette(engine_gate=gate)
+    engine = ObserveClinicalEngine(cassette=cassette)
+    context = {"age_months": 24}
+    context.update(ctx)
+    verdict = engine.evaluate(VitalsSnapshot(pid, T0, hr, o2, rr, temp, context=context))
+    return verdict, engine.audit_ledger.entries[-1]["data"]
+
+
+def _replay(data, **overrides):
+    """Recompute the fingerprint from a stored entry, the way a verifier would."""
+    payload = {k: v for k, v in data.items() if k not in _PROVENANCE_KEYS}
+    payload.update(overrides)
+    return decision_fingerprint(payload)
+
+
+_READINGS = (
+    ("calm", dict(hr=110, o2=98.0, rr=24, temp=37.0)),
+    ("rr_only", dict(hr=110, o2=98.0, rr=40, temp=37.0)),
+    ("temp_only", dict(hr=110, o2=98.0, rr=24, temp=39.0)),
+    ("critical", dict(hr=168, o2=83.0, rr=46, temp=39.5, force_heavy=True)),
+    ("nothing_assessable", dict(hr=_NAN, o2=_NAN, rr=_NAN, temp=_NAN)),
+)
+
+
+class NonDefaultGateIsBoundIntoProvenance(unittest.TestCase):
+    def test_a_default_entry_has_exactly_the_old_identity(self):
+        for label, kw in _READINGS:
+            _, data = _decide(None, "P-PROV-" + label, **kw)
+            self.assertEqual(data["cassette"], _IDENTITY, msg=label)
+            self.assertNotIn("engine_gate", data["cassette"], msg=label)
+
+    def test_a_legacy_entry_names_its_gate_in_the_stored_identity(self):
+        for label, kw in _READINGS:
+            _, data = _decide(ENGINE_GATE_CONSERVATIVE_LEGACY, "P-PROV-" + label, **kw)
+            self.assertEqual(data["cassette"], dict(_IDENTITY, engine_gate="conservative_legacy"), msg=label)
+
+    def test_the_fingerprint_differs_even_when_both_profiles_select_the_same_engines(self):
+        v_default, _ = _decide(None, "P-SAME-ENGINES", hr=110, o2=98.0, rr=24, temp=37.0)
+        v_legacy, _ = _decide(ENGINE_GATE_CONSERVATIVE_LEGACY, "P-SAME-ENGINES", hr=110, o2=98.0, rr=24, temp=37.0)
+        self.assertEqual(v_default.active_engines, v_legacy.active_engines)
+        self.assertNotEqual(v_default.decision_fingerprint, v_legacy.decision_fingerprint)
+
+    def test_the_fingerprint_differs_for_every_reading_and_the_outcome_differs_where_the_rule_does(self):
+        for label, kw in _READINGS:
+            v_default, _ = _decide(None, "P-DIFF-" + label, **kw)
+            v_legacy, _ = _decide(ENGINE_GATE_CONSERVATIVE_LEGACY, "P-DIFF-" + label, **kw)
+            self.assertNotEqual(v_default.decision_fingerprint, v_legacy.decision_fingerprint, msg=label)
+        d, _ = _decide(None, "P-RR", hr=110, o2=98.0, rr=40, temp=37.0)
+        g, _ = _decide(ENGINE_GATE_CONSERVATIVE_LEGACY, "P-RR", hr=110, o2=98.0, rr=40, temp=37.0)
+        self.assertIn("behavioral", d.active_engines)
+        self.assertNotIn("behavioral", g.active_engines)
+
+    def test_a_legacy_entry_replays_to_its_stored_fingerprint(self):
+        for label, kw in _READINGS:
+            verdict, data = _decide(ENGINE_GATE_CONSERVATIVE_LEGACY, "P-REPLAY-" + label, **kw)
+            self.assertEqual(_replay(data), verdict.decision_fingerprint, msg=label)
+
+    def test_a_legacy_entry_cannot_be_relabelled_as_default(self):
+        for label, kw in _READINGS:
+            verdict, data = _decide(ENGINE_GATE_CONSERVATIVE_LEGACY, "P-RELABEL-" + label, **kw)
+            relabelled = _replay(data, cassette=dict(_IDENTITY))
+            self.assertNotEqual(relabelled, verdict.decision_fingerprint, msg=label)
+
+    def test_the_fault_verdict_path_carries_the_gate_too(self):
+        # All four channels faulted: nothing is assessable, so the core builds the
+        # verdict itself (the second place provenance is built).
+        verdict, data = _decide(ENGINE_GATE_CONSERVATIVE_LEGACY, "P-FAULT", hr=_NAN, o2=_NAN, rr=_NAN, temp=_NAN)
+        self.assertIn("safety_bypass", data)
+        self.assertEqual(data["cassette"]["engine_gate"], "conservative_legacy")
+        self.assertEqual(_replay(data), verdict.decision_fingerprint)
+
+    def test_other_cassettes_and_odd_cassette_objects_are_untouched(self):
+        from industrial_cassette import AssetReading, IndustrialCassette
+        engine = ObserveClinicalEngine(cassette=IndustrialCassette())
+        engine.evaluate(AssetReading("PUMP-1", T0, 60.0, 55.0, 3.2))
+        data = engine.audit_ledger.entries[-1]["data"]
+        self.assertEqual(set(data["cassette"]), {"name", "version"})
+
+        class NotADict(PediatricCassette):
+            identity_extras = ["engine_gate", "x"]  # not a dict: the core must ignore it
+
+        odd = ObserveClinicalEngine(cassette=NotADict())
+        odd.evaluate(VitalsSnapshot("P-ODD", T0, 110, 98.0, 24, 37.0, context={"age_months": 24}))
+        self.assertEqual(odd.audit_ledger.entries[-1]["data"]["cassette"], _IDENTITY)
 
 
 if __name__ == "__main__":
