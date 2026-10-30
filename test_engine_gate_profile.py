@@ -23,6 +23,7 @@ updated deliberately, with that change.
 """
 
 import itertools
+import sys
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -199,6 +200,19 @@ _GOLDEN_MAIN = {
         "58792cb0dac7fa0f2e25abe2fa87a7946b694778df70a63264f2e29d65023013"),
 }
 
+# Python 3.12 changed how sum() adds floats, so on 3.11 the engine's entropy differs from 3.12 in the
+# last digit for some readings and the (unrounded) fingerprint with it. This is main's own behaviour,
+# recorded from main's code on 3.11, and not something this change introduced. The engine lists and the
+# entry shapes are identical on every version; only these fingerprints differ.
+_GOLDEN_MAIN_PRE_312 = {
+    "low_o2": "92e7dc312e62b79a38da332dfa8a327d60db4911e878f33921d6b44e31168f63",
+    "hr_high": "58b18da82a7437902018c5093838869558ceea023a3ca6c5de78079b52d3fa68",
+    "hr_boundary_lo": "466f12ce9372eef3d0aca8405b0cf41f6f7b7624e350983c0d257c80a2145cda",
+    "rr_only": "072b4fdbfc099f4b34ba1e22fa5330e7e79628faeb9d24f5c818d4482a8c66a9",
+    "temp_only": "dc8bce0bf31e3556fa07beb015f05bff7ba4c569711431619bab3b15f67b5251",
+    "rr_and_temp": "7982017825b7887f4a9dab62a71e7b90f597a68dbbc6d8703f13a7ed36fa7488",
+}
+
 
 _BASE_ENTRY_KEYS = {
     "cassette", "decision_fingerprint", "outputs", "parameter_set_version",
@@ -239,6 +253,8 @@ class DefaultGateIsUnchanged(unittest.TestCase):
             verdict = engine.evaluate(_golden_vitals(index, hr, o2, rr, temp, ctx))
             data = engine.audit_ledger.entries[-1]["data"]
             engines, fingerprint = _GOLDEN_MAIN[label]
+            if sys.version_info < (3, 12):
+                fingerprint = _GOLDEN_MAIN_PRE_312.get(label, fingerprint)
             self.assertEqual(list(verdict.active_engines), engines, msg=label)
             self.assertEqual(data["decision_fingerprint"], fingerprint, msg=label)
             self.assertEqual(data["cassette"], {"name": "pediatric_deterioration", "version": "1.1.0"}, msg=label)
