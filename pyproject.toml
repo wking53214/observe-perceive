@@ -51,7 +51,7 @@ fortress = ["fortress-kernel @ git+https://github.com/wking53214/fortress-kernel
 # there is no tag at or after that commit, and a tag cannot be pushed from this
 # session. Not a runtime dependency: a kernel built with a root guard needs it,
 # and one built with allow_unguarded_roots=True does not.
-cns = ["cns @ git+https://github.com/wking53214/CNS.git@v2.2.0"]
+cns = ["cns @ git+https://github.com/wking53214/CNS.git@v2.3.0"]
 test = ["pytest>=8", "hypothesis", "freezegun"]
 
 [tool.setuptools]
