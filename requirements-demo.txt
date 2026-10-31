@@ -11,7 +11,7 @@
 # The libraries are installed from exact commits, so a later push to a branch
 # cannot change what gets installed. Governance Gateway, CCC, DIT and the
 # Conservation Kernel are at the commits on their main branches whose own [cns]
-# extras pin CNS v1.9.0 (2026-10-21), so they agree with the CNS line below and
+# extras pin CNS v2.3.0 (2026-10-31), so they agree with the CNS line below and
 # pip can resolve the set.
 #
 # AUGUR is the exception. Its main branch no longer carries code, so it stays at
