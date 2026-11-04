@@ -6,6 +6,8 @@ OBSERVE engine, a real Conservation Kernel and a sealed Gateway admission. Needs
 import dataclasses
 import datetime as dt
 
+import pytest
+
 from conftest import ChainArtifact, importorskip_cns, make_perceive, make_vitals
 
 importorskip_cns("cns.gate")
@@ -137,3 +139,77 @@ def test_op3_strict_refuses_a_no_evidence_stable_verdict_for_a_hypoxic_tachycard
     assert result["refused_by"] == "observe" and result["stage_refused"] is True
     assert "evidence" in result["reason"]
     assert "executed" not in order
+
+
+# ---- OP-4: PERCEIVE sees the content's digest, its decision is bound to it, and admission compares it -------------
+
+def _request(content):
+    return SentinelPerceiveAdapter.sentinel_artifact_to_governance_request(
+        ChainArtifact("same-id", content=content), "escalate", {"patient_id": "P1"})
+
+
+def test_op4_perceive_is_handed_the_content_digest_and_its_decision_names_it():
+    request = _request("escalate P001")
+    policy_request = SentinelPerceiveAdapter.governance_request_to_policy_request(request)
+    assert policy_request.artifact_id == "same-id" and policy_request.artifact_hash == request.artifact_hash
+    decision = SentinelPerceiveAdapter.evaluate_through_perceive(make_perceive(), request)
+    assert decision.artifact_id == "same-id" and decision.artifact_hash == request.artifact_hash
+    other = SentinelPerceiveAdapter.evaluate_through_perceive(make_perceive(), _request("DISCHARGE P001"))
+    assert other.artifact_hash != decision.artifact_hash
+
+
+def test_op4_a_decision_for_content_a_is_not_admitted_for_content_b_with_the_same_id():
+    from perceive_conservation_adapter import ConservationRefusal, PerceiveConservationAdapter
+    a, b = _request("escalate P001"), _request("DISCHARGE P001, stop all monitoring")
+    decision_a = SentinelPerceiveAdapter.evaluate_through_perceive(make_perceive(), a)
+    admission = RootAdmission()
+    kernel = ConservationKernel(root_guard=admission)
+    adapter = PerceiveConservationAdapter(kernel, admission)
+    with pytest.raises(ConservationRefusal):
+        adapter.verify_perceive_decision(decision_a, b.artifact_id, b.artifact_content, b.artifact_hash, request=b)
+    assert "same-id" not in {x.artifact_id for x in kernel.ledger.artifacts()}
+    # The honest pairing still verifies.
+    decision_b = SentinelPerceiveAdapter.evaluate_through_perceive(make_perceive(), b)
+    verified = adapter.verify_perceive_decision(decision_b, b.artifact_id, b.artifact_content, b.artifact_hash,
+                                                request=b)
+    assert verified.verified is True
+
+
+def test_op4_root_admission_refuses_a_ruling_whose_decision_judged_other_content():
+    from conservation_kernel import Actor, ActorKind, Artifact
+    from root_admission import RootNotAdmitted, Ruling
+    a, b = _request("escalate P001"), _request("DISCHARGE P001")
+    decision_a = SentinelPerceiveAdapter.evaluate_through_perceive(make_perceive(), a)
+    root_b = Artifact(artifact_id="same-id", content=b.artifact_content, propositions=(),
+                      producer=Actor(actor_id="Sentinel", kind=ActorKind.SYSTEM))
+    admission = RootAdmission()
+    kernel = ConservationKernel(root_guard=admission)
+    ruling = Ruling(decision=decision_a, request_id=b.request_id, artifact_id="same-id", artifact_hash=b.artifact_hash)
+    with pytest.raises(RootNotAdmitted):
+        admission.admit(kernel, ruling, root_b)
+    assert admission(root_b) is False
+
+
+def test_op4_an_unguarded_kernel_also_refuses_a_decision_about_other_content():
+    from perceive_conservation_adapter import ConservationRefusal, PerceiveConservationAdapter
+    a, b = _request("escalate P001"), _request("DISCHARGE P001")
+    decision_a = SentinelPerceiveAdapter.evaluate_through_perceive(make_perceive(), a)
+    adapter = PerceiveConservationAdapter(ConservationKernel(allow_unguarded_roots=True))
+    with pytest.raises(ConservationRefusal, match="judged"):
+        adapter.verify_perceive_decision(decision_a, b.artifact_id, b.artifact_content, b.artifact_hash, request=b)
+
+
+def test_op4_root_admission_refuses_a_decision_that_names_no_document():
+    from conservation_kernel import Actor, ActorKind, Artifact
+    from governance_contracts import GovernanceApproval, GovernanceDecision
+    from root_admission import RootNotAdmitted, Ruling
+    root = Artifact(artifact_id="unnamed-1", content="escalate P001", propositions=(),
+                    producer=Actor(actor_id="Sentinel", kind=ActorKind.SYSTEM))
+    decision = GovernanceDecision(request_id="r1", decision_id="d1", approval=GovernanceApproval.APPROVED,
+                                  applied_gates=["boundary_gate"], unanimous_consensus=True, violations=[],
+                                  policy_version="1", perceive_audit_hash="abc")
+    admission = RootAdmission()
+    with pytest.raises(RootNotAdmitted):
+        admission.admit(ConservationKernel(root_guard=admission),
+                        Ruling(decision=decision, request_id="r1", artifact_id=root.artifact_id,
+                               artifact_hash=root.content_digest), root)

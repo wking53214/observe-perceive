@@ -23,8 +23,10 @@ THE ROSTER (three seats, and the super gate adds a fourth)
                                      binds but does not decide the seat: the orchestrator registers the root for
                                      a refused request too, so the refusal is in the kernel's ledger. This seat
                                      says "a ruling exists for this document", not "PERCEIVE approved it".
-  CNS:same_subject                   added by the super gate, first: the kernel's root and PERCEIVE's ruling
-                                     judged the same document identity and content digest.
+  CNS:same_subject                   added by the super gate, first: the request, the kernel's root and
+                                     PERCEIVE's ruling judged the same document identity and content digest. The
+                                     ruling's side is read from the decision itself (what PERCEIVE judged), not
+                                     from the request, so a decision about other content is refused.
 
 The ruling is the OMEGA end because it is PERCEIVE's product, and the roster needs both ends: the super gate
 calls a decision a go only when an OMEGA gate ran, so an ALPHA-only roster could never open the guard.
@@ -109,9 +111,17 @@ def _judged(identity: str, digest: str) -> Any:
     return Judged(identity, digest)
 
 
-def reads_ruling(ruling: Ruling) -> Any:
-    """Which document PERCEIVE's ruling was about, as the request named it."""
+def reads_request(ruling: Ruling) -> Any:
+    """Which document the request is about, as the request named it."""
     return _judged(ruling.artifact_id, ruling.artifact_hash)
+
+
+def reads_ruling(ruling: Ruling) -> Any:
+    """Which document PERCEIVE's ruling judged, as the decision itself names it (OP-4). Read from the decision, not
+    from the request, so a decision PERCEIVE made about other content under the same id disagrees with the request
+    and the root, and a decision that names no content agrees with nothing."""
+    decision = ruling.decision
+    return _judged(str(getattr(decision, "artifact_id", "") or ""), str(getattr(decision, "artifact_hash", "") or ""))
 
 
 def reads_root(artifact: Any) -> Any:
@@ -206,7 +216,7 @@ class RootAdmission:
         seats = [("PERCEIVE", RequestGate()), ("Conservation_Kernel", CnsRootAdmissionGate(kernel, require_guard=True)),
                  ("PERCEIVE", RulingGate())]
         decision = SuperGate(seats, required=REQUIRED_SEATS,
-                             same_subject={SEAT_REQUEST: reads_ruling, SEAT_ROOT: reads_root,
+                             same_subject={SEAT_REQUEST: reads_request, SEAT_ROOT: reads_root,
                                            SEAT_RULING: reads_ruling}
                              ).decide({SEAT_REQUEST: ruling, SEAT_ROOT: root, SEAT_RULING: ruling})
         guard = DecisionGuard(reads_root)
