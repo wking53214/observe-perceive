@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`pyproject.toml` lists `cassette` and `pediatric_cassette`.** Both are imported at module level
+  by listed modules (`observe_consolidated` imports `cassette`), and neither was in `py-modules`, so
+  an installed copy could not import the package. A test walks the imports of every listed module
+  and fails on any local module that is not listed.
+
 - **The behavioral-engine gate is a named, validated setting.** PR-2a of OBSERVE's
   `RECONCILE_UPSTREAM_PLAN.md`, the upstream half of the owner's decision to keep OBSERVE's
   narrower clinical rule until a pediatrician signs off upstream's wider one.
