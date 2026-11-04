@@ -95,7 +95,8 @@ class GovernanceOrchestrator:
             alert_human: optional callable, called with a dict (stage,
                 stage_error, request_id, artifact_id) when a stage RAISES
                 instead of reaching a verdict, or when the caller's executor
-                raises after approval (stage "execution"), so a person hears
+                raises after approval (stage "execution"), or when OBSERVE
+                raises in the strict profile (stage "observe"), so a person hears
                 about a crash and not only a log reader. It must reach a
                 human (page, dashboard, phone). Ordinary refusals and
                 successes never call it. The record of such a failure carries
@@ -906,8 +907,27 @@ class GovernanceOrchestrator:
                     raise RuntimeError("no OBSERVE engine configured")
                 observe_verdict = self.observe_engine.evaluate(vitals_snapshot)
             except Exception as e:
-                observe_error = f"{type(e).__name__}: {e}"
-                logger.error(f"[Orchestrator] OBSERVE did not produce a verdict: {observe_error}")
+                # OP-2: in strict, OBSERVE is mandatory, so a crash is a refusal and a person is told, as for any
+                # other stage that raises instead of reaching a verdict.
+                logger.error(f"[Orchestrator] Refusing execution: OBSERVE raised {type(e).__name__}: {e}")
+                human_alert = self._alert_stage_error("observe", e, governance_request)
+                if self.raise_on_stage_error:
+                    raise
+                return self._stamp({
+                    "status": "REJECTED",
+                    "reason": f"OBSERVE stage did not run to a verdict: {type(e).__name__}: {e}",
+                    "refused_by": "observe",
+                    "stage_refused": False,
+                    "stage_error": f"{type(e).__name__}: {e}",
+                    **self._alert_field(human_alert),
+                    "governance_decision": perceive_decision,
+                    "conservation_decision": conservation_decision,
+                    "execution_approval": execution_approval,
+                    "scope_enforced": declared_scope is not None,
+                    "observe_enforced": False,
+                    "observe_error": f"{type(e).__name__}: {e}",
+                    "audit_chain": None,
+                }, governance_request)
             else:
                 observed_before_action = True
                 problems = self._observe_problems(observe_verdict)
@@ -1002,7 +1022,7 @@ class GovernanceOrchestrator:
 
         # PHASE 6: OBSERVE monitoring
         logger.info("[Orchestrator] Phase 6: OBSERVE clinical monitoring")
-        if observed_before_action or observe_error is not None:
+        if observed_before_action:
             logger.info("[Orchestrator] OBSERVE already ran before the action (strict)")
         elif vitals_snapshot:
             # The action has already run. Whatever happens here must not lose

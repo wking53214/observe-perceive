@@ -90,3 +90,27 @@ def test_op1_strict_refuses_an_unassessable_observation_before_the_action_runs()
     assert result["refused_by"] == "observe" and result["stage_refused"] is True
     assert "executed" not in order and order == ["observe"]
     assert result["observe_verdict"].unassessable is True
+
+
+# ---- OP-2: an OBSERVE crash in strict mode is a refusal, and a person is told ---------------------------------------
+
+class Exploding:
+    def evaluate(self, vitals):
+        raise RuntimeError("OBSERVE engine crashed")
+
+
+def test_op2_strict_observe_crash_is_a_refusal_and_raises_the_human_alert():
+    alerts = []
+    result, order = run_strict(strict(Exploding(), alerts), "p5-op2", make_vitals(), "P112")
+    assert result["status"] == "REJECTED"
+    assert result["refused_by"] == "observe" and result["stage_refused"] is False
+    assert "OBSERVE engine crashed" in result["stage_error"]
+    assert "executed" not in order
+    assert result["human_alert"] == "delivered"
+    assert [a["stage"] for a in alerts] == ["observe"]
+
+
+def test_op2_strict_with_no_alert_channel_still_refuses_and_says_no_channel():
+    result, order = run_strict(strict(Exploding()), "p5-op2b", make_vitals(), "P113")
+    assert result["status"] == "REJECTED" and "executed" not in order
+    assert result["human_alert"] == "no_channel"
