@@ -55,7 +55,7 @@ test = ["pytest>=8", "hypothesis", "freezegun"]
 [tool.setuptools]
 # Flat layout: every module sits at the repository root.
 py-modules = [
-  "adversarial_sensor_faults", "augur_screen_adapter", "capacity_planning",
+  "adversarial_sensor_faults", "augur_screen_adapter", "capacity_planning", "cassette",
   "clinical_governance_system", "cns_connector", "cns_governed_decision", "compliance_exporters",
   "conservation_gsa815_adapter", "demo_why", "deterioration_simulator",
   "execution_guard",
@@ -64,6 +64,6 @@ py-modules = [
   "governance_orchestrator", "governance_record", "governance_recurring_report", "gsa815_observe_adapter", "herald_governance_adapter",
   "approval_governance_adapter", "kalman_trajectory", "observe_consolidated",
   "orchestrator_ccc_adapter", "perceive_conservation_adapter",
-  "perceive_consolidated", "reserve_control", "root_admission", "sentinel_perceive_adapter",
+  "pediatric_cassette", "perceive_consolidated", "reserve_control", "root_admission", "sentinel_perceive_adapter",
   "tie_governance_adapter", "vertical_slice",
 ]
