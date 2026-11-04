@@ -11,6 +11,7 @@ Central orchestrator that routes requests through:
 """
 
 import logging
+import math
 from datetime import datetime, timezone
 
 from governance_contracts import CONTRACT_VERSION
@@ -279,6 +280,15 @@ class GovernanceOrchestrator:
         if getattr(verdict, "unassessable", True) is not False:
             faults = list(getattr(verdict, "validation_faults", None) or [])
             problems.append("the observation is unassessable" + (f" ({'; '.join(map(str, faults))})" if faults else ""))
+        # OP-3: a verdict nothing assessed is not evidence, whatever regime it names. No engine ran, or the engines
+        # that ran contributed no confidence (every one abstained), so a "stable" here is a default, not a finding.
+        engines = list(getattr(verdict, "active_engines", None) or [])
+        confidence = getattr(verdict, "confidence", None)
+        if not engines:
+            problems.append("the verdict rests on no evidence: no OBSERVE engine assessed the reading")
+        elif not isinstance(confidence, (int, float)) or not math.isfinite(confidence) or confidence <= 0:
+            problems.append(f"the verdict rests on no evidence: its confidence is {confidence!r}, so no engine "
+                            "that ran assessed the reading")
         return problems
 
     @staticmethod
