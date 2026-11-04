@@ -961,6 +961,15 @@ class GovernanceOrchestrator:
             except Exception as e:
                 observe_error = f"{type(e).__name__}: {e}"
                 logger.error(f"[Orchestrator] OBSERVE did not produce a verdict: {observe_error}")
+                # A crash part way through evaluate can leave the patient's escalation state ahead of any
+                # record. Start the patient again so the next reading is judged fresh: a repeat page is
+                # the acceptable error, silence is not.
+                reset = getattr(self.observe_engine, "reset_tracked_state", None)
+                if callable(reset):
+                    try:
+                        reset(vitals_snapshot)
+                    except Exception as reset_error:  # noqa: BLE001 - the record of the crash still stands
+                        observe_error += f"; tracked state reset failed: {type(reset_error).__name__}: {reset_error}"
         else:
             logger.info("[Orchestrator] No vitals provided, OBSERVE evaluation skipped (warned above)")
 

@@ -410,8 +410,9 @@ class TestGovernanceUnavailable(unittest.TestCase):
         self.assertEqual(d.action, "escalate_assessment_unavailable")
         self.assertEqual(d.regime, "assessment_unavailable")
         self.assertTrue(d.escalation_required)
-        self.assertEqual(d.governance_status, GovernanceStatus.NOT_EVALUATED)
+        self.assertEqual(d.governance_status, GovernanceStatus.ASSESSMENT_UNAVAILABLE)
         self.assertEqual(d.human_alert, "delivered")
+        self.assertEqual(len(alerts), 1)
         self.assertIs(alerts[0], d)
         self.assertTrue(any("ASSESSMENT_UNAVAILABLE" in v for v in d.governance_violations))
 
@@ -441,6 +442,48 @@ class TestGovernanceUnavailable(unittest.TestCase):
         self.assertTrue(any(v.startswith("HUMAN_ALERT_FAILED") for v in d.governance_violations))
         self.assertTrue(system.verify_all_audits()["perceive_chain_valid"])
         self.assertFalse(any("HUMAN_ALERT_FAILED" in str(e) for e in system.export_perceive_audit()))
+
+    def test_a_crash_after_the_engine_moved_its_state_does_not_silence_the_next_critical_reading(self):
+        """Stage 1A step 4: the direction to be wrong in is a repeat page, never silence."""
+        alerts = []
+        system = build_single_hospital_system(alert_human=alerts.append)
+        ledger = system.observe.audit_ledger
+        real_append = ledger.append
+        calls = {"n": 0}
+
+        def _fail_once(*a, **k):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OSError("ledger store failed after the escalation state moved")
+            return real_append(*a, **k)
+
+        ledger.append = _fail_once
+        def crit(minute):
+            return VitalsSnapshot("P7", datetime(2026, 11, 4, 8, minute, tzinfo=timezone.utc), 168, 83.0, 46, 39.5,
+                                  context={"age_months": 12, "force_heavy": True, "physician_approved": True})
+
+        first = system.process_vitals(crit(0))
+        self.assertEqual(first.action, "escalate_assessment_unavailable")
+        second = system.process_vitals(crit(1))  # one minute later: inside the cooldown a stale lock would apply
+        self.assertTrue(second.escalation_required, "the next critical reading must escalate, not be swallowed")
+        self.assertEqual(second.action, "escalate_approved")
+        self.assertEqual(len(alerts), 1)  # one for the crash; the approved escalation is not an alert
+
+    def test_a_failed_state_reset_is_recorded_and_the_alert_still_goes_out(self):
+        alerts = []
+        system = build_single_hospital_system(alert_human=alerts.append)
+
+        def _boom(_v):
+            raise RuntimeError("OBSERVE failure")
+
+        def _reset_boom(_v):
+            raise RuntimeError("reset failure")
+
+        system.observe.evaluate = _boom
+        system.observe.reset_tracked_state = _reset_boom
+        d = system.process_vitals(vitals(pid="P3", hr=110, o2=98.0))
+        self.assertEqual(d.human_alert, "delivered")
+        self.assertTrue(any("TRACKED_STATE_RESET_FAILED" in v for v in d.governance_violations))
 
 
 if __name__ == "__main__":

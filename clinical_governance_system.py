@@ -72,6 +72,7 @@ class GovernanceStatus(str, Enum):
     APPROVED = "approved"
     BLOCKED = "blocked"
     UNAVAILABLE = "unavailable"       # governance was asked and failed; a human is alerted
+    ASSESSMENT_UNAVAILABLE = "assessment_unavailable"  # OBSERVE itself failed; nothing was assessed, a human is alerted
 
 
 @dataclass
@@ -215,9 +216,18 @@ class ClinicalGovernanceSystem:
                 active_engines=[],
                 triggered_rules=[],
                 observe_audit_hash="",
+                governance_status=GovernanceStatus.ASSESSMENT_UNAVAILABLE,
                 governance_violations=[f"ASSESSMENT_UNAVAILABLE: {type(e).__name__}: {e}"],
                 action="escalate_assessment_unavailable",
             )
+            # evaluate() moves the patient's escalation state before it records, so a crash part way can
+            # leave "already escalated, locked" for a reading no ledger holds and swallow the next critical
+            # reading as a repeat. Start the patient again: the cost is a possible repeat page, never silence.
+            try:
+                self.observe.reset_tracked_state(vitals)
+            except Exception as reset_error:  # noqa: BLE001 - still alert, whatever else is broken
+                failed.governance_violations.append(f"TRACKED_STATE_RESET_FAILED: {reset_error}")
+                logger.error(f"TRACKED STATE RESET FAILED for {vitals.patient_id}: {reset_error}")
             self._alert_human(failed)
             return failed
 
