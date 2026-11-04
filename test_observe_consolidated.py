@@ -429,10 +429,11 @@ class TestEscalationPolicy(unittest.TestCase):
         self.assertTrue(escalated)
         self.assertTrue(policy.escalation_locked)
 
-        # Immediately try to escalate further to CRITICAL -> locked, regime unchanged
+        # Immediately worsen to CRITICAL. The lock suppresses repeats at the same severity, not a severity
+        # increase: this is a new escalation (PR-3, escalation integrity). It used to be held at WARNING.
         regime2, escalated2 = policy.evaluate(OperationalRegime.CRITICAL, ts)
-        self.assertEqual(regime2, OperationalRegime.WARNING)
-        self.assertFalse(escalated2)
+        self.assertEqual(regime2, OperationalRegime.CRITICAL)
+        self.assertTrue(escalated2)
 
 
 # ============================================================
