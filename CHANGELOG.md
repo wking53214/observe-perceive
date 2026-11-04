@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **A cooldown no longer hides a worsening patient.** On `main`, a patient escalated at WARNING who
+  worsened to CRITICAL was held at WARNING for the whole 300 s lock and, with a hard-rule bypass,
+  changed regime but raised no escalation event (`escalation_required=False`, action
+  `continue_monitoring`); a bypass could also lower a patient tracked at CRITICAL. Now the lock
+  suppresses only repeats at the same severity, any move up into WARNING or CRITICAL is an escalation
+  event (an already-escalated patient who worsens is acted on at the first reading, no dwell; a first
+  escalation from below still needs its dwell), a bypass never lowers a tracked regime, and every verdict and decision names its
+  `escalation_kind` (`new_escalation`, `severity_increase`, `de_escalation`) and `previous_regime`.
+  Existing entries and fingerprints are unchanged (the two new kinds are recorded only when they
+  occur). One existing test edited: `test_escalation_lock_prevents_immediate_re_escalation` asserted
+  that a CRITICAL candidate is refused during the lock. Notification, receipt, acknowledgement and
+  human-governed recovery are not part of this change. See `docs/race/ESCALATION_INTEGRITY_DESIGN.md`
+  and `docs/race/ESCALATION_HAZARD_ANALYSIS.md`.
+
 - **The demo requirements install the libraries without their `[cns]` extras.** CI's `cns` job
   had failed at install since the CNS pin moved to v2.3.0 (run 137): `requirements-demo.txt`
   installed Governance Gateway, CCC, DIT and the Conservation Kernel with their `[cns]` extra, and
