@@ -988,11 +988,24 @@ class EscalationPolicy:
                 # The cooldown exists to stop a storm of repeats at the SAME severity. It must never
                 # hide a genuine severity increase: a patient escalated at WARNING who worsens to
                 # CRITICAL is a new event, and used to be held at WARNING until the lock expired and
-                # two more readings confirmed. A higher candidate falls through to the dwell logic below.
+                # two more readings confirmed.
                 if _REGIME_SEVERITY[new_regime] <= _REGIME_SEVERITY[self.current_regime]:
                     return self.current_regime, False
             else:
                 self.escalation_locked = False
+
+        # A patient who is ALREADY escalated (WARNING) and whose candidate is higher is acted on at the first
+        # reading, with no dwell (owner decision, PR-3): dwell damps noise at the edge of a first escalation,
+        # and a worsening patient the system has already flagged is not that. A first escalation from STABLE or
+        # CAUTION still needs its dwell, exactly as before.
+        if (_REGIME_SEVERITY[self.current_regime] >= _REGIME_SEVERITY[OperationalRegime.WARNING]
+                and _REGIME_SEVERITY[new_regime] > _REGIME_SEVERITY[self.current_regime]):
+            self.current_regime = new_regime
+            self.pending_regime = None
+            self.dwell_count = 0
+            self.escalation_locked = True
+            self.last_escalation_time = timestamp
+            return new_regime, True
 
         if new_regime == self.current_regime:
             self.pending_regime = None
