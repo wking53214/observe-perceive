@@ -1605,9 +1605,13 @@ class ObserveClinicalEngine:
             fused_risk = max(fused_risk, REGIME_RISK_FLOOR[final_regime.value])  # every call, not only a change
         elif bypass and (hold_floor or candidate_regime.value in ("warning", "critical")):
             escalation = policy.current_regime.value in ("stable", "caution")
-            lifted = _REGIME_SEVERITY[candidate_regime] < _REGIME_SEVERITY[OperationalRegime.WARNING]
-            final_regime = _max_severity(candidate_regime, OperationalRegime.WARNING)
-            if lifted:  # only reachable with hold_floor: fusion rated it below WARNING and cannot argue it down
+            # A bypass can raise the regime and never lower it: neither fusion nor a quieter confirming reading
+            # may pull a patient already tracked at CRITICAL down to WARNING because a hard rule fired again.
+            final_regime = _max_severity(
+                candidate_regime, OperationalRegime.WARNING if hold_floor else candidate_regime,
+                policy.current_regime)
+            raised = _REGIME_SEVERITY[final_regime] > _REGIME_SEVERITY[candidate_regime]
+            if raised:  # fusion rated it lower and cannot argue it down; risk follows so score and regime agree
                 fused_risk = max(fused_risk, REGIME_RISK_FLOOR[final_regime.value])
             policy.current_regime = final_regime
             policy.pending_regime = None
@@ -1618,16 +1622,40 @@ class ObserveClinicalEngine:
             reason = "hard-rule" if hard_rule_fired else "dangerous-syndrome"
             bypass_label = cassette_label(self._cassette, "safety_bypass")
             all_triggered_bypass_note = [f"{bypass_label}: {reason} trigger skipped dwell confirmation"]
-            if lifted:
-                why = "corroborated by another abnormal channel" if corroborated else "confirmed within the window"
+            if raised:
+                if hold_floor and _REGIME_SEVERITY[candidate_regime] < _REGIME_SEVERITY[OperationalRegime.WARNING]:
+                    why = ("corroborated by another abnormal channel" if corroborated
+                           else "confirmed within the window" if hard_rule_confirmed else "named syndrome")
+                else:
+                    why = "tracked regime was higher"
                 all_triggered_bypass_note.append(
-                    f"{bypass_label}: {reason} trigger ({why}) held the regime at WARNING against a lower fused regime")
+                    f"{bypass_label}: {reason} trigger ({why}) held the regime at {final_regime.value.upper()} "
+                    "against a lower fused regime")
         else:
             final_regime, escalation = policy.evaluate(candidate_regime, vitals.timestamp)
             all_triggered_bypass_note = []
 
+        # A floor the domain sets on the REPORTED regime (for example a patient outside the supported
+        # population). It follows the normal tracking above, so a tracked CRITICAL is still held; it never
+        # writes the policy, never lowers anything, and pages at most once per window (the same dedup a
+        # sensor fault uses).
+        floor_of = cassette_optional_member(self._cassette, "regime_floor")
+        floor = floor_of(recorded) if floor_of else None
+        floor_notes: List[str] = []
+        if floor:
+            floor_value, floor_note = floor
+            floor_notes.append(floor_note)
+            floor_regime = OperationalRegime(floor_value)
+            if _REGIME_SEVERITY[final_regime] < _REGIME_SEVERITY[floor_regime]:
+                tracked_below = _REGIME_SEVERITY[policy.current_regime] < _REGIME_SEVERITY[floor_regime]
+                final_regime = floor_regime
+                fused_risk = max(fused_risk, REGIME_RISK_FLOOR[final_regime.value])
+                if not escalation:
+                    escalation = self._fault_page(subject, recorded.timestamp, tracked_below, False)
+
         fault_notes = [f"DATA_INTEGRITY_FAULT: {f}" for f in faults]
-        all_triggered = fault_notes + all_triggered_bypass_note + advisory_notes + [r for o in outputs for r in o.triggered_rules]
+        all_triggered = (fault_notes + all_triggered_bypass_note + floor_notes + advisory_notes
+                         + [r for o in outputs for r in o.triggered_rules])
         avg_confidence = sum(o.confidence for o in outputs) / len(outputs) if outputs else 0.0
         if unassessable:
             avg_confidence *= UNASSESSABLE_CONFIDENCE_PENALTY
@@ -1644,6 +1672,8 @@ class ObserveClinicalEngine:
             decision_data["safety_bypass"] = list(all_triggered_bypass_note)
         if advisory_notes:  # likewise
             decision_data["advisory_notes"] = list(advisory_notes)
+        if floor_notes:  # likewise
+            decision_data["regime_floor"] = list(floor_notes)
         if unassessable:  # present only then, so a clean entry keeps its shape
             decision_data["validation_faults"] = list(faults)
             decision_data["verdict"]["unassessable"] = True

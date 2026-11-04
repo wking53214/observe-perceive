@@ -193,7 +193,7 @@ _CALLABLE = REQUIRED[2:]
 #: assess a reading partially"), not a conformance failure. Presence without
 #: callability is a failure: a capability declared wrongly is rejected at
 #: load rather than quietly skipped on some later evaluation.
-OPTIONAL = ("mask_faults", "hard_rule_confirm_window", "hard_rule_corroborated", "advisory_notes")
+OPTIONAL = ("mask_faults", "hard_rule_confirm_window", "hard_rule_corroborated", "advisory_notes", "regime_floor")
 
 
 #: Used when a cassette omits a label key. Neutral on purpose: a domain

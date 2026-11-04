@@ -146,14 +146,18 @@ def test_every_value_participates_in_the_digest():
 def test_a_patient_at_or_inside_the_bound_has_no_population_finding():
     for age in (0, 24, 215, 216):
         v = ObserveClinicalEngine().evaluate(snap(age=age))
-        assert not v.unassessable, age
+        assert not has_finding(v), age
+
+
+def has_finding(v):
+    return any("OUTSIDE_SUPPORTED_POPULATION" in r for r in v.triggered_rules)
 
 
 def test_a_patient_above_the_bound_is_flagged_and_floored_at_warning():
     v = ObserveClinicalEngine().evaluate(snap(age=480))
-    assert v.unassessable and v.regime == OperationalRegime.WARNING and v.escalation_required
-    assert any("supported pediatric population" in f for f in v.validation_faults)
-    assert any("interpret with caution" in r for r in v.triggered_rules)
+    assert v.regime == OperationalRegime.WARNING and v.escalation_required
+    assert not v.unassessable                       # nothing about the reading is untrustworthy
+    assert has_finding(v) and any("interpret with caution" in r for r in v.triggered_rules)
 
 
 def test_being_out_of_scope_never_scores_a_deteriorating_patient_lower():
@@ -167,19 +171,42 @@ def test_being_out_of_scope_never_scores_a_deteriorating_patient_lower():
 
 
 def test_the_population_finding_can_be_turned_off_or_the_bound_moved():
-    assert not engine(outside_population="assess_anyway").evaluate(snap(age=480)).unassessable
-    assert not engine(max_age_months=None).evaluate(snap(age=480)).unassessable
-    assert not engine(max_age_months=300).evaluate(snap(age=250)).unassessable
-    assert engine(max_age_months=300).evaluate(snap(age=301)).unassessable
+    assert not has_finding(engine(outside_population="assess_anyway").evaluate(snap(age=480)))
+    assert not has_finding(engine(max_age_months=None).evaluate(snap(age=480)))
+    assert not has_finding(engine(max_age_months=300).evaluate(snap(age=250)))
+    assert has_finding(engine(max_age_months=300).evaluate(snap(age=301)))
 
 
 def test_an_unknown_age_is_assessed_as_before_unless_the_deployment_requires_one():
-    assert not ObserveClinicalEngine().evaluate(snap(age=None)).unassessable
+    assert not has_finding(ObserveClinicalEngine().evaluate(snap(age=None)))
     required = engine(require_age=True).evaluate(snap(age=None))
-    assert required.unassessable and any("requires the patient's age" in f for f in required.validation_faults)
+    assert has_finding(required) and required.regime == OperationalRegime.WARNING
+    for unusable in (-5, "old", float("nan"), 2000):   # present but unusable counts as no age
+        assert has_finding(engine(require_age=True).evaluate(snap(age=unusable)))
 
 
 def test_a_population_finding_and_a_faulted_channel_together_still_mask_the_channel():
     v = ObserveClinicalEngine().evaluate(snap(age=480, o2=float("nan")))
-    assert v.unassessable and len(v.validation_faults) == 2
+    assert v.unassessable and len(v.validation_faults) == 1 and has_finding(v)
     assert not any("CRITICAL_O2" in r for r in v.triggered_rules)               # the NaN channel is still masked
+
+
+def test_an_over_age_patient_keeps_the_critical_hold_a_child_gets():
+    """Review finding: the population finding used to bypass policy tracking, so CRITICAL dropped to WARNING."""
+    rows = [(90, 87, 60, 38.0), (135, 98, 12, 38.0), (160, 98, 45, 38.0)]
+    from datetime import timedelta
+    for age in (120, 240, 480):
+        e, seen = ObserveClinicalEngine(), []
+        for i, (hr, o2, rr, t) in enumerate(rows):
+            seen.append(e.evaluate(VitalsSnapshot("P", T + timedelta(minutes=i), hr, o2, rr, t, {"age_months": age})).regime)
+        assert seen == [OperationalRegime.CRITICAL] * 3, (age, seen)
+
+
+def test_the_population_floor_pages_once_per_window_and_never_suppresses_a_later_critical_page():
+    from datetime import timedelta
+    e = ObserveClinicalEngine()
+    pages = [e.evaluate(VitalsSnapshot("A", T + timedelta(minutes=m), 110, 98.0, 25, 37.0, {"age_months": 480})
+                        ).escalation_required for m in (0, 1, 2)]
+    assert pages == [True, False, False]                                         # one page, then held
+    crit = e.evaluate(VitalsSnapshot("A", T + timedelta(minutes=3), 168, 83.0, 46, 39.5, {"age_months": 480}))
+    assert crit.regime == OperationalRegime.CRITICAL and crit.escalation_required

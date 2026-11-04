@@ -75,6 +75,15 @@ def test_a_window_of_one_means_only_corroboration_confirms():
     assert run([(112, 92, 26, 38.2), SICK], eng, 15)[1].escalation_required
 
 
+def test_a_hard_rule_never_lowers_a_patient_already_tracked_at_critical():
+    """Review finding: the bypass overwrote the tracked regime with WARNING."""
+    rows = [(90, 87, 60, 38.0), (135, 98, 12, 38.0), (160, 98, 45, 38.0), (90, 91, 38, 33.0)]
+    for age in (24, 60, 120):
+        r = run(rows, step_minutes=1, age=age)
+        assert [v.regime.value for v in r][:3] == ["critical"] * 3, age
+        assert r[3].regime.value == "critical", (age, r[3].regime.value, r[3].triggered_rules)
+
+
 # ---- probe-off note: annotation only ----------------------------------------------------------------------------
 
 def test_a_zero_spo2_carries_a_probe_note_and_the_regime_is_not_lowered_by_it():

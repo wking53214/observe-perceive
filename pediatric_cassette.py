@@ -88,16 +88,15 @@ ENGINE_GATES = (ENGINE_GATE_WIDENED_PROVISIONAL, ENGINE_GATE_CONSERVATIVE_LEGACY
 
 logger = logging.getLogger("PEDIATRIC_CASSETTE")
 
-#: The name of the finding a reading outside the supported population carries. It is a "fault" only in the
-#: sense the core uses the word: the reading cannot be fully trusted to be scored on these norms.
-POPULATION_FAULT_KEY = "age_months"
+#: The name of the finding a reading outside the supported population carries.
+POPULATION_FINDING = "OUTSIDE_SUPPORTED_POPULATION"
 
 
 class PediatricCassette:
     """Pediatric deterioration: the original domain, behind the seam."""
 
     name = "pediatric_deterioration"
-    version = "1.1.0"  # 1.1.0: supplies mask_faults. Settings and the population finding add no version:
+    version = "1.1.0"  # 1.1.0: supplies mask_faults. Settings and the population floor add no version:
     # a default cassette keeps its recorded identity, and a changed setting is recorded in identity_extras
 
     def __init__(self, engine_gate: str = DEFAULT_ENGINE_GATE,
@@ -151,28 +150,32 @@ class PediatricCassette:
 
     # -- trust boundary -----------------------------------------------
     def validate(self, obs: Any) -> List[str]:
-        return validate_vitals(obs) + self._population_faults(obs)
+        return validate_vitals(obs)
 
-    def _population_faults(self, obs: Any) -> List[str]:
-        """A reading outside this cassette's supported population, as a named finding.
+    def regime_floor(self, obs: Any) -> Optional[Tuple[str, str]]:
+        """A floor on the reported regime, with its reason, or None.
 
         Pediatric is the supported population; adult norms are a future cassette. A reading above
-        `max_age_months` is still assessed (mask_faults hands it back unchanged), so it is never scored less
-        severely for being out of scope, but it is floored at WARNING and says why, so a person looks."""
+        `max_age_months` is assessed on every channel exactly as before (and tracked as before, so a CRITICAL
+        is still held), but is reported no lower than WARNING with a named finding, so a person looks. It is
+        a floor on the report, not a data fault: nothing about the reading is untrustworthy."""
         s = self.settings
         if s.outside_population != "alert":
-            return []
+            return None
         context = obs.context if isinstance(getattr(obs, "context", None), dict) else {}
         age = context.get("age_months")
-        known = isinstance(age, (int, float)) and not isinstance(age, bool) and math.isfinite(age)
+        known = (isinstance(age, (int, float)) and not isinstance(age, bool) and math.isfinite(age)
+                 and 0 <= age <= 1500)
         if not known:
             if s.require_age:
-                return [f"{POPULATION_FAULT_KEY}=missing: this deployment requires the patient's age"]
-            return []
+                return ("warning", f"{POPULATION_FINDING}: this deployment requires the patient's age and none "
+                                   "usable was given")
+            return None
         if s.max_age_months is not None and age > s.max_age_months:
-            return [f"{POPULATION_FAULT_KEY}={age:g} is above the supported pediatric population "
-                    f"(max {s.max_age_months:g} months); assessed on pediatric norms, interpret with caution"]
-        return []
+            return ("warning", f"{POPULATION_FINDING}: age {age:g} months is above the supported pediatric "
+                               f"population (max {s.max_age_months:g}); assessed on pediatric norms, "
+                               "interpret with caution")
+        return None
 
     def mask_faults(self, obs: Any, faults: List[str]) -> Optional[Any]:
         """The reading to assess in place of a faulted one, or None.
@@ -184,17 +187,11 @@ class PediatricCassette:
         channel is faulted (nothing is left to assess).
         """
         faulted: Set[str] = set()
-        population_only = False
         for fault in faults:
             channel = fault.split("=", 1)[0]
-            if channel == POPULATION_FAULT_KEY:
-                population_only = True  # until a channel fault below says otherwise
-                continue  # a finding about the patient, not a poisoned channel: nothing to mask
             if channel not in _VITALS_NEUTRAL:
                 return None
             faulted.add(channel)
-        if population_only and not faulted:
-            return obs  # every channel is real; assess them all, the finding is reported by the core
         if not faulted or faulted == set(_VITALS_NEUTRAL):
             return None
         dropped = {key for channel in faulted for key in _CHANNEL_CONTEXT_KEYS[channel]}
