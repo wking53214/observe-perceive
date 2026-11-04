@@ -44,12 +44,51 @@ def test_warning_then_critical_during_the_cooldown_is_a_new_escalation_at_the_po
     assert p.evaluate(R.CRITICAL, at(60)) == (R.CRITICAL, True)            # inside the lock
 
 
-def test_the_policy_still_needs_its_dwell_confirmation_for_a_higher_candidate_during_the_lock():
+def test_a_worsening_from_an_already_escalated_state_acts_on_the_first_reading_with_no_dwell():
     p = EscalationPolicy(dwell_threshold=2, lock_seconds=300)
     p.evaluate(R.WARNING, at(0))
     p.evaluate(R.WARNING, at(1))                                           # escalated, locked
-    assert p.evaluate(R.CRITICAL, at(60)) == (R.WARNING, False)            # first confirming reading
-    assert p.evaluate(R.CRITICAL, at(120)) == (R.CRITICAL, True)           # second confirms, inside the lock
+    assert p.evaluate(R.CRITICAL, at(60)) == (R.CRITICAL, True)            # first reading, inside the lock
+    assert p.evaluate(R.CRITICAL, at(90)) == (R.CRITICAL, False)           # and it is not repeated
+
+
+def test_a_worsening_after_the_lock_has_expired_also_acts_on_the_first_reading():
+    p = EscalationPolicy(dwell_threshold=2, lock_seconds=300)
+    p.evaluate(R.WARNING, at(0))
+    p.evaluate(R.WARNING, at(1))
+    assert p.evaluate(R.CRITICAL, at(1000)) == (R.CRITICAL, True)
+
+
+def test_a_first_escalation_from_below_still_needs_its_dwell():
+    for start in (R.STABLE, R.CAUTION):
+        p = EscalationPolicy(dwell_threshold=2, lock_seconds=300)
+        if start is R.CAUTION:                                             # track CAUTION first (two readings)
+            p.evaluate(R.CAUTION, at(0))
+            p.evaluate(R.CAUTION, at(1))
+        assert p.current_regime == start
+        assert p.evaluate(R.WARNING, at(10)) == (start, False)             # one reading is not enough
+        assert p.evaluate(R.WARNING, at(20)) == (R.WARNING, True)          # the second confirms
+        p2 = EscalationPolicy(dwell_threshold=2, lock_seconds=300)
+        assert p2.evaluate(R.CRITICAL, at(0)) == (R.STABLE, False)         # STABLE to CRITICAL: dwell applies
+
+
+def test_a_worsening_re_arms_the_lock_so_a_quick_fall_cannot_downgrade_it():
+    p = EscalationPolicy(dwell_threshold=2, lock_seconds=300)
+    p.evaluate(R.WARNING, at(0))
+    p.evaluate(R.WARNING, at(1))
+    assert p.evaluate(R.CRITICAL, at(10)) == (R.CRITICAL, True)
+    for s in (20, 30, 40):                                                 # three calm candidates inside the new lock
+        assert p.evaluate(R.STABLE, at(s)) == (R.CRITICAL, False)
+    assert p.escalation_locked and p.last_escalation_time == at(10)
+
+
+def test_a_flapping_candidate_does_not_re_escalate_after_a_worsening():
+    p = EscalationPolicy(dwell_threshold=2, lock_seconds=300)
+    p.evaluate(R.WARNING, at(0))
+    p.evaluate(R.WARNING, at(1))
+    assert p.evaluate(R.CRITICAL, at(10))[1] is True
+    for s, cand in ((20, R.WARNING), (30, R.CRITICAL), (40, R.WARNING), (50, R.CRITICAL)):
+        assert p.evaluate(cand, at(s)) == (R.CRITICAL, False)
 
 
 def test_a_repeat_at_the_same_severity_is_still_suppressed_by_the_cooldown():

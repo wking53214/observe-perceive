@@ -15,6 +15,7 @@ Scope: what OBSERVE's escalation policy decides and reports. Notification, deliv
 | Cooldown suppresses repeats at the same severity | The lock still returns early when the candidate is not higher than the tracked regime |
 | Cooldown never suppresses a severity increase | A higher candidate falls through to the dwell logic during the lock |
 | A severity increase is a new escalation event | An escalation is any move up into WARNING or CRITICAL, including WARNING to CRITICAL; lock and timestamp are set again |
+| A worsening patient is acted on at once | A candidate higher than the tracked regime, when the patient is already at WARNING or above, is escalated at the **first reading** with no dwell (owner decision) |
 | The event is distinguishable from the one before it | `FusedVerdict.escalation_kind` is `new_escalation`, `severity_increase`, `de_escalation` or empty, with `previous_regime`; `ClinicalDecision` carries both; the audit entry and fingerprint record the two new kinds; each reading already has its own audit hash and state commitment |
 | A persistent CRITICAL stays CRITICAL | The bypass takes the maximum of the candidate and the tracked regime |
 | Repeated CRITICAL is one event | Same severity is suppressed by the lock |
@@ -23,7 +24,7 @@ Scope: what OBSERVE's escalation policy decides and reports. Notification, deliv
 
 ## Decisions made, and the alternatives
 
-* **Dwell is kept for a higher candidate.** A higher candidate that does not come from the hard-rule or syndrome bypass still needs the configured dwell (2) confirming readings, now inside the lock, not after it. Alternative: act on the first reading. The hard-rule bypass already acts on the first reading, and on the current engine no input reaches WARNING or CRITICAL without that bypass (0 of 7,200 swept), so this choice affects only future cassettes. Owner decision if they want zero dwell on severity increases.
+* **No dwell for a worsening (owner decision, option B).** A patient the system has already escalated who moves to a higher regime is escalated on the first reading. Dwell damps noise at the edge of a first escalation, and a worsening patient already flagged is not that. A first escalation from STABLE or CAUTION still needs the configured dwell (2), exactly as before, including STABLE straight to CRITICAL. The alternative, keeping dwell for non-bypass severity increases, was the recommendation; the owner chose first-reading action. The hard-rule bypass already acted on the first reading, and on the current engine no input reaches WARNING or CRITICAL without it (0 of 7,200 swept), so this affects future cassettes. Trade-off: one noisy higher reading from an already-escalated patient raises a new event; the lock then holds that severity for 300 s against a quick fall.
 * **Only two kinds are fingerprinted.** `severity_increase` and `de_escalation` add keys to the decision data only when they occur, so every existing entry and recorded fingerprint is unchanged. `new_escalation` is on the verdict and decision but not in the hashed data, because adding it would change existing fingerprints.
 
 ## Not solved here
