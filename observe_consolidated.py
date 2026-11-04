@@ -371,15 +371,21 @@ def decision_fingerprint(data: Dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def get_age_group(age_months: Optional[int]) -> str:
-    """Map age in months to clinical age group. Returns 'generic' if age unknown."""
+#: Upper bounds, in months, of the neonatal, infant and toddler groups; at or beyond the last is "child".
+AGE_GROUP_UPPER_MONTHS = (3, 12, 36)
+
+
+def get_age_group(age_months: Optional[int], bounds: Tuple[float, float, float] = AGE_GROUP_UPPER_MONTHS) -> str:
+    """Map age in months to clinical age group. Returns 'generic' if age unknown.
+
+    `bounds` is the clinician-adjustable setting (see clinical_settings); the default is the original table."""
     if age_months is None:
         return "generic"
-    if age_months < 3:
+    if age_months < bounds[0]:
         return "neonatal"
-    if age_months < 12:
+    if age_months < bounds[1]:
         return "infant"
-    if age_months < 36:
+    if age_months < bounds[2]:
         return "toddler"
     return "child"
 
@@ -414,8 +420,13 @@ class RiskAdapters:
     """All 6 risk assessment engines, consolidated with fixes from code review."""
 
     @staticmethod
-    def heuristic(vitals: VitalsSnapshot) -> RiskOutput:
-        """FIX: confidence = data-completeness, not history_quality formula. Age-adjusted norms."""
+    def heuristic(vitals: VitalsSnapshot, norms: Optional[Mapping[str, Mapping[str, float]]] = None,
+                  age_bounds: Tuple[float, float, float] = AGE_GROUP_UPPER_MONTHS,
+                  critical_o2_below: float = 88.0, hypothermia_below: float = 35.0) -> RiskOutput:
+        """FIX: confidence = data-completeness, not history_quality formula. Age-adjusted norms.
+
+        The keyword arguments are the clinician-adjustable settings (clinical_settings.ClinicalSettings);
+        every default is the value this function always used."""
         triggered = []
         score = 0.0
 
@@ -425,11 +436,11 @@ class RiskAdapters:
         if age_months is None:
             logger.warning(f"HEURISTIC: age_months missing for {vitals.patient_id}; using generic norms")
 
-        age_group = get_age_group(age_months)
-        thresh = PEDIATRIC_NORMS[age_group]
+        age_group = get_age_group(age_months, age_bounds)
+        thresh = (PEDIATRIC_NORMS if norms is None else norms)[age_group]
 
-        if vitals.oxygen_saturation < 88.0:
-            triggered.append(f"CRITICAL_O2: {vitals.oxygen_saturation}% (<88%)")
+        if vitals.oxygen_saturation < critical_o2_below:
+            triggered.append(f"CRITICAL_O2: {vitals.oxygen_saturation}% (<{critical_o2_below:g}%)")
             score += 0.5
         elif vitals.oxygen_saturation < thresh["o2_low"]:
             triggered.append(f"WARNING_O2: {vitals.oxygen_saturation}% (<{thresh['o2_low']}%)")
@@ -449,8 +460,8 @@ class RiskAdapters:
         if vitals.temperature > thresh["temp_high"]:
             triggered.append(f"FEVER: {vitals.temperature}°C > {thresh['temp_high']}°C")
             score += 0.1
-        elif vitals.temperature < 35.0:
-            triggered.append(f"HYPOTHERMIA: {vitals.temperature}°C < 35.0°C")
+        elif vitals.temperature < hypothermia_below:
+            triggered.append(f"HYPOTHERMIA: {vitals.temperature}°C < {hypothermia_below:.1f}°C")
             score += 0.4
 
         score = min(score, 1.0)
@@ -465,14 +476,17 @@ class RiskAdapters:
         return RiskOutput("heuristic", score, confidence, regime_distribution(score), triggered, datetime.now(timezone.utc))
 
     @staticmethod
-    def bayesian(vitals: VitalsSnapshot) -> RiskOutput:
-        """FIX: age-group lookup (no hardcoded toddler norms), continuous sigmoid likelihood."""
+    def bayesian(vitals: VitalsSnapshot, norms: Optional[Mapping[str, Mapping[str, float]]] = None,
+                 age_bounds: Tuple[float, float, float] = AGE_GROUP_UPPER_MONTHS) -> RiskOutput:
+        """FIX: age-group lookup (no hardcoded toddler norms), continuous sigmoid likelihood.
+
+        `norms` and `age_bounds` are the clinician-adjustable settings; the defaults are the original tables."""
         triggered = []
         debug_info = {}
 
         age_months = vitals.context.get("age_months")
-        age_group = get_age_group(age_months)
-        thresh = PEDIATRIC_NORMS[age_group]
+        age_group = get_age_group(age_months, age_bounds)
+        thresh = (PEDIATRIC_NORMS if norms is None else norms)[age_group]
 
         o2_mean, o2_std = (thresh["o2_low"] + 100) / 2.0, 3.0
         hr_mean, hr_std = (thresh["hr_high"] + thresh["hr_low"]) / 2.0, (thresh["hr_high"] - thresh["hr_low"]) / 4.0

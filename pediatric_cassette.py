@@ -11,13 +11,18 @@ industry can supply its own answers without touching the engine.
 """
 from __future__ import annotations
 
+import logging
+import math
 from dataclasses import replace
+from functools import partial
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 
 from cassette import ChannelModel
+from clinical_settings import ClinicalSettings
 from kalman_trajectory import _PEDIATRIC_CHANNEL_MODEL
 
 from observe_consolidated import (
+    RiskAdapters,
     _NUMERIC_CONTEXT_LIST_BOUNDS,
     _NUMERIC_CONTEXT_SCALAR_BOUNDS,
     _has_physiological_telemetry,
@@ -81,27 +86,64 @@ DEFAULT_ENGINE_GATE = ENGINE_GATE_WIDENED_PROVISIONAL
 ENGINE_GATES = (ENGINE_GATE_WIDENED_PROVISIONAL, ENGINE_GATE_CONSERVATIVE_LEGACY)
 
 
+logger = logging.getLogger("PEDIATRIC_CASSETTE")
+
+#: The name of the finding a reading outside the supported population carries. It is a "fault" only in the
+#: sense the core uses the word: the reading cannot be fully trusted to be scored on these norms.
+POPULATION_FAULT_KEY = "age_months"
+
+
 class PediatricCassette:
     """Pediatric deterioration: the original domain, behind the seam."""
 
     name = "pediatric_deterioration"
-    version = "1.1.0"  # 1.1.0: supplies mask_faults
+    version = "1.1.0"  # 1.1.0: supplies mask_faults. Settings and the population finding add no version:
+    # a default cassette keeps its recorded identity, and a changed setting is recorded in identity_extras
 
-    def __init__(self, engine_gate: str = DEFAULT_ENGINE_GATE) -> None:
+    def __init__(self, engine_gate: str = DEFAULT_ENGINE_GATE,
+                 settings: Optional[ClinicalSettings] = None) -> None:
         if engine_gate not in ENGINE_GATES:
             raise ValueError(
                 f"unknown engine_gate {engine_gate!r}; expected one of {sorted(ENGINE_GATES)}"
             )
+        if settings is not None and not isinstance(settings, ClinicalSettings):
+            raise TypeError("settings must be a ClinicalSettings (ClinicalSettings.from_mapping builds one)")
         self.engine_gate = engine_gate
+        self.settings = settings if settings is not None else ClinicalSettings()
+        s = self.settings
+        if s.engine_params_are_default():
+            self._engines = _ENGINES
+        else:
+            self._engines = {
+                **_ENGINES,
+                "heuristic": partial(RiskAdapters.heuristic, norms=s.norms, age_bounds=s.age_group_upper_months,
+                                     critical_o2_below=s.critical_o2_below, hypothermia_below=s.hypothermia_below),
+                "bayesian": partial(RiskAdapters.bayesian, norms=s.norms, age_bounds=s.age_group_upper_months),
+            }
+        weaker = s.weakenings()
+        if weaker:
+            logger.warning(f"clinical settings make an alert LESS likely than the defaults: {weaker} "
+                           f"(settings digest {s.digest()[:12]})")
 
     @property
     def identity_extras(self) -> Dict[str, str]:
         """What the core records under this cassette's identity beyond name and
-        version. Empty for the default gate, so default entries and fingerprints
-        are exactly what they were; the gate's name for any other."""
-        if self.engine_gate == DEFAULT_ENGINE_GATE:
-            return {}
-        return {"engine_gate": self.engine_gate}
+        version. Empty at the default gate and default settings, so default entries and
+        fingerprints are exactly what they were. Otherwise: the gate's name if it is not the
+        default, and the settings digest with the name of every setting that differs, so a
+        verdict is traceable to the values that produced it."""
+        extras: Dict[str, str] = {}
+        if self.engine_gate != DEFAULT_ENGINE_GATE:
+            extras["engine_gate"] = self.engine_gate
+        changed = self.settings.non_default()
+        if changed:
+            extras["settings_digest"] = self.settings.digest()
+            for key, value in changed.items():
+                extras[f"setting.{key}"] = value
+            weaker = self.settings.weakenings()
+            if weaker:
+                extras["settings_weaker"] = ",".join(weaker)
+        return extras
 
     # -- identity -----------------------------------------------------
     def subject_id(self, obs: Any) -> str:
@@ -109,7 +151,28 @@ class PediatricCassette:
 
     # -- trust boundary -----------------------------------------------
     def validate(self, obs: Any) -> List[str]:
-        return validate_vitals(obs)
+        return validate_vitals(obs) + self._population_faults(obs)
+
+    def _population_faults(self, obs: Any) -> List[str]:
+        """A reading outside this cassette's supported population, as a named finding.
+
+        Pediatric is the supported population; adult norms are a future cassette. A reading above
+        `max_age_months` is still assessed (mask_faults hands it back unchanged), so it is never scored less
+        severely for being out of scope, but it is floored at WARNING and says why, so a person looks."""
+        s = self.settings
+        if s.outside_population != "alert":
+            return []
+        context = obs.context if isinstance(getattr(obs, "context", None), dict) else {}
+        age = context.get("age_months")
+        known = isinstance(age, (int, float)) and not isinstance(age, bool) and math.isfinite(age)
+        if not known:
+            if s.require_age:
+                return [f"{POPULATION_FAULT_KEY}=missing: this deployment requires the patient's age"]
+            return []
+        if s.max_age_months is not None and age > s.max_age_months:
+            return [f"{POPULATION_FAULT_KEY}={age:g} is above the supported pediatric population "
+                    f"(max {s.max_age_months:g} months); assessed on pediatric norms, interpret with caution"]
+        return []
 
     def mask_faults(self, obs: Any, faults: List[str]) -> Optional[Any]:
         """The reading to assess in place of a faulted one, or None.
@@ -121,11 +184,17 @@ class PediatricCassette:
         channel is faulted (nothing is left to assess).
         """
         faulted: Set[str] = set()
+        population_only = False
         for fault in faults:
             channel = fault.split("=", 1)[0]
+            if channel == POPULATION_FAULT_KEY:
+                population_only = True  # until a channel fault below says otherwise
+                continue  # a finding about the patient, not a poisoned channel: nothing to mask
             if channel not in _VITALS_NEUTRAL:
                 return None
             faulted.add(channel)
+        if population_only and not faulted:
+            return obs  # every channel is real; assess them all, the finding is reported by the core
         if not faulted or faulted == set(_VITALS_NEUTRAL):
             return None
         dropped = {key for channel in faulted for key in _CHANNEL_CONTEXT_KEYS[channel]}
@@ -178,7 +247,7 @@ class PediatricCassette:
         return ordered
 
     def engines(self) -> Mapping[str, Callable[[Any], RiskOutput]]:
-        return _ENGINES
+        return self._engines
 
     # -- what is never noise -------------------------------------------
     def hard_rule_fired(self, outputs: List[RiskOutput]) -> bool:
