@@ -303,8 +303,13 @@ class TestGovernanceUnavailable(unittest.TestCase):
         self.assertEqual(
             d.governance_status == GovernanceStatus.APPROVED, d.governance_approved is True
         )
-        self.assertIsNone(d.human_alert)
-        self.assertEqual(alerts, [])
+        # Step 1 (H-01): a BLOCKED escalation now alerts a person; an APPROVED one still does not.
+        if d.governance_status == GovernanceStatus.BLOCKED:
+            self.assertEqual(d.human_alert, "delivered")
+            self.assertEqual(len(alerts), 1)
+        else:
+            self.assertIsNone(d.human_alert)
+            self.assertEqual(alerts, [])
 
     def test_a_system_without_an_alert_channel_is_refused_at_construction(self):
         with self.assertRaises(ValueError) as ctx:
@@ -360,6 +365,37 @@ class TestGovernanceUnavailable(unittest.TestCase):
         d = system.process_vitals(crit)
         self.assertEqual(d.action, "escalate_blocked")
         self.assertTrue(any("Physician approval required" in v for v in d.governance_violations))
+
+    def test_a_blocked_critical_escalation_still_alerts_a_person(self):
+        """Step 1 (H-01): governance may block the action; it may not leave a CRITICAL reading unheard."""
+        alerts = []
+        system = build_single_hospital_system(alert_human=alerts.append)
+        crit = VitalsSnapshot("P9", datetime.now(timezone.utc), 168, 83.0, 46, 39.5,
+                              context={"age_months": 12, "force_heavy": True})
+        d = system.process_vitals(crit)
+        self.assertEqual(d.governance_status, GovernanceStatus.BLOCKED)
+        self.assertEqual(d.human_alert, "delivered")
+        self.assertEqual(len(alerts), 1)
+        self.assertIs(alerts[0], d)
+
+    def test_a_blocked_escalation_with_no_channel_is_loud_not_silent(self):
+        system = build_single_hospital_system(allow_no_alert_channel=True)
+        crit = VitalsSnapshot("P9", datetime.now(timezone.utc), 168, 83.0, 46, 39.5,
+                              context={"age_months": 12, "force_heavy": True})
+        with self.assertLogs("CLINICAL_GOVERNANCE", level="CRITICAL"):
+            d = system.process_vitals(crit)
+        self.assertEqual(d.governance_status, GovernanceStatus.BLOCKED)
+        self.assertEqual(d.human_alert, "no_channel")
+
+    def test_an_approved_escalation_does_not_alert(self):
+        alerts = []
+        system = build_single_hospital_system(alert_human=alerts.append)
+        crit = VitalsSnapshot("P9", datetime.now(timezone.utc), 168, 83.0, 46, 39.5,
+                              context={"age_months": 12, "force_heavy": True, "physician_approved": True})
+        d = system.process_vitals(crit)
+        self.assertEqual(d.governance_status, GovernanceStatus.APPROVED)
+        self.assertIsNone(d.human_alert)
+        self.assertEqual(alerts, [])
 
 
 if __name__ == "__main__":

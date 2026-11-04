@@ -108,7 +108,8 @@ class ClinicalDecision:
     action: str = "continue_monitoring"  # or "escalate_approved" / "escalate_blocked"
                                          # / "escalate_governance_unavailable"
 
-    # Set only when governance was unavailable: "delivered", "failed" or "no_channel".
+    # Set when governance was unavailable or BLOCKED an escalation: "delivered", "failed" or
+    # "no_channel". "delivered" means the alert callback returned, not that a person saw it.
     # Anything other than "delivered" means no human was reached by this system and the
     # caller must put the decision in front of one.
     human_alert: Optional[str] = None
@@ -291,6 +292,11 @@ class ClinicalGovernanceSystem:
             logger.warning(
                 f"ESCALATION BLOCKED for {vitals.patient_id}: {'; '.join(gov_verdict.violations)}"
             )
+            # A governance verdict is about the action, not about whether a person hears of the
+            # patient. A blocked escalation used to end here with no alert at all, so a CRITICAL
+            # reading refused for want of a physician flag reached nobody. The block stands; the
+            # person is told, and the record says whether that worked.
+            self._alert_human(decision)
 
         return decision
 
