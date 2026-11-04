@@ -426,6 +426,22 @@ class TestGovernanceUnavailable(unittest.TestCase):
             d = system.process_vitals(vitals(pid="P3", hr=110, o2=98.0))
         self.assertEqual(d.human_alert, "no_channel")
 
+    def test_a_failing_pager_on_a_blocked_escalation_does_not_break_the_perceive_audit_chain(self):
+        """Step 1 follow-up: the alert failure is recorded on the decision, never on the hashed ledger entry."""
+        def _pager_down(_decision):
+            raise RuntimeError("pager unreachable")
+
+        system = build_single_hospital_system(alert_human=_pager_down)
+        crit = VitalsSnapshot("P9", datetime.now(timezone.utc), 168, 83.0, 46, 39.5,
+                              context={"age_months": 12, "force_heavy": True})
+        with self.assertLogs("CLINICAL_GOVERNANCE", level="CRITICAL"):
+            d = system.process_vitals(crit)
+        self.assertEqual(d.governance_status, GovernanceStatus.BLOCKED)
+        self.assertEqual(d.human_alert, "failed")
+        self.assertTrue(any(v.startswith("HUMAN_ALERT_FAILED") for v in d.governance_violations))
+        self.assertTrue(system.verify_all_audits()["perceive_chain_valid"])
+        self.assertFalse(any("HUMAN_ALERT_FAILED" in str(e) for e in system.export_perceive_audit()))
+
 
 if __name__ == "__main__":
     unittest.main()

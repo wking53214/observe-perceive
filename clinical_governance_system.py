@@ -300,7 +300,9 @@ class ClinicalGovernanceSystem:
         )
         decision.governance_approved = gov_verdict.approved
         decision.governance_confidence = gov_verdict.confidence
-        decision.governance_violations = gov_verdict.violations
+        # A copy: the verdict's own list is the one already hashed into PERCEIVE's ledger entry, and
+        # a failed alert appends to the decision's list (HUMAN_ALERT_FAILED), which must not reach it.
+        decision.governance_violations = list(gov_verdict.violations)
         decision.applied_gates = gov_verdict.applied_gates
         decision.perceive_audit_hash = gov_verdict.audit_hash
         decision.used_multi_node_consensus = gov_verdict.consensus_result is not None
