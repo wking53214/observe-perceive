@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **`profile="production"` proves its wiring or does not start.** The strict profile asked only that the
+  Conservation Kernel have *a* root guard, so strict plus `lambda artifact: True` executed an action with no
+  CNS roster anywhere. `production` is strict plus a startup proof (`production_profile.py`): CNS at v2.3.0
+  or later; the kernel's root guard is the `RootAdmission` handed to the orchestrator (identity); a canary the
+  roster must refuse is refused, registers nothing and leaves the guard closed; receipts and the execution
+  ledger are durable and signed; an alert channel, OBSERVE and event-time source keys are configured.
+  Every problem is reported at once. Advisory and strict are unchanged. A human-notification policy is not
+  checked because that lifecycle does not exist yet. Documents: `docs/race/GOVERNED_EXECUTION_PROFILE.md`,
+  `docs/race/CNS_ADMISSION_AND_IDENTITY_AUDIT.md`.
+
 - **`pyproject.toml` lists `cassette` and `pediatric_cassette`.** Both are imported at module level
   by listed modules (`observe_consolidated` imports `cassette`), and neither was in `py-modules`, so
   an installed copy could not import the package. A test walks the imports of every listed module
