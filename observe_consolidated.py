@@ -116,6 +116,11 @@ class FusedVerdict:
     state_commitment: str = ""  # governance_contracts.compute_state_commitment over verdict_state(),
     # chained per subject through predecessor_state_commitment; recorded in the audit entry
     validation_faults: List[str] = field(default_factory=list)  # validate()'s faults; non-empty iff unassessable
+    escalation_kind: str = ""  # "new_escalation" (up into WARNING or CRITICAL from below), "severity_increase" (an
+    # already-escalated patient moves to a HIGHER regime), "de_escalation" (the reported regime fell), or "".
+    # A severity increase is a new escalation event: escalation_required is True and this says why it is not a repeat.
+    previous_regime: str = ""  # the regime tracked before this reading ("" when there was none): what an
+    # escalation or de-escalation moved from, so two events for one patient stay distinguishable
     unassessable: bool = False  # True iff at least one channel of this reading failed validate().
     # With active_engines non-empty the verdict assesses the VALID channels only, floored at
     # WARNING and never below the tracked regime; with active_engines == [] nothing was scored.
@@ -980,8 +985,14 @@ class EscalationPolicy:
         if self.escalation_locked and self.last_escalation_time:
             elapsed = (timestamp - self.last_escalation_time).total_seconds()
             if elapsed < self.lock_seconds:
-                return self.current_regime, False
-            self.escalation_locked = False
+                # The cooldown exists to stop a storm of repeats at the SAME severity. It must never
+                # hide a genuine severity increase: a patient escalated at WARNING who worsens to
+                # CRITICAL is a new event, and used to be held at WARNING until the lock expired and
+                # two more readings confirmed. A higher candidate falls through to the dwell logic below.
+                if _REGIME_SEVERITY[new_regime] <= _REGIME_SEVERITY[self.current_regime]:
+                    return self.current_regime, False
+            else:
+                self.escalation_locked = False
 
         if new_regime == self.current_regime:
             self.pending_regime = None
@@ -997,8 +1008,9 @@ class EscalationPolicy:
             self.dwell_count = 1
 
         if self.dwell_count >= self.dwell_threshold:
+            # An escalation is any move UP into WARNING or CRITICAL, including WARNING to CRITICAL.
             escalation = (new_regime.value in ("warning", "critical")
-                           and self.current_regime.value in ("stable", "caution"))
+                          and _REGIME_SEVERITY[new_regime] > _REGIME_SEVERITY[self.current_regime])
             self.current_regime = new_regime
             self.pending_regime = None
             self.dwell_count = 0
@@ -1441,6 +1453,7 @@ class ObserveClinicalEngine:
 
         subject = self._cassette.subject_id(vitals)
         policy = self._get_policy(subject)
+        prior_regime = policy.current_regime  # what was tracked before this reading moves anything
 
         # DATA-INTEGRITY GATE (FIX, red-team R1/R2): a non-finite or physically
         # impossible reading is a sensor/data fault, not a clinical state. It must
@@ -1542,8 +1555,12 @@ class ObserveClinicalEngine:
                 all_triggered_bypass_note = []
             fused_risk = max(fused_risk, REGIME_RISK_FLOOR[final_regime.value])  # every call, not only a change
         elif bypass and candidate_regime.value in ("warning", "critical"):
-            escalation = policy.current_regime.value in ("stable", "caution")
-            final_regime = candidate_regime
+            # A bypass raises the regime and never lowers it: a patient tracked at CRITICAL stays CRITICAL
+            # when a later reading's bypass rates only WARNING. Any move UP is an escalation event, WARNING to
+            # CRITICAL included (it used to be one only from STABLE or CAUTION, so a worsening patient
+            # changed regime and raised no event).
+            final_regime = _max_severity(candidate_regime, policy.current_regime)
+            escalation = _REGIME_SEVERITY[final_regime] > _REGIME_SEVERITY[policy.current_regime]
             policy.current_regime = final_regime
             policy.pending_regime = None
             policy.dwell_count = 0
@@ -1556,6 +1573,15 @@ class ObserveClinicalEngine:
         else:
             final_regime, escalation = policy.evaluate(candidate_regime, vitals.timestamp)
             all_triggered_bypass_note = []
+
+        if escalation:
+            moved_up_from_escalated = (_REGIME_SEVERITY[prior_regime] >= _REGIME_SEVERITY[OperationalRegime.WARNING]
+                                       and _REGIME_SEVERITY[final_regime] > _REGIME_SEVERITY[prior_regime])
+            escalation_kind = "severity_increase" if moved_up_from_escalated else "new_escalation"
+        elif not unassessable and _REGIME_SEVERITY[final_regime] < _REGIME_SEVERITY[prior_regime]:
+            escalation_kind = "de_escalation"
+        else:
+            escalation_kind = ""
 
         fault_notes = [f"DATA_INTEGRITY_FAULT: {f}" for f in faults]
         all_triggered = fault_notes + all_triggered_bypass_note + [r for o in outputs for r in o.triggered_rules]
@@ -1573,6 +1599,9 @@ class ObserveClinicalEngine:
         }
         if all_triggered_bypass_note:  # present only then, so a clean entry keeps its shape
             decision_data["safety_bypass"] = list(all_triggered_bypass_note)
+        if escalation_kind in ("severity_increase", "de_escalation"):  # only the kinds this change adds
+            decision_data["escalation_kind"] = escalation_kind
+            decision_data["previous_regime"] = prior_regime.value
         if unassessable:  # present only then, so a clean entry keeps its shape
             decision_data["validation_faults"] = list(faults)
             decision_data["verdict"]["unassessable"] = True
@@ -1595,6 +1624,8 @@ class ObserveClinicalEngine:
             state_commitment=commitment,
             validation_faults=list(faults),
             unassessable=unassessable,
+            escalation_kind=escalation_kind,
+            previous_regime=prior_regime.value,
         )
 
         audit_hash = self.audit_ledger.append(
