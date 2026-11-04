@@ -151,6 +151,8 @@ Reports: `docs/closure/ARCHITECTURE_CLOSURE_REPORT.md`, `GOVERNANCE_BYPASS_REPOR
 
 The CNS pipeline below is not on that path. Nothing in the orchestrator calls it. It is an optional extra check for a caller who wants gates from several libraries combined under CNS, and it neither replaces nor substitutes for the orchestrator's guard.
 
+**The `production` profile** (`GovernanceOrchestrator(profile="production", ...)`) is strict plus a startup proof, and it refuses to start if the proof fails: CNS at v2.3.0 or later; the kernel's root guard is the very `RootAdmission` given to the orchestrator (identity, not a similar callable); a canary request the roster must refuse is refused and registers nothing; signed, durable receipts and execution ledger; an alert channel; an OBSERVE engine; registered source keys. It does not check a human-notification policy, because that does not exist yet. See `docs/race/GOVERNED_EXECUTION_PROFILE.md`.
+
 What `strict` guarantees: a kernel with a root guard, an executor guarded for the orchestrator's own ledger (an executor cannot declare itself guarded), and the guard switched on. What it does not: a caller who invokes the raw action function directly bypasses everything, and OBSERVE runs after the action, so it can warn but not prevent. If the action runs and its receipt then fails to append, the action has happened and a person is alerted; nothing is undone.
 
 ## Governed decision across libraries (optional)
