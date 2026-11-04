@@ -181,6 +181,11 @@ REGIME_CRITICAL_FLOOR_DEFAULT = 0.01  # regime_distribution: critical never reac
 DRIFT_CRITICAL_FLOOR = 0.02           # the drift adapter's stricter floor
 ESCALATION_DWELL_THRESHOLD = 2        # consecutive confirming readings before a regime change
 ESCALATION_LOCK_SECONDS = 300         # post-escalation cooldown (also the fault-page dedup window)
+# A hard rule that fires on one reading may be a sensor artefact; the same rule firing again within this many
+# of the patient's readings (the current one included) is not, and then holds the regime at WARNING whatever
+# the fusion says. Counted in readings, not seconds, so it does not depend on how often a unit samples.
+# Branch logic, like the rest of evaluate's: attested by the source revision, not by PARAMETER_SET.
+HARD_RULE_CONFIRM_WINDOW = 3
 # Fault overlay (ported from OBSERVE, T2b): how the core reasons about a reading
 # with a faulted channel. Each floor is the bottom of the REGIME_DISTRIBUTION_BANDS
 # band its regime wins, so a floored verdict's risk and regime agree.
@@ -1298,6 +1303,9 @@ class ObserveClinicalEngine:
         # EscalationPolicy is never written on such a reading, so it cannot
         # carry this dedup. Evicted with the policy.
         self._patient_fault_paged: Dict[str, Dict[str, datetime]] = {}
+        # Whether the hard rule fired on each of a subject's last HARD_RULE_CONFIRM_WINDOW readings.
+        # Evicted with the policy.
+        self._patient_hard_rule_recent: Dict[str, List[bool]] = {}
         # FIX(red-team / concurrency): the per-patient OrderedDict + entropy dict are
         # mutated during evaluate(). Safe under a single asyncio loop (no await inside
         # evaluate), but a thread pool / multiple loops could corrupt them mid-resize.
@@ -1346,10 +1354,31 @@ class ObserveClinicalEngine:
                 self._patient_entropy.pop(evicted_id, None)
                 self._state_commitments.pop(evicted_id, None)
                 self._patient_fault_paged.pop(evicted_id, None)
+                self._patient_hard_rule_recent.pop(evicted_id, None)
                 self.audit_ledger.append(
                     evicted_id, "STATE_EVICTED",
                     {"reason": "lru_capacity", "cap": self._max_tracked_patients},
                 )
+
+    def reset_tracked_state(self, vitals: "VitalsSnapshot") -> None:
+        """Forget what is tracked about this reading's subject, so its next reading starts from a fresh
+        STABLE baseline.
+
+        For a caller whose evaluation of the subject crashed. `evaluate` moves the subject's escalation
+        state before it fingerprints and records, so a crash part way through can leave the state saying
+        "already escalated, locked" for a reading no ledger holds, and the subject's next critical reading
+        would then be swallowed as a repeat. Starting again can only cause a repeat page, never silence,
+        which is the direction to be wrong in. Nothing is written to the audit ledger (it may be what
+        failed); the caller records the crash.
+        """
+        subject = self._cassette.subject_id(vitals)
+        with self._state_lock:
+            self._patient_policies.pop(subject, None)
+            self._patient_entropy.pop(subject, None)
+            self._state_commitments.pop(subject, None)
+            self._patient_fault_paged.pop(subject, None)
+            self._patient_hard_rule_recent.pop(subject, None)
+            self._patient_kalman.pop(subject, None)
 
     def _get_policy(self, patient_id: str) -> EscalationPolicy:
         with self._state_lock:
@@ -1523,6 +1552,14 @@ class ObserveClinicalEngine:
             for o in outputs for r in o.triggered_rules
         )
         bypass = hard_rule_fired or syndrome_fired
+        # A named syndrome is a conjunction of vitals, not one sensor, so it always holds the floor. A hard
+        # rule holds it once it has fired again within the confirmation window; a lone hard-rule reading is
+        # judged exactly as before (it may be an artefact, and the next reading decides).
+        with self._state_lock:
+            recent = self._patient_hard_rule_recent.get(subject, [])
+            hard_rule_confirmed = hard_rule_fired and any(recent[-(HARD_RULE_CONFIRM_WINDOW - 1):])
+            self._patient_hard_rule_recent[subject] = (recent + [hard_rule_fired])[-HARD_RULE_CONFIRM_WINDOW:]
+        hold_floor = syndrome_fired or hard_rule_confirmed
 
         if unassessable:
             # FROZEN POLICY: read, never written, on a faulted reading. Placeholder
@@ -1541,9 +1578,12 @@ class ObserveClinicalEngine:
             else:
                 all_triggered_bypass_note = []
             fused_risk = max(fused_risk, REGIME_RISK_FLOOR[final_regime.value])  # every call, not only a change
-        elif bypass and candidate_regime.value in ("warning", "critical"):
+        elif bypass and (hold_floor or candidate_regime.value in ("warning", "critical")):
             escalation = policy.current_regime.value in ("stable", "caution")
-            final_regime = candidate_regime
+            lifted = _REGIME_SEVERITY[candidate_regime] < _REGIME_SEVERITY[OperationalRegime.WARNING]
+            final_regime = _max_severity(candidate_regime, OperationalRegime.WARNING)
+            if lifted:  # only reachable with hold_floor: fusion rated it below WARNING and cannot argue it down
+                fused_risk = max(fused_risk, REGIME_RISK_FLOOR[final_regime.value])
             policy.current_regime = final_regime
             policy.pending_regime = None
             policy.dwell_count = 0
@@ -1553,6 +1593,9 @@ class ObserveClinicalEngine:
             reason = "hard-rule" if hard_rule_fired else "dangerous-syndrome"
             bypass_label = cassette_label(self._cassette, "safety_bypass")
             all_triggered_bypass_note = [f"{bypass_label}: {reason} trigger skipped dwell confirmation"]
+            if lifted:
+                all_triggered_bypass_note.append(
+                    f"{bypass_label}: {reason} trigger held the regime at WARNING against a lower fused regime")
         else:
             final_regime, escalation = policy.evaluate(candidate_regime, vitals.timestamp)
             all_triggered_bypass_note = []
