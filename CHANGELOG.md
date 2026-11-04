@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`pyproject.toml` lists `cassette` and `pediatric_cassette`.** Both are imported at module level
+  by listed modules (`observe_consolidated` imports `cassette`), and neither was in `py-modules`, so
+  an installed copy could not import the package. A test walks the imports of every listed module
+  and fails on any local module that is not listed.
+
 - **A cooldown no longer hides a worsening patient.** On `main`, a patient escalated at WARNING who
   worsened to CRITICAL was held at WARNING for the whole 300 s lock and, with a hard-rule bypass,
   changed regime but raised no escalation event (`escalation_required=False`, action
