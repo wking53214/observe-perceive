@@ -107,6 +107,7 @@ class ClinicalDecision:
     # Final action the system recommends
     action: str = "continue_monitoring"  # or "escalate_approved" / "escalate_blocked"
                                          # / "escalate_governance_unavailable"
+                                         # / "escalate_assessment_unavailable" (OBSERVE itself failed)
 
     # Set when governance was unavailable or BLOCKED an escalation: "delivered", "failed" or
     # "no_channel". "delivered" means the alert callback returned, not that a person saw it.
@@ -197,7 +198,28 @@ class ClinicalGovernanceSystem:
         """
 
         # --- Clinical layer ---
-        verdict: FusedVerdict = self.observe.evaluate(vitals)
+        try:
+            verdict: FusedVerdict = self.observe.evaluate(vitals)
+        except Exception as e:  # noqa: BLE001 - a failed assessment is never a quiet one
+            # An OBSERVE crash used to propagate: no decision came back and no person was told, so
+            # the patient simply was not assessed and nothing said so. Return a decision that says
+            # exactly that, mark it as needing a human, and alert. It carries no risk judgement:
+            # the regime is "assessment_unavailable", never a normal one.
+            logger.error(f"ASSESSMENT UNAVAILABLE for {vitals.patient_id}: {type(e).__name__}: {e}")
+            failed = ClinicalDecision(
+                patient_id=vitals.patient_id,
+                timestamp=vitals.timestamp,
+                risk_score=0.0,
+                regime="assessment_unavailable",
+                escalation_required=True,
+                active_engines=[],
+                triggered_rules=[],
+                observe_audit_hash="",
+                governance_violations=[f"ASSESSMENT_UNAVAILABLE: {type(e).__name__}: {e}"],
+                action="escalate_assessment_unavailable",
+            )
+            self._alert_human(failed)
+            return failed
 
         decision = ClinicalDecision(
             patient_id=vitals.patient_id,

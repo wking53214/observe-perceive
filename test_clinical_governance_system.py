@@ -397,6 +397,35 @@ class TestGovernanceUnavailable(unittest.TestCase):
         self.assertIsNone(d.human_alert)
         self.assertEqual(alerts, [])
 
+    def test_an_observe_crash_returns_a_decision_and_alerts_a_person(self):
+        """Step 3 (issue 7): a failed assessment is never a quiet one."""
+        alerts = []
+        system = build_single_hospital_system(alert_human=alerts.append)
+
+        def _boom(_vitals):
+            raise RuntimeError("simulated OBSERVE failure")
+
+        system.observe.evaluate = _boom
+        d = system.process_vitals(vitals(pid="P3", hr=110, o2=98.0))
+        self.assertEqual(d.action, "escalate_assessment_unavailable")
+        self.assertEqual(d.regime, "assessment_unavailable")
+        self.assertTrue(d.escalation_required)
+        self.assertEqual(d.governance_status, GovernanceStatus.NOT_EVALUATED)
+        self.assertEqual(d.human_alert, "delivered")
+        self.assertIs(alerts[0], d)
+        self.assertTrue(any("ASSESSMENT_UNAVAILABLE" in v for v in d.governance_violations))
+
+    def test_an_observe_crash_with_no_channel_is_loud(self):
+        system = build_single_hospital_system(allow_no_alert_channel=True)
+
+        def _boom(_vitals):
+            raise RuntimeError("simulated OBSERVE failure")
+
+        system.observe.evaluate = _boom
+        with self.assertLogs("CLINICAL_GOVERNANCE", level="CRITICAL"):
+            d = system.process_vitals(vitals(pid="P3", hr=110, o2=98.0))
+        self.assertEqual(d.human_alert, "no_channel")
+
 
 if __name__ == "__main__":
     unittest.main()
