@@ -272,6 +272,15 @@ class GovernanceOrchestrator:
         }
 
     @staticmethod
+    def _observe_problems(verdict) -> list:
+        """Why an OBSERVE verdict cannot back an action in the strict profile; empty if it can."""
+        problems = []
+        if getattr(verdict, "unassessable", True) is not False:
+            faults = list(getattr(verdict, "validation_faults", None) or [])
+            problems.append("the observation is unassessable" + (f" ({'; '.join(map(str, faults))})" if faults else ""))
+        return problems
+
+    @staticmethod
     def _temporal_anomalies(request) -> list:
         from datetime import timedelta
         anomalies = []
@@ -883,6 +892,41 @@ class GovernanceOrchestrator:
                 "the orchestrator with require_vitals=True to refuse instead."
             )
 
+        # Strict OBSERVE runs BEFORE the action (OP-1). An observation that is a precondition can only be one if it
+        # is made before the thing it conditions; run after, it could only describe what had already happened. An
+        # observation OBSERVE itself marks unassessable is a refusal: strict does not act on a reading it cannot read.
+        # The advisory profile keeps OBSERVE after the action, as before.
+        observe_verdict = None
+        observe_error = None
+        observed_before_action = False
+        if self.profile in ("strict", "production") and vitals_snapshot is not None:
+            logger.info("[Orchestrator] Phase 4b: OBSERVE before the action (strict)")
+            try:
+                if self.observe_engine is None:
+                    raise RuntimeError("no OBSERVE engine configured")
+                observe_verdict = self.observe_engine.evaluate(vitals_snapshot)
+            except Exception as e:
+                observe_error = f"{type(e).__name__}: {e}"
+                logger.error(f"[Orchestrator] OBSERVE did not produce a verdict: {observe_error}")
+            else:
+                observed_before_action = True
+                problems = self._observe_problems(observe_verdict)
+                if problems:
+                    logger.error(f"[Orchestrator] Refusing execution: OBSERVE cannot back it: {problems}")
+                    return self._stamp({
+                        "status": "REJECTED",
+                        "reason": "OBSERVE cannot back the action: " + "; ".join(problems),
+                        "refused_by": "observe",
+                        "stage_refused": True,
+                        "governance_decision": perceive_decision,
+                        "conservation_decision": conservation_decision,
+                        "execution_approval": execution_approval,
+                        "scope_enforced": declared_scope is not None,
+                        "observe_enforced": True,
+                        "observe_verdict": observe_verdict,
+                        "audit_chain": None,
+                    }, governance_request)
+
         logger.info("[Orchestrator] Phase 5: GSA-815 execution")
         executor = gsa815_operation_func
         # Only a wrapper `guarded` made, for THIS orchestrator's ledger, counts as already guarded. The
@@ -927,8 +971,8 @@ class GovernanceOrchestrator:
                 "execution_context": execution_context,
                 "execution_authorization": execution_authorization,
                 "gsa815_result": None,
-                "observe_verdict": None,
-                "observe_enforced": False,
+                "observe_verdict": observe_verdict,
+                "observe_enforced": observe_verdict is not None,
                 "outcome_context": outcome_context,
                 "audit_chain": None,
                 "audit_chain_valid": False,
@@ -958,9 +1002,9 @@ class GovernanceOrchestrator:
 
         # PHASE 6: OBSERVE monitoring
         logger.info("[Orchestrator] Phase 6: OBSERVE clinical monitoring")
-        observe_verdict = None
-        observe_error = None
-        if vitals_snapshot:
+        if observed_before_action or observe_error is not None:
+            logger.info("[Orchestrator] OBSERVE already ran before the action (strict)")
+        elif vitals_snapshot:
             # The action has already run. Whatever happens here must not lose
             # the record of it, so an OBSERVE failure is recorded beside the
             # execution rather than raised over it.
