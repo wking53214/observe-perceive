@@ -15,7 +15,8 @@ gw = importorskip_cns("governance_gateway.models")
 from conservation_kernel import ConservationKernel, HmacSigner  # noqa: E402
 from gateway_admission_adapter import GatewayAdmissionAdapter  # noqa: E402
 from governance_orchestrator import GovernanceOrchestrator  # noqa: E402
-from observe_consolidated import ObserveClinicalEngine  # noqa: E402
+from observe_consolidated import ObserveClinicalEngine, RiskOutput  # noqa: E402
+from pediatric_cassette import PediatricCassette  # noqa: E402
 from root_admission import RootAdmission  # noqa: E402
 from sentinel_perceive_adapter import SentinelPerceiveAdapter  # noqa: E402
 
@@ -114,3 +115,25 @@ def test_op2_strict_with_no_alert_channel_still_refuses_and_says_no_channel():
     result, order = run_strict(strict(Exploding()), "p5-op2b", make_vitals(), "P113")
     assert result["status"] == "REJECTED" and "executed" not in order
     assert result["human_alert"] == "no_channel"
+
+
+# ---- OP-3: a verdict with no evidence is not acceptable -------------------------------------------------------------
+
+class AbstainingCassette(PediatricCassette):
+    """Every engine abstains: nothing assessed the patient, so the fused 'stable' rests on no evidence."""
+
+    def engines(self):
+        def abstain(name):
+            return lambda v: RiskOutput(name, 0.0, 0.0, {"stable": 1.0, "caution": 0.0, "warning": 0.0,
+                                                         "critical": 0.0}, [], dt.datetime.now(dt.timezone.utc),
+                                        abstained=True)
+        return {n: abstain(n) for n in super().engines()}
+
+
+def test_op3_strict_refuses_a_no_evidence_stable_verdict_for_a_hypoxic_tachycardic_child():
+    vitals = dataclasses.replace(make_vitals(), oxygen_saturation=84.0, heart_rate=190)
+    result, order = run_strict(strict(ObserveClinicalEngine(cassette=AbstainingCassette())), "p5-op3", vitals, "P114")
+    assert result["status"] == "REJECTED"
+    assert result["refused_by"] == "observe" and result["stage_refused"] is True
+    assert "evidence" in result["reason"]
+    assert "executed" not in order
