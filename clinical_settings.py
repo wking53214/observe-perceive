@@ -152,6 +152,29 @@ class ClinicalSettings:
         return cls(**overrides)
 
     @classmethod
+    def from_json_file(cls, path: Any) -> "ClinicalSettings":
+        """Settings from a JSON file a clinician can edit. A missing or unreadable file raises: a deployment
+        that was meant to run on tuned settings must not quietly run on the defaults."""
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return cls.from_json(fh.read())
+        except OSError as exc:
+            raise SettingsError(f"settings file {path!s} cannot be read: {exc}") from exc
+
+    @classmethod
+    def coerce(cls, value: Any) -> "ClinicalSettings":
+        """Settings from whatever a caller holds: None (defaults), settings, a mapping, or a path to a JSON file."""
+        if value is None:
+            return cls()
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, Mapping):
+            return cls.from_mapping(value)
+        if isinstance(value, (str, bytes)) or hasattr(value, "__fspath__"):
+            return cls.from_json_file(value)
+        raise SettingsError(f"cannot read settings from a {type(value).__name__}")
+
+    @classmethod
     def from_json(cls, text: str) -> "ClinicalSettings":
         try:
             data = json.loads(text)
