@@ -90,6 +90,10 @@ class ClinicalDecision:
     active_engines: List[str]
     triggered_rules: List[str]
     observe_audit_hash: str
+    # What kind of event this reading is, from OBSERVE: "new_escalation", "severity_increase" (an escalated
+    # patient moved to a HIGHER regime: a new event, distinct from the one before it), "de_escalation", or "".
+    escalation_kind: str = ""
+    previous_regime: str = ""  # the regime tracked before this reading
 
     # Governance layer (PERCEIVE) -- only populated if escalation occurred.
     # governance_status is the field to read. governance_evaluated is True only when a
@@ -207,6 +211,8 @@ class ClinicalGovernanceSystem:
             active_engines=verdict.active_engines,
             triggered_rules=verdict.triggered_rules,
             observe_audit_hash=verdict.audit_hash,
+            escalation_kind=verdict.escalation_kind,
+            previous_regime=verdict.previous_regime,
         )
 
         # --- WS3: reserve modulation (opt-in; no effect unless modulator + utilization) ---
@@ -347,6 +353,8 @@ class ClinicalGovernanceSystem:
             "risk_score": verdict.risk_score,
             "regime": verdict.regime.value,
             "top_triggers": verdict.triggered_rules[:3],
+            "escalation_kind": verdict.escalation_kind,
+            "previous_regime": verdict.previous_regime,
         }
 
         if verdict.regime == OperationalRegime.CRITICAL:
