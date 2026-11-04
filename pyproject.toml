@@ -63,7 +63,7 @@ py-modules = [
   "gems_governance_adapter", "governance_chain", "governance_contracts",
   "governance_orchestrator", "governance_record", "governance_recurring_report", "gsa815_observe_adapter", "herald_governance_adapter",
   "approval_governance_adapter", "kalman_trajectory", "observe_consolidated",
-  "orchestrator_ccc_adapter", "perceive_conservation_adapter",
+  "orchestrator_ccc_adapter", "perceive_conservation_adapter", "production_profile",
   "perceive_consolidated", "reserve_control", "root_admission", "sentinel_perceive_adapter",
   "tie_governance_adapter", "vertical_slice",
 ]

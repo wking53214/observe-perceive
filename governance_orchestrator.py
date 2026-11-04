@@ -115,10 +115,12 @@ class GovernanceOrchestrator:
         # be supplied, the event time must be attested by a registered source
         # key, and violations PERCEIVE only advised on are enforced here.
         # Whichever profile produced a record is named on the record.
-        if profile not in ("advisory", "strict"):
-            raise ValueError(f"unknown profile {profile!r}; use 'advisory' or 'strict'")
+        if profile not in ("advisory", "strict", "production"):
+            raise ValueError(f"unknown profile {profile!r}; use 'advisory', 'strict' or 'production'")
         self.profile = profile
-        strict = profile == "strict"
+        # "production" is strict plus a startup proof that the controls it claims are the controls wired
+        # (production_profile.py). It enforces everything strict does.
+        strict = profile in ("strict", "production")
         # Strict is the protected profile. A kernel with no root guard registers any root it admits, so the
         # roster that decides what may become ancestry would be advisory. Refuse it here, not at the first root.
         if strict and conservation_kernel is not None and not getattr(conservation_kernel, "has_root_guard", False):
@@ -165,6 +167,15 @@ class GovernanceOrchestrator:
         self.perceive = perceive
         self.conservation_kernel = conservation_kernel
         self.observe_engine = observe_engine
+        if profile == "production":
+            # Fail closed at construction: an orchestrator that cannot prove its wiring never starts.
+            from production_profile import ProductionProfileError, production_problems
+            problems = production_problems(
+                conservation_kernel=conservation_kernel, root_admission=root_admission,
+                observe_engine=observe_engine, receipts=receipts, execution_ledger=self.execution_ledger,
+                alert_human=alert_human, source_signers=source_signers, guard_executor=guard_executor)
+            if problems:
+                raise ProductionProfileError(problems)
 
         # Lazy imports for adapters
         from sentinel_perceive_adapter import SentinelPerceiveAdapter
