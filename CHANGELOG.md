@@ -16,6 +16,16 @@
   human-governed recovery are not part of this change. See `docs/race/ESCALATION_INTEGRITY_DESIGN.md`
   and `docs/race/ESCALATION_HAZARD_ANALYSIS.md`.
 
+- **The demo requirements install the libraries without their `[cns]` extras.** CI's `cns` job
+  had failed at install since the CNS pin moved to v2.3.0 (run 137): `requirements-demo.txt`
+  installed Governance Gateway, CCC, DIT and the Conservation Kernel with their `[cns]` extra, and
+  at those commits each extra pins CNS v2.2.0, which pip cannot install beside v2.3.0. They are
+  now installed from the same commits without the extra, as AUGUR already was, and CNS comes from
+  the one explicit v2.3.0 line. README, the `pyproject.toml` comment and the false comment in
+  `requirements-demo.txt` now say what is true. The default test job and the future-clock pass run
+  with `-rs`, so skipped tests are listed. One test edited: the requirements test asserted the extra.
+  Evidence and what was not verified: `docs/race/DEPENDENCY_COMPATIBILITY_REPORT.md`.
+
 - **The behavioral-engine gate is a named, validated setting.** PR-2a of OBSERVE's
   `RECONCILE_UPSTREAM_PLAN.md`, the upstream half of the owner's decision to keep OBSERVE's
   narrower clinical rule until a pediatrician signs off upstream's wider one.
