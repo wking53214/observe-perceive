@@ -126,7 +126,7 @@ def test_age_group_boundaries_are_adjustable():
 def test_weakenings_name_only_the_settings_that_alert_less():
     s = ClinicalSettings.from_mapping({
         "norms": {"child": {"hr_high": 140, "hr_low": 90, "o2_low": 90, "rr_high": 30}},
-        "hard_rule_confirm_window": 5, "hard_rule_corroboration": False, "outside_population": "assess_anyway"})
+        "hard_rule_confirm_window": 2, "hard_rule_corroboration": False, "outside_population": "assess_anyway"})
     assert s.weakenings() == sorted([
         "norms.child.hr_high", "norms.child.hr_low", "norms.child.o2_low", "hard_rule_confirm_window",
         "hard_rule_corroboration", "outside_population"])                       # rr_high 30 < 35 alerts MORE
@@ -210,3 +210,103 @@ def test_the_population_floor_pages_once_per_window_and_never_suppresses_a_later
     assert pages == [True, False, False]                                         # one page, then held
     crit = e.evaluate(VitalsSnapshot("A", T + timedelta(minutes=3), 168, 83.0, 46, 39.5, {"age_months": 480}))
     assert crit.regime == OperationalRegime.CRITICAL and crit.escalation_required
+
+
+# ---- review findings: direction, validation, immutability, canonical form ----------------------------------------
+
+@pytest.mark.parametrize("change,weaker", [
+    ({"hard_rule_confirm_window": 1}, True),          # 1 turns repeat confirmation off
+    ({"hard_rule_confirm_window": 2}, True),
+    ({"hard_rule_confirm_window": 10}, False),        # a longer window lets MORE repeats count
+    ({"max_age_months": 300}, True),                  # fewer patients get the finding
+    ({"max_age_months": None}, True),
+    ({"max_age_months": 100}, False),
+    ({"age_group_upper_months": (4, 12, 36)}, True),  # direction cannot be shown to be safe, so it is listed
+    ({"hard_rule_corroboration_margin": 0.3}, True),
+    ({"hard_rule_corroboration_margin": 0.0}, False),
+    ({"require_age": True}, False),
+])
+def test_weakening_direction(change, weaker):
+    assert bool(ClinicalSettings.from_mapping(change).weakenings()) is weaker, change
+
+
+def test_a_window_of_one_really_is_the_weaker_behaviour():
+    """The flag must match what the engine does: with window 1 two low readings in a row no longer escalate."""
+    from datetime import timedelta
+    rows = [(100, 98, 24, 37.0), (102, 85, 26, 37.5), (104, 84, 28, 37.6)]
+
+    def third(window):
+        e = engine(hard_rule_confirm_window=window)
+        prev, out = None, None
+        for i, (hr, o2, rr, t) in enumerate(rows):
+            ctx = {"age_months": 24}
+            if prev:
+                ctx.update(previous_hr=prev[0], previous_o2=prev[1], previous_rr=prev[2], previous_temp=prev[3],
+                           time_delta_seconds=3600)
+            out = e.evaluate(VitalsSnapshot("P", T + timedelta(hours=i), hr, o2, rr, t, ctx))
+            prev = (hr, o2, rr, t)
+        return out.escalation_required
+    assert third(3) and not third(1)
+    assert "hard_rule_confirm_window" in ClinicalSettings.from_mapping({"hard_rule_confirm_window": 1}).weakenings()
+
+
+@pytest.mark.parametrize("bad", [
+    {"norms": {"generic": {"hr_high": 150, "hr_low": 90, "rr_high": 40, "o2_low": 91, "temp_high": 39.0}}},  # groups missing
+    {"norms": None}, {"norms": []}, {"norms": {"child": 5}}, {"age_group_upper_months": None},
+    {"age_group_upper_months": "abc"}, {"max_age_months": [1]},
+])
+def test_malformed_settings_are_a_settings_error_never_a_crash_later(bad):
+    with pytest.raises(SettingsError):
+        ClinicalSettings(**bad)
+
+
+def test_from_mapping_rejects_malformed_norms_with_a_settings_error():
+    for bad in ({"norms": {"child": 5}}, {"norms": [1]}, {"norms": None}):
+        with pytest.raises(SettingsError):
+            ClinicalSettings.from_mapping(bad)
+
+
+def test_the_norms_table_cannot_be_changed_after_construction():
+    s = ClinicalSettings()
+    with pytest.raises(TypeError):
+        s.norms["child"]["hr_high"] = 999
+    with pytest.raises(TypeError):
+        s.norms["child"] = {}
+    c = PediatricCassette(settings=s)
+    assert c.settings.norms["child"]["hr_high"] == 130          # what the record says is what the engine uses
+
+
+def test_equal_values_are_equal_everywhere_whatever_their_spelling():
+    a = ClinicalSettings.from_mapping({"age_group_upper_months": [3.0, 12.0, 36.0], "max_age_months": 216,
+                                       "critical_o2_below": 88.0})
+    assert a.digest() == ClinicalSettings().digest() and a.non_default() == {}
+    assert PediatricCassette(settings=a).identity_extras == {}
+
+
+def test_default_engine_text_is_unchanged_when_a_norm_is_tuned():
+    out = engine(norms={"child": {"hr_high": 125.0}}).evaluate(snap(age=60, hr=130))
+    assert any(r == "TACHYCARDIA: 130 > 125" for r in out.triggered_rules)     # 125, not 125.0
+
+
+def test_every_local_module_the_package_imports_is_listed_in_pyproject():
+    """An installed copy imports only what pyproject lists. Review found two omissions (cassette, pediatric_cassette)."""
+    import ast
+    import pathlib
+    import re
+    root = pathlib.Path(__file__).parent
+    mods = {p.stem for p in root.glob("*.py") if not p.name.startswith("test_") and p.name not in ("conftest.py", "__init__.py")}
+    text = (root / "pyproject.toml").read_text()
+    listed = set(re.findall(r'"([a-z_0-9]+)"', text[text.index("py-modules"):]))
+    frontier, seen, missing = listed & mods, set(), set()
+    while frontier:
+        m = frontier.pop()
+        seen.add(m)
+        for n in ast.walk(ast.parse((root / f"{m}.py").read_text())):
+            names = [a.name.split(".")[0] for a in n.names] if isinstance(n, ast.Import) else \
+                [n.module.split(".")[0]] if isinstance(n, ast.ImportFrom) and n.module and n.level == 0 else []
+            for x in names:
+                if x in mods and x not in seen:
+                    if x not in listed:
+                        missing.add(x)
+                    frontier.add(x)
+    assert not missing, f"imported by the package but not in pyproject py-modules: {sorted(missing)}"

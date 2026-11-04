@@ -36,6 +36,7 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass, field, fields
+from types import MappingProxyType
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from observe_consolidated import AGE_GROUP_UPPER_MONTHS, PEDIATRIC_NORMS
@@ -63,6 +64,20 @@ def _default_norms() -> Dict[str, Dict[str, float]]:
     return copy.deepcopy(PEDIATRIC_NORMS)
 
 
+def _canon(value: Any) -> Any:
+    """A number in one canonical form (8.0 is 8), so equal values are equal everywhere: in comparisons, in the
+    digest, and in the text the engines print. Anything that is not a number is returned untouched."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value
+    return int(value) if float(value).is_integer() else float(value)
+
+
+def _plain_norms(value: Any) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(value, Mapping) or any(not isinstance(row, Mapping) for row in value.values()):
+        raise SettingsError("norms must be a mapping of age group to a mapping of reference values")
+    return {str(group): dict(row) for group, row in value.items()}
+
+
 @dataclass(frozen=True)
 class ClinicalSettings:
     # --- population ---
@@ -83,10 +98,23 @@ class ClinicalSettings:
     probe_off_spo2_at_or_below: Optional[float] = 0.0
 
     def __post_init__(self) -> None:
-        norms = copy.deepcopy(self.norms)
-        object.__setattr__(self, "norms", norms)
-        object.__setattr__(self, "age_group_upper_months", tuple(self.age_group_upper_months))
-        self._validate()
+        # Anything malformed is a SettingsError with a reason, never a TypeError from deep inside.
+        try:
+            object.__setattr__(self, "norms", _plain_norms(self.norms))
+            object.__setattr__(self, "age_group_upper_months", tuple(self.age_group_upper_months))
+            self._validate()
+        except SettingsError:
+            raise
+        except (TypeError, AttributeError, KeyError, ValueError) as exc:
+            raise SettingsError(f"settings are malformed: {type(exc).__name__}: {exc}") from exc
+        # Validated: put numbers in canonical form and freeze the norms table, so the cassette and the record
+        # can never disagree about the values in force and nothing can change them after construction.
+        object.__setattr__(self, "norms", MappingProxyType({
+            g: MappingProxyType({k: _canon(v) for k, v in row.items()}) for g, row in self.norms.items()}))
+        object.__setattr__(self, "age_group_upper_months", tuple(_canon(x) for x in self.age_group_upper_months))
+        for name in ("max_age_months", "critical_o2_below", "hypothermia_below",
+                     "hard_rule_corroboration_margin", "probe_off_spo2_at_or_below"):
+            object.__setattr__(self, name, _canon(getattr(self, name)))
 
     # -- validation ------------------------------------------------------
     def _validate(self) -> None:
@@ -99,6 +127,10 @@ class ClinicalSettings:
         b = [_num(x, "age_group_upper_months") for x in self.age_group_upper_months]
         if len(b) != 3 or b[0] <= 0 or not b[0] < b[1] < b[2]:
             raise SettingsError("age_group_upper_months must be three increasing positive numbers")
+        missing = sorted(set(PEDIATRIC_NORMS) - set(self.norms))
+        if missing:
+            raise SettingsError(f"norms must give every age group; missing {missing} "
+                                "(from_mapping fills the groups you do not name)")
         for group, row in self.norms.items():
             if group not in PEDIATRIC_NORMS:
                 raise SettingsError(f"unknown age group {group!r} in norms; known: {sorted(PEDIATRIC_NORMS)}")
@@ -141,7 +173,10 @@ class ClinicalSettings:
             raise SettingsError(f"unknown setting(s) {unknown}; known: {sorted(known)}")
         if "norms" in overrides:
             merged = _default_norms()
-            for group, row in dict(overrides["norms"]).items():
+            given = overrides["norms"]
+            if not isinstance(given, Mapping) or any(not isinstance(r, Mapping) for r in given.values()):
+                raise SettingsError("norms must be a mapping of age group to a mapping of the values to change")
+            for group, row in dict(given).items():
                 if group not in merged:
                     raise SettingsError(f"unknown age group {group!r} in norms; known: {sorted(merged)}")
                 bad = sorted(set(row) - set(_NORM_KEYS))
@@ -188,7 +223,7 @@ class ClinicalSettings:
     def as_dict(self) -> Dict[str, Any]:
         out = {f.name: getattr(self, f.name) for f in fields(self)}
         out["age_group_upper_months"] = list(self.age_group_upper_months)
-        out["norms"] = copy.deepcopy(self.norms)
+        out["norms"] = {g: dict(row) for g, row in self.norms.items()}
         return out
 
     def digest(self) -> str:
@@ -210,12 +245,12 @@ class ClinicalSettings:
         return changed
 
     # direction in which a value makes the system LESS likely to alert
-    _WEAKER_WHEN_HIGHER = ("norms.*.hr_high", "norms.*.rr_high", "norms.*.temp_high", "hard_rule_confirm_window",
-                           "hard_rule_corroboration_margin")
+    _WEAKER_WHEN_HIGHER = ("norms.*.hr_high", "norms.*.rr_high", "norms.*.temp_high")
     _WEAKER_WHEN_LOWER = ("norms.*.hr_low", "norms.*.o2_low", "critical_o2_below", "hypothermia_below")
 
     def weakenings(self) -> List[str]:
-        """Names of the non-default settings that make an alert less likely than the default does."""
+        """Names of the non-default settings that make an alert less likely than the default does, or that
+        cannot be shown to make it no less likely."""
         base, mine = ClinicalSettings().as_dict(), self.as_dict()
         weak: List[str] = []
 
@@ -229,10 +264,20 @@ class ClinicalSettings:
                 if pattern in self._WEAKER_WHEN_HIGHER or pattern in self._WEAKER_WHEN_LOWER:
                     check(f"norms.{group}.{k}", mine["norms"][group][k], base["norms"][group][k],
                           pattern in self._WEAKER_WHEN_HIGHER)
-        for key in ("hard_rule_confirm_window", "hard_rule_corroboration_margin"):
-            check(key, mine[key], base[key], True)
+        check("hard_rule_corroboration_margin", mine["hard_rule_corroboration_margin"],
+              base["hard_rule_corroboration_margin"], True)           # harder to count as corroborated
         for key in ("critical_o2_below", "hypothermia_below"):
             check(key, mine[key], base[key], False)
+        # A shorter window lets fewer repeats count (1 turns repeat confirmation off), so it is the weaker way.
+        check("hard_rule_confirm_window", mine["hard_rule_confirm_window"], base["hard_rule_confirm_window"], False)
+        # A higher bound (or none) means fewer patients get the out-of-population finding.
+        inf = float("inf")
+        check("max_age_months", inf if mine["max_age_months"] is None else mine["max_age_months"],
+              inf if base["max_age_months"] is None else base["max_age_months"], True)
+        # Moving an age-group boundary moves some children onto a different row; whether that alerts less
+        # depends on the child, so it cannot be shown to be safe and is listed.
+        if tuple(mine["age_group_upper_months"]) != tuple(base["age_group_upper_months"]):
+            weak.append("age_group_upper_months")
         if self.hard_rule_corroboration is False:
             weak.append("hard_rule_corroboration")
         if self.outside_population == "assess_anyway":
