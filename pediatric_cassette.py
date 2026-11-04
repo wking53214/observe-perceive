@@ -262,6 +262,35 @@ class PediatricCassette:
                 return out.risk_score >= HARD_RULE_RISK
         return False
 
+    # -- hard-rule confirmation (clinician settings) -------------------
+    def hard_rule_confirm_window(self) -> int:
+        """How many of a patient's readings, the current one included, make a repeat of the hard rule."""
+        return self.settings.hard_rule_confirm_window
+
+    def hard_rule_corroborated(self, outputs: List[RiskOutput]) -> bool:
+        """Is the hard rule accompanied by another abnormal finding in the same assessment?
+
+        Each heuristic finding adds to its score, and the hard rule itself is worth exactly HARD_RULE_RISK, so
+        a score above it by at least the margin means something else was abnormal too. An artefact on one
+        sensor does not raise a child's respiratory rate or temperature."""
+        s = self.settings
+        if not s.hard_rule_corroboration:
+            return False
+        for out in outputs:
+            if out.engine_name == HARD_RULE_ENGINE and not out.abstained:
+                return out.risk_score >= HARD_RULE_RISK + s.hard_rule_corroboration_margin
+        return False
+
+    def advisory_notes(self, obs: Any) -> List[str]:
+        """Notes that sit beside the verdict and change no regime."""
+        limit = self.settings.probe_off_spo2_at_or_below
+        o2 = getattr(obs, "oxygen_saturation", None)
+        if limit is not None and isinstance(o2, (int, float)) and not isinstance(o2, bool) \
+                and math.isfinite(o2) and o2 <= limit:
+            return [f"POSSIBLE_SENSOR_DISCONNECT: SpO2 reads {o2:g}%; check the probe and check the patient. "
+                    "The reading is not downgraded."]
+        return []
+
     def labels(self) -> Mapping[str, str]:
         """The exact strings this domain's ledger already contains.
 

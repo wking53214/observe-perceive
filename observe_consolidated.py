@@ -1569,11 +1569,22 @@ class ObserveClinicalEngine:
         # A named syndrome is a conjunction of vitals, not one sensor, so it always holds the floor. A hard
         # rule holds it once it has fired again within the confirmation window; a lone hard-rule reading is
         # judged exactly as before (it may be an artefact, and the next reading decides).
+        # A hard rule is also confirmed at once when another channel is abnormal alongside it: a sensor
+        # artefact does not raise a child's respiratory rate or temperature. The domain says how many
+        # readings make a repeat and what counts as corroboration (both are clinician settings).
+        window_of = cassette_optional_member(self._cassette, "hard_rule_confirm_window")
+        window = max(1, int(window_of())) if window_of else HARD_RULE_CONFIRM_WINDOW
+        corroborated_by = cassette_optional_member(self._cassette, "hard_rule_corroborated")
+        corroborated = bool(hard_rule_fired and corroborated_by and corroborated_by(outputs))
         with self._state_lock:
             recent = self._patient_hard_rule_recent.get(subject, [])
-            hard_rule_confirmed = hard_rule_fired and any(recent[-(HARD_RULE_CONFIRM_WINDOW - 1):])
-            self._patient_hard_rule_recent[subject] = (recent + [hard_rule_fired])[-HARD_RULE_CONFIRM_WINDOW:]
+            repeated = window > 1 and any(recent[-(window - 1):])
+            hard_rule_confirmed = hard_rule_fired and (repeated or corroborated)
+            self._patient_hard_rule_recent[subject] = (recent + [hard_rule_fired])[-window:]
         hold_floor = syndrome_fired or hard_rule_confirmed
+        # Notes the domain wants beside the verdict that change no regime (for example a probe that may be off).
+        notes_of = cassette_optional_member(self._cassette, "advisory_notes")
+        advisory_notes = list(notes_of(recorded)) if notes_of else []
 
         if unassessable:
             # FROZEN POLICY: read, never written, on a faulted reading. Placeholder
@@ -1608,14 +1619,15 @@ class ObserveClinicalEngine:
             bypass_label = cassette_label(self._cassette, "safety_bypass")
             all_triggered_bypass_note = [f"{bypass_label}: {reason} trigger skipped dwell confirmation"]
             if lifted:
+                why = "corroborated by another abnormal channel" if corroborated else "confirmed within the window"
                 all_triggered_bypass_note.append(
-                    f"{bypass_label}: {reason} trigger held the regime at WARNING against a lower fused regime")
+                    f"{bypass_label}: {reason} trigger ({why}) held the regime at WARNING against a lower fused regime")
         else:
             final_regime, escalation = policy.evaluate(candidate_regime, vitals.timestamp)
             all_triggered_bypass_note = []
 
         fault_notes = [f"DATA_INTEGRITY_FAULT: {f}" for f in faults]
-        all_triggered = fault_notes + all_triggered_bypass_note + [r for o in outputs for r in o.triggered_rules]
+        all_triggered = fault_notes + all_triggered_bypass_note + advisory_notes + [r for o in outputs for r in o.triggered_rules]
         avg_confidence = sum(o.confidence for o in outputs) / len(outputs) if outputs else 0.0
         if unassessable:
             avg_confidence *= UNASSESSABLE_CONFIDENCE_PENALTY
@@ -1630,6 +1642,8 @@ class ObserveClinicalEngine:
         }
         if all_triggered_bypass_note:  # present only then, so a clean entry keeps its shape
             decision_data["safety_bypass"] = list(all_triggered_bypass_note)
+        if advisory_notes:  # likewise
+            decision_data["advisory_notes"] = list(advisory_notes)
         if unassessable:  # present only then, so a clean entry keeps its shape
             decision_data["validation_faults"] = list(faults)
             decision_data["verdict"]["unassessable"] = True
