@@ -128,6 +128,18 @@ class GovernanceOrchestrator:
         if strict and conservation_kernel is not None and not getattr(conservation_kernel, "has_root_guard", False):
             raise ValueError("the strict profile needs a Conservation Kernel built with a root guard; this one "
                              "would register any root it admits (use profile='advisory' for an unguarded kernel)")
+        # When the kernel lets its guard be read (`root_guard`, Conservation_Kernel after the pin this repo
+        # carries), strict also asks what it is: the roster-backed RootAdmission, not a bare callable that
+        # answers yes. A kernel that does not expose it keeps the has_root_guard check above and nothing more.
+        if strict and conservation_kernel is not None:
+            held = getattr(conservation_kernel, "root_guard", None)
+            if held is not None:
+                from root_admission import RootAdmission
+                if not isinstance(held, RootAdmission):
+                    raise ValueError(
+                        f"the strict profile needs the Conservation Kernel's root guard to be a RootAdmission "
+                        f"(the CNS roster); this one is a {type(held).__name__}, which would admit whatever it "
+                        "answers yes to (use profile='advisory' for another guard)")
         # The executor guard is strict's pre-action authorization. Without it the orchestrator can only consume
         # the context after the action has run. Advisory may still turn it off, for callers that guard elsewhere.
         if strict and not guard_executor:

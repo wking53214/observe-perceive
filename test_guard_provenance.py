@@ -91,3 +91,31 @@ def test_strict_profile_refuses_to_switch_the_pre_action_guard_off(perceive):
 def test_advisory_profile_may_still_switch_the_guard_off(perceive, kernel):
     off = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), guard_executor=False)
     assert off.guard_executor is False
+
+
+# ---- strict reads the kernel's guard when the kernel lets it be read (Conservation_Kernel after the pin) ----------
+
+class _ReadableKernel:
+    """A kernel that exposes its guard, as Conservation_Kernel main does. Only what the check reads."""
+
+    def __init__(self, guard):
+        self.has_root_guard = guard is not None
+        self.root_guard = guard
+
+
+def test_strict_refuses_a_readable_guard_that_is_a_bare_callable():
+    with pytest.raises(ValueError, match="RootAdmission"):
+        GovernanceOrchestrator(None, _ReadableKernel(lambda artifact: True), ObserveClinicalEngine(),
+                               profile="strict", guard_executor=True)
+
+
+def test_strict_accepts_a_readable_guard_that_is_the_roster():
+    pytest.importorskip("cns_composition.decision_guard")
+    from root_admission import RootAdmission
+    GovernanceOrchestrator(None, _ReadableKernel(RootAdmission()), ObserveClinicalEngine(),
+                           profile="strict", guard_executor=True)
+
+
+def test_advisory_still_accepts_a_readable_bare_callable_guard():
+    GovernanceOrchestrator(None, _ReadableKernel(lambda artifact: True), ObserveClinicalEngine(),
+                           profile="advisory")
