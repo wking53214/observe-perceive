@@ -8,6 +8,7 @@ importorskip_cns("cns.gate", reason="needs the pinned CNS package")
 
 from cns.gate import GateOutcome  # noqa: E402
 from cns_connector import ObserveCnsGate  # noqa: E402
+from observe_consolidated import ObserveClinicalEngine  # noqa: E402
 from test_cns_connector import make_verdict, make_vitals  # noqa: E402
 
 
@@ -30,5 +31,6 @@ def test_a_non_finite_reading_is_a_sensor_fault_to_re_read_and_the_refusal_is_st
 
 
 def test_a_normal_verdict_and_normal_vitals_still_pass():
-    assert ObserveCnsGate("omega").check(make_verdict()).outcome is GateOutcome.PASS
+    engine = ObserveClinicalEngine()
+    assert ObserveCnsGate("omega", engine=engine).check(engine.evaluate(make_vitals())).outcome is GateOutcome.PASS
     assert ObserveCnsGate("alpha").check(make_vitals()).outcome is GateOutcome.PASS
