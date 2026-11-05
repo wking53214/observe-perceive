@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Strict reads the kernel's root guard when it can, and wants the roster (step 6).** If the Conservation Kernel
+  exposes `root_guard` (its main does; the commit this repo pins does not), the strict profile refuses a guard that is
+  not a `RootAdmission`, so `lambda artifact: True` no longer passes as strict. A kernel that does not expose the guard
+  keeps the old `has_root_guard` check only. When this repo re-pins the kernel,
+  `test_production_profile.py::test_strict_accepts_a_bare_lambda_guard_and_production_refuses_it` asserts the old
+  behaviour and must be updated then, and the seven `root_guard=lambda artifact: True` test sites need an explicit
+  test-only `RootAdmission` subclass.
+
 - **An escalation with no justification is allowed, recorded and alerted (OP-5).** PERCEIVE does not select the
   justification check for `escalate_patient`, so a strict run went ahead on a blank one with no trace. The orchestrator
   now never refuses it (a clinical escalation is not held up over wording) but sets `unjustified_escalation` on the
