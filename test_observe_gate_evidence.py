@@ -2,7 +2,7 @@
 
 These drive the real engine and its real audit ledger, so the gate is judged on verdicts the engine actually
 produced, not on hand-built ones. OBSERVE's copy of this gate and this one must agree: see
-test_observe_gate_vectors.py, which holds the shared expected outcomes.
+test_observe_gate_sync.py, which fingerprints the gate.
 """
 
 import dataclasses
