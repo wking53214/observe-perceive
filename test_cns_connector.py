@@ -15,7 +15,9 @@ from cns.gate import GateOutcome, GatePosition  # noqa: E402
 from cns_connector import (  # noqa: E402
     CnsNotInstalled, ObserveCnsGate, PerceiveCnsGate, cns_available,
 )
-from observe_consolidated import FusedVerdict, OperationalRegime, VitalsSnapshot, validate_vitals  # noqa: E402
+from observe_consolidated import (  # noqa: E402
+    FusedVerdict, ObserveClinicalEngine, OperationalRegime, VitalsSnapshot, validate_vitals,
+)
 from perceive_consolidated import PolicyGates, PolicyRequest, PolicyVerdict, Provenance  # noqa: E402
 
 
@@ -67,7 +69,8 @@ def test_observe_alpha_asks_for_a_new_reading_on_a_sensor_fault():
 
 
 def test_observe_omega_passes_a_verdict_backed_by_evidence():
-    result = ObserveCnsGate("omega").check(make_verdict())
+    engine = ObserveClinicalEngine()
+    result = ObserveCnsGate("omega", engine=engine).check(engine.evaluate(make_vitals()))
     assert result.outcome is GateOutcome.PASS
     assert result.position is GatePosition.OMEGA
     assert result.gate == "observe.verdict_egress"
