@@ -228,3 +228,38 @@ def test_the_admission_guard_is_held_to_the_required_roster_when_cns_can_hold_it
         assert guard.expected_seats == REQUIRED_SEATS
     else:
         assert not hasattr(guard, "expected_seats"), "the pinned CNS has no roster pin; re-pin to get the check"
+
+
+# ---- OP-5: an escalation with no justification is allowed, recorded, and a person is told ---------------------------
+
+def test_op5_an_unjustified_escalation_is_allowed_recorded_and_alerted():
+    alerts = []
+    result, order = run_strict(strict(ObserveClinicalEngine(), alerts), "p5-op5", make_vitals(), "P115",
+                               extra={"justification": ""})
+    assert result["status"] == "APPROVED_AND_EXECUTED", (result.get("refused_by"), result.get("reason"))
+    assert order == ["observe", "executed"]
+    assert result["unjustified_escalation"] is True
+    assert result["unjustified_escalation_alert"] == "delivered"
+    assert [a["stage"] for a in alerts] == ["unjustified_escalation"]
+    assert alerts[0]["request_id"] == result["governance_request"].request_id
+
+
+def test_op5_the_alert_failing_or_missing_never_changes_the_outcome():
+    result, _ = run_strict(strict(ObserveClinicalEngine()), "p5-op5b", make_vitals(), "P116",
+                           extra={"justification": "  "})
+    assert result["status"] == "APPROVED_AND_EXECUTED"
+    assert result["unjustified_escalation"] is True and result["unjustified_escalation_alert"] == "no_channel"
+
+    def broken(_alert):
+        raise RuntimeError("pager down")
+    orchestrator = strict(ObserveClinicalEngine())
+    orchestrator.alert_human = broken
+    result, _ = run_strict(orchestrator, "p5-op5c", make_vitals(), "P117", extra={"justification": ""})
+    assert result["status"] == "APPROVED_AND_EXECUTED" and result["unjustified_escalation_alert"] == "failed"
+
+
+def test_op5_a_justified_escalation_carries_no_flag_and_sends_no_alert():
+    alerts = []
+    result, _ = run_strict(strict(ObserveClinicalEngine(), alerts), "p5-op5d", make_vitals(), "P118")
+    assert result["status"] == "APPROVED_AND_EXECUTED"
+    assert "unjustified_escalation" not in result and alerts == []

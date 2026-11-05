@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **An escalation with no justification is allowed, recorded and alerted (OP-5).** PERCEIVE does not select the
+  justification check for `escalate_patient`, so a strict run went ahead on a blank one with no trace. The orchestrator
+  now never refuses it (a clinical escalation is not held up over wording) but sets `unjustified_escalation` on the
+  record, logs CRITICAL and calls `alert_human` with stage `unjustified_escalation`; `unjustified_escalation_alert`
+  says whether the alert was "delivered", "failed" or "no_channel". A justified escalation is unchanged. The shared
+  test helper `conftest.run_chain` now states a justification by default so existing alert-count tests stay about
+  their own stage.
+- **OBSERVE's OMEGA gate judges only confirmed engine evidence (OBS-1..4).** Ported from OBSERVE's own gate; see
+  `test_observe_gate_evidence.py`. `test_observe_gate_sync.py` keeps this copy and OBSERVE's identical.
+
 - **`profile="production"` proves its wiring or does not start.** The strict profile asked only that the
   Conservation Kernel have *a* root guard, so strict plus `lambda artifact: True` executed an action with no
   CNS roster anywhere. `production` is strict plus a startup proof (`production_profile.py`): CNS at v2.3.0

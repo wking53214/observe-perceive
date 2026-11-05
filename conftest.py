@@ -87,7 +87,9 @@ def run_chain(orchestrator, artifact_id, operation="escalate", func=None, vitals
     def default(ctx):
         ran.append(ctx)
         return {"status": "done", "artifact_id": ctx.artifact_id}
-    ctx = {"patient_id": "P001", "execution_id": f"exec-{artifact_id}"}
+    # OP-5: an escalation with no justification alerts a person, so a default run states one.
+    ctx = {"patient_id": "P001", "execution_id": f"exec-{artifact_id}",
+           "justification": "SpO2 trending down and heart rate rising"}
     ctx.update(context or {})
     result = orchestrator.orchestrate_request(
         artifact or ChainArtifact(artifact_id), operation, func or default,
