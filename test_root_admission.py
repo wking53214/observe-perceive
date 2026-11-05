@@ -37,10 +37,11 @@ def _enforcing_perceive():
     return perceive
 
 
-def _decision(request_id="req-1", audit="abc"):
+def _decision(request_id="req-1", audit="abc", about=None):
     return GovernanceDecision(
         request_id=request_id, decision_id="dec-1", approval=GovernanceApproval.APPROVED, applied_gates=["boundary_gate"],
-        unanimous_consensus=True, violations=[], policy_version="1.0.0", perceive_audit_hash=audit)
+        unanimous_consensus=True, violations=[], policy_version="1.0.0", perceive_audit_hash=audit,
+        artifact_id=about.artifact_id if about else "", artifact_hash=about.content_digest if about else "")
 
 
 def test_a_guarded_kernel_runs_a_request_to_completion_without_the_flag():
@@ -105,7 +106,7 @@ def test_an_approval_opened_on_one_thread_is_closed_on_another():
     admission = RootAdmission()
     kernel = ConservationKernel(root_guard=admission)
     root = _fresh_root("adm-7")
-    ruling = Ruling(decision=_decision("req-7"), request_id="req-7", artifact_id=root.artifact_id,
+    ruling = Ruling(decision=_decision("req-7", about=root), request_id="req-7", artifact_id=root.artifact_id,
                     artifact_hash=root.content_digest)
     admission.admit(kernel, ruling, root)  # open on this thread
     seen = []
@@ -127,7 +128,7 @@ def test_a_ruling_about_another_request_is_refused():
     admission = RootAdmission()
     kernel = ConservationKernel(root_guard=admission)
     root = _fresh_root()
-    ruling = Ruling(decision=_decision("req-A"), request_id="req-B", artifact_id=root.artifact_id,
+    ruling = Ruling(decision=_decision("req-A", about=root), request_id="req-B", artifact_id=root.artifact_id,
                     artifact_hash=root.content_digest)
     with pytest.raises(RootNotAdmitted, match="different request"):
         admission.admit(kernel, ruling, root)
@@ -138,7 +139,7 @@ def test_a_ruling_with_no_audit_record_is_refused():
     admission = RootAdmission()
     kernel = ConservationKernel(root_guard=admission)
     root = _fresh_root()
-    ruling = Ruling(decision=_decision("req-1", audit=""), request_id="req-1", artifact_id=root.artifact_id,
+    ruling = Ruling(decision=_decision("req-1", audit="", about=root), request_id="req-1", artifact_id=root.artifact_id,
                     artifact_hash=root.content_digest)
     with pytest.raises(RootNotAdmitted, match="no audit record"):
         admission.admit(kernel, ruling, root)
@@ -150,7 +151,7 @@ def test_a_ruling_about_another_document_is_refused_by_the_agreement_seat():
     kernel = ConservationKernel(root_guard=admission)
     root = _fresh_root("doc-1", "true content")
     other = _fresh_root("doc-1", "inflated content")
-    ruling = Ruling(decision=_decision(), request_id="req-1", artifact_id=other.artifact_id,
+    ruling = Ruling(decision=_decision(about=other), request_id="req-1", artifact_id=other.artifact_id,
                     artifact_hash=other.content_digest)
     with pytest.raises(RootNotAdmitted, match="different subjects"):
         admission.admit(kernel, ruling, root)

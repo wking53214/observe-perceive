@@ -198,6 +198,16 @@ class PerceiveConservationAdapter:
                 f"{input_artifact_hash[:12]}... but the content digests to "
                 f"{expected_hash[:12]}...; the content changed after it was hashed"
             )
+        # OP-4: a decision PERCEIVE made about other content is not a decision about this content, even under the
+        # same artifact id. Refused here for every kernel; root admission also refuses a decision that names no
+        # content at all.
+        judged_id = getattr(governance_decision, "artifact_id", "") or ""
+        judged_hash = getattr(governance_decision, "artifact_hash", "") or ""
+        if (judged_id and judged_id != input_artifact_id) or (judged_hash and judged_hash != input_artifact_hash):
+            raise ConservationRefusal(
+                f"PERCEIVE's decision {governance_decision.decision_id} judged document {judged_id!r} with content "
+                f"{judged_hash[:12]}..., not {input_artifact_id!r} with content {input_artifact_hash[:12]}..."
+            )
 
         # Create Conservation Kernel Artifact for the decision
         decision_content = f"""

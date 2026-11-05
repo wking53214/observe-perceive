@@ -9,6 +9,10 @@ OBSERVE (vitals in, fused verdict out)
   reading is requested instead of a score.
   OMEGA refuses a verdict that is only a partial assessment, or that no engine
   backed with evidence, as RETRY. Missing evidence is abstention, not normality.
+  A verdict carrying validation_faults is a partial assessment whatever its
+  unassessable flag says. A NaN or infinite vital at ALPHA is a sensor fault
+  (RETRY); it is described as text for the digest, which refuses such floats,
+  so the refusal is still bound to the reading.
 
 PERCEIVE (policy request in, consensus verdict out)
   ALPHA runs one PolicyGates check on the request. A refusal is final.
@@ -27,6 +31,7 @@ raises CnsNotInstalled with the install command and nothing else changes.
 from __future__ import annotations
 
 import importlib
+import math
 from dataclasses import asdict
 from datetime import datetime
 from enum import Enum
@@ -86,16 +91,24 @@ def cns_available() -> bool:
     return True
 
 
-def _plain(value: Any) -> Any:
-    """Reduce a value to the plain types a digest accepts."""
+def _plain(value: Any, non_finite: bool = False) -> Any:
+    """Reduce a value to the plain types a digest accepts.
+
+    With non_finite, a NaN or infinite float is described as text, so a
+    reading carrying one can still be bound and refused as a sensor fault.
+    The digest refuses such floats by design; without the flag they stay
+    unbindable, which is a fault.
+    """
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, datetime):
         return value.isoformat()
+    if non_finite and isinstance(value, float) and not math.isfinite(value):
+        return {"non_finite_float": repr(value)}
     if isinstance(value, dict):
-        return {str(k): _plain(v) for k, v in value.items()}
+        return {str(k): _plain(v, non_finite) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_plain(v) for v in value]
+        return [_plain(v, non_finite) for v in value]
     return value
 
 
@@ -124,7 +137,7 @@ class _CnsGateBase:
                 f"got {type(candidate).__name__}",
             )
         try:
-            digest = cns.subject_digest(_plain(asdict(candidate)))
+            digest = cns.subject_digest(self._bound_content(candidate))
         except (TypeError, ValueError) as exc:
             return self._result(
                 cns.GateOutcome.TERMINAL_BREACH, f"fault: content cannot be bound ({exc})"
@@ -138,6 +151,10 @@ class _CnsGateBase:
                 f"fault: gate raised {type(exc).__name__}: {exc}", subject, digest,
             )
         return self._result(outcome, reason, subject, digest)
+
+    def _bound_content(self, candidate: Any) -> Any:
+        """The content the result is bound to."""
+        return _plain(asdict(candidate))
 
     def _judge(self, candidate: Any) -> tuple:
         raise NotImplementedError
@@ -170,6 +187,12 @@ class ObserveCnsGate(_CnsGateBase):
             raise ValueError(f"position must be 'alpha' or 'omega', not {position!r}")
         super().__init__(name, position)
 
+    def _bound_content(self, candidate: Any) -> Any:
+        content = asdict(candidate)
+        # A NaN or infinite vital is a sensor fault (RETRY, as documented), not
+        # content that cannot be bound, so ALPHA describes it rather than refusing it.
+        return _plain(content, non_finite=self._position == _ALPHA)
+
     def _judge(self, candidate: Union[VitalsSnapshot, FusedVerdict]) -> tuple:
         cns = self._cns
         if self._position == _ALPHA:
@@ -177,8 +200,11 @@ class ObserveCnsGate(_CnsGateBase):
             if faults:
                 return cns.GateOutcome.RETRY, "sensor fault, re-read required: " + "; ".join(faults)
             return cns.GateOutcome.PASS, ""
-        if candidate.unassessable:
-            return cns.GateOutcome.RETRY, "partial assessment: " + "; ".join(candidate.validation_faults)
+        if candidate.unassessable or candidate.validation_faults:
+            # Either one marks a partial assessment. A verdict carrying faults with the
+            # flag cleared is inconsistent, and is refused the same way.
+            faults = "; ".join(candidate.validation_faults) or "verdict is flagged unassessable"
+            return cns.GateOutcome.RETRY, "partial assessment: " + faults
         if not candidate.active_engines:
             return cns.GateOutcome.RETRY, "no engine produced evidence for this verdict"
         return cns.GateOutcome.PASS, ""

@@ -74,6 +74,12 @@ class PolicyRequest:
     # escalation counts a pure function of recorded inputs (deterministic). Falls back to
     # wall-clock only when a caller omits it (e.g. ad-hoc admin requests).
     state_commitment: str = ""
+    # OP-4: the document the request is about and the digest of its content. PERCEIVE judges a request about THIS
+    # content: the digest is in the request snapshot its audit entry and state commitment cover, and the verdict
+    # names it, so a decision cannot be carried to other content filed under the same id. Empty for a request
+    # that is not about a document.
+    artifact_id: str = ""
+    artifact_hash: str = ""
 
 
 @dataclass
@@ -102,6 +108,9 @@ class PolicyVerdict:
     # What the advisory-mode gates would have refused. The verdict is still
     # `approved`; this is the record that a check ran and was not enforced.
     advisory_violations: List[str] = field(default_factory=list)
+    # OP-4: the document this verdict judged, copied from the request PERCEIVE evaluated.
+    artifact_id: str = ""
+    artifact_hash: str = ""
 
 
 @dataclass
@@ -1063,7 +1072,7 @@ class PerceiveGovernanceKernel:
                 request_id=request.request_id, approved=False, confidence=0.0,
                 violations=["No policy manifest available"], applied_gates=[],
                 policy_version="", provenance=Provenance("system", "unknown", "no_manifest"),
-                audit_hash="",
+                audit_hash="", artifact_id=request.artifact_id, artifact_hash=request.artifact_hash,
             )
 
         gates_to_evaluate = self._select_gates(request)
@@ -1191,6 +1200,7 @@ class PerceiveGovernanceKernel:
             audit_hash=audit_entry.immutable_hash, consensus_result=consensus_result,
             state_commitment=decision_state_commitment,
             advisory_violations=advisory_violations,
+            artifact_id=request.artifact_id, artifact_hash=request.artifact_hash,
         )
 
         logger.info(f"Verdict: approved={approved}, confidence={confidence:.2f}, audit_hash={audit_entry.immutable_hash[:16]}")
