@@ -134,6 +134,11 @@ class GovernanceDecision:
     # is APPROVED *despite* these, which downstream readers need to be able to
     # see rather than infer from an empty `violations` list.
     advisory_violations: List[str] = field(default_factory=list)
+    # OP-4: the document PERCEIVE judged (id and content digest), as PERCEIVE's verdict names it. Root admission
+    # and the Conservation adapter compare it with the content they are handed. Empty on a decision not made by
+    # PERCEIVE about a document, which root admission refuses.
+    artifact_id: str = ""
+    artifact_hash: str = ""
 
 
 @dataclass

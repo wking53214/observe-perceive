@@ -11,6 +11,7 @@ Central orchestrator that routes requests through:
 """
 
 import logging
+import math
 from datetime import datetime, timezone
 
 from governance_contracts import CONTRACT_VERSION
@@ -95,7 +96,8 @@ class GovernanceOrchestrator:
             alert_human: optional callable, called with a dict (stage,
                 stage_error, request_id, artifact_id) when a stage RAISES
                 instead of reaching a verdict, or when the caller's executor
-                raises after approval (stage "execution"), so a person hears
+                raises after approval (stage "execution"), or when OBSERVE
+                raises in the strict profile (stage "observe"), so a person hears
                 about a crash and not only a log reader. It must reach a
                 human (page, dashboard, phone). Ordinary refusals and
                 successes never call it. The record of such a failure carries
@@ -270,6 +272,24 @@ class GovernanceOrchestrator:
             "authorized_at": entry["recorded_at"],
             "guard": None,
         }
+
+    @staticmethod
+    def _observe_problems(verdict) -> list:
+        """Why an OBSERVE verdict cannot back an action in the strict profile; empty if it can."""
+        problems = []
+        if getattr(verdict, "unassessable", True) is not False:
+            faults = list(getattr(verdict, "validation_faults", None) or [])
+            problems.append("the observation is unassessable" + (f" ({'; '.join(map(str, faults))})" if faults else ""))
+        # OP-3: a verdict nothing assessed is not evidence, whatever regime it names. No engine ran, or the engines
+        # that ran contributed no confidence (every one abstained), so a "stable" here is a default, not a finding.
+        engines = list(getattr(verdict, "active_engines", None) or [])
+        confidence = getattr(verdict, "confidence", None)
+        if not engines:
+            problems.append("the verdict rests on no evidence: no OBSERVE engine assessed the reading")
+        elif not isinstance(confidence, (int, float)) or not math.isfinite(confidence) or confidence <= 0:
+            problems.append(f"the verdict rests on no evidence: its confidence is {confidence!r}, so no engine "
+                            "that ran assessed the reading")
+        return problems
 
     @staticmethod
     def _temporal_anomalies(request) -> list:
@@ -883,6 +903,60 @@ class GovernanceOrchestrator:
                 "the orchestrator with require_vitals=True to refuse instead."
             )
 
+        # Strict OBSERVE runs BEFORE the action (OP-1). An observation that is a precondition can only be one if it
+        # is made before the thing it conditions; run after, it could only describe what had already happened. An
+        # observation OBSERVE itself marks unassessable is a refusal: strict does not act on a reading it cannot read.
+        # The advisory profile keeps OBSERVE after the action, as before.
+        observe_verdict = None
+        observe_error = None
+        observed_before_action = False
+        if self.profile in ("strict", "production") and vitals_snapshot is not None:
+            logger.info("[Orchestrator] Phase 4b: OBSERVE before the action (strict)")
+            try:
+                if self.observe_engine is None:
+                    raise RuntimeError("no OBSERVE engine configured")
+                observe_verdict = self.observe_engine.evaluate(vitals_snapshot)
+            except Exception as e:
+                # OP-2: in strict, OBSERVE is mandatory, so a crash is a refusal and a person is told, as for any
+                # other stage that raises instead of reaching a verdict.
+                logger.error(f"[Orchestrator] Refusing execution: OBSERVE raised {type(e).__name__}: {e}")
+                human_alert = self._alert_stage_error("observe", e, governance_request)
+                if self.raise_on_stage_error:
+                    raise
+                return self._stamp({
+                    "status": "REJECTED",
+                    "reason": f"OBSERVE stage did not run to a verdict: {type(e).__name__}: {e}",
+                    "refused_by": "observe",
+                    "stage_refused": False,
+                    "stage_error": f"{type(e).__name__}: {e}",
+                    **self._alert_field(human_alert),
+                    "governance_decision": perceive_decision,
+                    "conservation_decision": conservation_decision,
+                    "execution_approval": execution_approval,
+                    "scope_enforced": declared_scope is not None,
+                    "observe_enforced": False,
+                    "observe_error": f"{type(e).__name__}: {e}",
+                    "audit_chain": None,
+                }, governance_request)
+            else:
+                observed_before_action = True
+                problems = self._observe_problems(observe_verdict)
+                if problems:
+                    logger.error(f"[Orchestrator] Refusing execution: OBSERVE cannot back it: {problems}")
+                    return self._stamp({
+                        "status": "REJECTED",
+                        "reason": "OBSERVE cannot back the action: " + "; ".join(problems),
+                        "refused_by": "observe",
+                        "stage_refused": True,
+                        "governance_decision": perceive_decision,
+                        "conservation_decision": conservation_decision,
+                        "execution_approval": execution_approval,
+                        "scope_enforced": declared_scope is not None,
+                        "observe_enforced": True,
+                        "observe_verdict": observe_verdict,
+                        "audit_chain": None,
+                    }, governance_request)
+
         logger.info("[Orchestrator] Phase 5: GSA-815 execution")
         executor = gsa815_operation_func
         # Only a wrapper `guarded` made, for THIS orchestrator's ledger, counts as already guarded. The
@@ -927,8 +1001,8 @@ class GovernanceOrchestrator:
                 "execution_context": execution_context,
                 "execution_authorization": execution_authorization,
                 "gsa815_result": None,
-                "observe_verdict": None,
-                "observe_enforced": False,
+                "observe_verdict": observe_verdict,
+                "observe_enforced": observe_verdict is not None,
                 "outcome_context": outcome_context,
                 "audit_chain": None,
                 "audit_chain_valid": False,
@@ -958,9 +1032,9 @@ class GovernanceOrchestrator:
 
         # PHASE 6: OBSERVE monitoring
         logger.info("[Orchestrator] Phase 6: OBSERVE clinical monitoring")
-        observe_verdict = None
-        observe_error = None
-        if vitals_snapshot:
+        if observed_before_action:
+            logger.info("[Orchestrator] OBSERVE already ran before the action (strict)")
+        elif vitals_snapshot:
             # The action has already run. Whatever happens here must not lose
             # the record of it, so an OBSERVE failure is recorded beside the
             # execution rather than raised over it.

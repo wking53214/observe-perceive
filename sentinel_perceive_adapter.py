@@ -146,6 +146,9 @@ class SentinelPerceiveAdapter:
             context=dict(request.context),
             timestamp=request.timestamp,
             state_commitment=request.state_commitment,
+            # OP-4: PERCEIVE is handed the digest of the content, so its ruling is about this content.
+            artifact_id=request.artifact_id,
+            artifact_hash=request.artifact_hash,
         )
 
     @staticmethod
@@ -184,6 +187,9 @@ class SentinelPerceiveAdapter:
             state_commitment=verdict.state_commitment,
             timestamp=datetime.now(timezone.utc),
             advisory_violations=list(getattr(verdict, "advisory_violations", None) or []),
+            # What PERCEIVE judged, from its verdict, not from the request: the two are compared downstream.
+            artifact_id=getattr(verdict, "artifact_id", "") or "",
+            artifact_hash=getattr(verdict, "artifact_hash", "") or "",
         )
 
     @classmethod
