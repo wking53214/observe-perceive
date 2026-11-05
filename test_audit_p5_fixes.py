@@ -213,3 +213,18 @@ def test_op4_root_admission_refuses_a_decision_that_names_no_document():
         admission.admit(ConservationKernel(root_guard=admission),
                         Ruling(decision=decision, request_id="r1", artifact_id=root.artifact_id,
                                artifact_hash=root.content_digest), root)
+
+
+# ---- the roster the acting side needs is held by the guard, where the installed CNS can hold it ---------------------
+
+def test_the_admission_guard_is_held_to_the_required_roster_when_cns_can_hold_it():
+    import inspect
+
+    from cns_composition.decision_guard import DecisionGuard
+    from root_admission import REQUIRED_SEATS, _guard_for
+
+    guard = _guard_for(DecisionGuard)
+    if "expected_seats" in inspect.signature(DecisionGuard.__init__).parameters:
+        assert guard.expected_seats == REQUIRED_SEATS
+    else:
+        assert not hasattr(guard, "expected_seats"), "the pinned CNS has no roster pin; re-pin to get the check"
