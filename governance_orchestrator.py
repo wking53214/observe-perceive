@@ -341,6 +341,33 @@ class GovernanceOrchestrator:
             return "failed"
         return "delivered"
 
+    def _flag_unjustified_escalation(self, result: dict) -> None:
+        """OP-5: an escalation that went ahead with no usable justification is recorded and a person is told.
+
+        It is never refused: a clinical escalation is not held up over wording, and PERCEIVE does not select the
+        justification check for this request type. The record carries `unjustified_escalation` and the alert
+        outcome (`unjustified_escalation_alert`, "delivered", "failed" or "no_channel"); nothing else changes.
+        """
+        if result.get("status") not in ("APPROVED_AND_EXECUTED", "EXECUTION_FAILED"):
+            return
+        request = result.get("governance_request")
+        kind = getattr(getattr(request, "request_type", None), "value", getattr(request, "request_type", None))
+        if kind != "escalate_patient":
+            return
+        justification = (getattr(request, "context", None) or {}).get("justification")
+        if len(str(justification or "").strip()) >= 10:
+            return
+        result["unjustified_escalation"] = True
+        logger.critical(
+            f"[Orchestrator] Escalation {getattr(request, 'request_id', None)} went ahead with no usable "
+            "justification. It is allowed and recorded; a person should review it."
+        )
+        result["unjustified_escalation_alert"] = self._alert_stage_error(
+            "unjustified_escalation",
+            ValueError("escalation carried no usable justification; allowed and recorded, not refused"),
+            request,
+        )
+
     @staticmethod
     def _alert_field(human_alert):
         """The record field for a stage error. Other records never get it."""
@@ -393,6 +420,7 @@ class GovernanceOrchestrator:
     ) -> dict:
         """Orchestrate the flow (see `_orchestrate`) and receipt the result."""
         result = self._orchestrate(sentinel_artifact, operation_type, gsa815_operation_func, vitals_snapshot, context)
+        self._flag_unjustified_escalation(result)
         if self.receipts is not None:
             try:
                 result["receipt"] = self.receipts.append(result)
