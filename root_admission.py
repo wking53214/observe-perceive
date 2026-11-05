@@ -44,6 +44,7 @@ CNS is imported only when `admit` runs. Without it `admit` raises CnsNotInstalle
 from __future__ import annotations
 
 import importlib
+import inspect
 import threading
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -68,6 +69,19 @@ SEAT_ROOT = "Conservation_Kernel:root_admission"
 #: Hand-written, independent of any candidate. Dropping or renaming a seat must fail at construction, so
 #: changing this list is a policy change made in review.
 REQUIRED_SEATS = (SEAT_REQUEST, SEAT_ROOT, SEAT_RULING, "CNS:same_subject")
+
+
+def _guard_for(guard_type: Any) -> Any:
+    """The guard that opens for an admitted root, held to REQUIRED_SEATS when this CNS can hold it to a roster.
+
+    `SuperGate(required=...)` is checked at construction, but whoever builds a roster can name fewer seats and
+    still get a complete-looking decision. CNS `DecisionGuard(expected_seats=...)` refuses a decision whose
+    roster lacks a seat the ACTING side needs. The CNS this repository pins (v2.3.0) predates it, so there the
+    guard is built as before and `expected_seats` does not exist: re-pin to a CNS that has it to get the check.
+    """
+    if "expected_seats" in inspect.signature(guard_type.__init__).parameters:
+        return guard_type(reads_root, expected_seats=REQUIRED_SEATS)
+    return guard_type(reads_root)
 
 
 class RootNotAdmitted(Exception):
@@ -219,7 +233,7 @@ class RootAdmission:
                              same_subject={SEAT_REQUEST: reads_request, SEAT_ROOT: reads_root,
                                            SEAT_RULING: reads_ruling}
                              ).decide({SEAT_REQUEST: ruling, SEAT_ROOT: root, SEAT_RULING: ruling})
-        guard = DecisionGuard(reads_root)
+        guard = _guard_for(DecisionGuard)
         try:
             guard.authorize(decision)
         except ValueError as exc:
