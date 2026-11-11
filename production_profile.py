@@ -11,16 +11,15 @@ checking IDENTITY and BEHAVIOUR, not shape:
   * The roster really refuses: a canary request that must be refused is put to it at startup. A roster that
     approves it (or a guard that opens for it) is refused. The canary registers nothing.
   * The audit is durable and signed: receipts and the execution ledger have a path and a signer.
-  * Someone can be told: an alert channel exists. OBSERVE is configured. Event-time source keys are registered.
+  * OBSERVE is configured. Event-time source keys are registered.
   * The executor is guarded.
+  * Someone can be told AND followed up: an EscalationDesk with a valid policy, a key for every responder, and a
+    durable signed log (human_escalation.py). It cannot prove that a scheduler calls `sweep()`; that stays an
+    operator duty, stated in docs/race/HUMAN_ESCALATION_AND_RECEIPT_MODEL.md.
 
 Every problem is reported together, so an operator fixes the wiring once. Nothing here is a clinical rule, a
 privacy rule or an authorization: it is a check that the controls the deployment claims to have are the
 controls that are wired.
-
-NOT YET CHECKED (stated so the profile is not read as more than it is): a configured human-notification
-policy with receipts and acknowledgement. That lifecycle does not exist yet; when it does, it becomes a
-requirement here. See docs/race/GOVERNED_EXECUTION_PROFILE.md.
 """
 from __future__ import annotations
 
@@ -99,7 +98,7 @@ def _canary_problem(kernel: Any, root_admission: Any) -> Optional[str]:
 
 def production_problems(*, conservation_kernel: Any, root_admission: Any, observe_engine: Any, receipts: Any,
                         execution_ledger: Any, alert_human: Any, source_signers: Any,
-                        guard_executor: bool) -> List[str]:
+                        guard_executor: bool, escalations: Any = None) -> List[str]:
     """Every reason this wiring is not a production wiring; empty if it is."""
     problems: List[str] = []
 
@@ -143,8 +142,17 @@ def production_problems(*, conservation_kernel: Any, root_admission: Any, observ
         problems.append("the execution ledger is in memory: a replay after a restart would not be a replay")
     elif getattr(execution_ledger, "signer", None) is None:
         problems.append("the execution ledger is unsigned")
-    if not callable(alert_human):
-        problems.append("no alert_human channel: a crashed stage or a lost receipt would reach nobody")
+    if escalations is None:
+        problems.append("no escalation desk: a bare alert_human callable proves only that a function returned, not "
+                        "that a person was told, took responsibility, or was followed up")
+    else:
+        from human_escalation import EscalationDesk
+        if not isinstance(escalations, EscalationDesk):
+            problems.append(f"escalations is a {type(escalations).__name__}, not an EscalationDesk")
+        else:
+            problems.extend(f"escalation desk: {p}" for p in escalations.problems())
+    if alert_human is not None:
+        problems.append("alert_human is given beside the production escalation desk: use the desk alone")
     if observe_engine is None:
         problems.append("no OBSERVE engine is configured")
     if not source_signers:

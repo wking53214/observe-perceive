@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 from governance_contracts import CONTRACT_VERSION
 from governance_chain import verify_result
+from human_escalation import AlertOutcome
 from execution_guard import ExecutionLedger, ExecutionRefusal as LedgerRefusal, guard_ledger_of
 
 logger = logging.getLogger("GovernanceOrchestrator")
@@ -39,7 +40,8 @@ class GovernanceOrchestrator:
                  require_attested_event_time: bool = False,
                  enforce_advisory_violations: bool = False,
                  root_admission=None,
-                 alert_human=None):
+                 alert_human=None,
+                 escalations=None):
         """
         Initialize orchestrator with all governance systems.
 
@@ -110,6 +112,14 @@ class GovernanceOrchestrator:
                 "receipt_append"); the result then carries `human_alert`, or
                 `receipt_human_alert` when a stage-error alert is already on
                 it, and its outcome is unchanged. Not required.
+            escalations: optional `human_escalation.EscalationDesk`. Replaces
+                `alert_human` (give one or the other, never both): every event
+                that would call `alert_human` opens a ticket, dispatched tier
+                by tier, which stays open until a named responder signs an
+                acknowledgement. The record gains `escalation_ticket`.
+                `human_alert` keeps its meaning ("delivered" = dispatched or
+                delivered, never acknowledged). Required by profile
+                "production". See docs/race/HUMAN_ESCALATION_AND_RECEIPT_MODEL.md.
         """
         # 1.3.0 profile. "advisory" is the historical default: every check
         # runs and records, only refusals refuse. "strict" turns every
@@ -146,7 +156,10 @@ class GovernanceOrchestrator:
         # {key_id: Signer} or an iterable of Signers.
         self.source_signers = source_signers
         self.raise_on_stage_error = raise_on_stage_error
+        if alert_human is not None and escalations is not None:
+            raise ValueError("give alert_human or escalations, not both: there must be no doubt which channel tells a person")
         self.alert_human = alert_human
+        self.escalations = escalations
         # The execution stage (Phase 5) used to call the caller's function
         # unguarded: an exception there left NO record at all, after
         # Conservation had verified and execution had been approved. Now a
@@ -175,7 +188,8 @@ class GovernanceOrchestrator:
             problems = production_problems(
                 conservation_kernel=conservation_kernel, root_admission=root_admission,
                 observe_engine=observe_engine, receipts=receipts, execution_ledger=self.execution_ledger,
-                alert_human=alert_human, source_signers=source_signers, guard_executor=guard_executor)
+                alert_human=alert_human, escalations=escalations, source_signers=source_signers,
+                guard_executor=guard_executor)
             if problems:
                 raise ProductionProfileError(problems)
 
@@ -320,6 +334,19 @@ class GovernanceOrchestrator:
         whatever this does.
         """
         request_id = getattr(governance_request, "request_id", None)
+        if self.escalations is not None:
+            try:
+                ticket_id, state = self.escalations.raise_and_dispatch(
+                    kind="stage_error", request_id=request_id,
+                    artifact_id=getattr(governance_request, "artifact_id", None),
+                    context={"stage": stage, "stage_error": f"{type(error).__name__}: {error}"})
+            except Exception as desk_error:  # noqa: BLE001 - never alter the rejection
+                logger.critical(
+                    f"[Orchestrator] HUMAN ALERT FAILED: {stage} stage raised {type(error).__name__}: {error} "
+                    f"on request {request_id}; the escalation desk raised {type(desk_error).__name__}: {desk_error}."
+                )
+                return AlertOutcome("failed")
+            return AlertOutcome("failed" if state == "exhausted" else "delivered", ticket_id)
         if self.alert_human is None:
             logger.critical(
                 f"[Orchestrator] HUMAN ALERT NOT SENT: {stage} stage raised {type(error).__name__}: {error} "
@@ -344,7 +371,10 @@ class GovernanceOrchestrator:
     @staticmethod
     def _alert_field(human_alert):
         """The record field for a stage error. Other records never get it."""
-        return {} if human_alert is None else {"human_alert": human_alert}
+        if human_alert is None:
+            return {}
+        ticket = getattr(human_alert, "ticket_id", None)
+        return {"human_alert": human_alert, **({"escalation_ticket": ticket} if ticket else {})}
 
     def _stamp(self, result: dict, governance_request=None) -> dict:
         """Attach the handoff record and the request to every result.
@@ -409,6 +439,8 @@ class GovernanceOrchestrator:
                 # keeps it, and this one is recorded beside it.
                 alert = self._alert_stage_error("receipt_append", e, result.get("governance_request"))
                 result["receipt_human_alert" if "human_alert" in result else "human_alert"] = alert
+                if getattr(alert, "ticket_id", None):
+                    result["receipt_escalation_ticket" if "escalation_ticket" in result else "escalation_ticket"] = alert.ticket_id
         return result
 
     def _orchestrate(
