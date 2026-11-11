@@ -2,14 +2,32 @@
 
 ## Unreleased
 
+- **A person who is told can be followed up, and "delivered" stops meaning "a function returned".**
+  `human_escalation.py` adds an `EscalationDesk`. Every event that used to call `alert_human` (a crashed
+  stage, a lost receipt, a failed execution) opens a ticket in a hash-chained, signed log. A ticket is
+  `dispatched` when a channel callable returns, `delivered` only when the channel returns its own receipt id,
+  and `acknowledged` only through a signature by a named responder over a digest bound to that ticket. A
+  channel can never acknowledge. A raising or hung channel (`dispatch_timeout_s`) moves to the next tier at
+  once; an unanswered ticket moves up on `sweep()` and ends `exhausted`, open and loud. A log that cannot be
+  written never stops a page; a ticket stranded by a crash is picked up by the next sweep; one writer per log.
+  There are no default timings. `GovernanceOrchestrator(escalations=desk)` replaces `alert_human` (both is
+  refused) and the record gains `escalation_ticket`; `human_alert` says `delivered` only for a channel receipt,
+  `dispatched` for a callable that merely returned. The legacy callable behaves as before. `profile="production"`
+  now requires a valid desk. Two independent reviews found defects in the first versions (a log failure silencing the page, tickets stranded after a crash, a restart bricked by routine changes); each has a test
+  that fails without its fix, and a mutation check of the module leaves no surviving mutant but two argued
+  equivalents. Edited pre-existing tests (they assert the exact behaviour changed): `test_production_profile.py`
+  fixture `wiring()` and the parametrized case that asserted "no alert_human channel".
+  Not done: a scheduler and watchdog for `sweep()`, and tickets for clinical escalations (next change).
+  Document: `docs/race/HUMAN_ESCALATION_AND_RECEIPT_MODEL.md`.
+
 - **`profile="production"` proves its wiring or does not start.** The strict profile asked only that the
   Conservation Kernel have *a* root guard, so strict plus `lambda artifact: True` executed an action with no
   CNS roster anywhere. `production` is strict plus a startup proof (`production_profile.py`): CNS at v2.3.0
   or later; the kernel's root guard is the `RootAdmission` handed to the orchestrator (identity); a canary the
   roster must refuse is refused, registers nothing and leaves the guard closed; receipts and the execution
   ledger are durable and signed; an alert channel, OBSERVE and event-time source keys are configured.
-  Every problem is reported at once. Advisory and strict are unchanged. A human-notification policy is not
-  checked because that lifecycle does not exist yet. Documents: `docs/race/GOVERNED_EXECUTION_PROFILE.md`,
+  Every problem is reported at once. Advisory and strict are unchanged. (A human-notification policy is now
+  required too; see the entry above.) Documents: `docs/race/GOVERNED_EXECUTION_PROFILE.md`,
   `docs/race/CNS_ADMISSION_AND_IDENTITY_AUDIT.md`.
 
 - **`pyproject.toml` lists `cassette` and `pediatric_cassette`.** Both are imported at module level
