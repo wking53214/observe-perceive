@@ -7,13 +7,17 @@
   stage, a lost receipt, a failed execution) opens a ticket in a hash-chained, signed log. A ticket is
   `dispatched` when a channel callable returns, `delivered` only when the channel returns its own receipt id,
   and `acknowledged` only through a signature by a named responder over a digest bound to that ticket. A
-  channel can never acknowledge. A raising channel moves to the next tier at once; an unanswered ticket moves
-  up on `sweep()` and ends `exhausted`, open and loud, never quiet. There are no default timings: a tier with no
-  `ack_within_s` is a problem. `GovernanceOrchestrator(escalations=desk)` replaces `alert_human` (both is
-  refused) and the record gains `escalation_ticket`; the legacy callable behaves as before. `profile="production"`
-  now requires a valid desk. Edited pre-existing tests (they assert the exact behaviour changed):
-  `test_production_profile.py` fixture `wiring()` and the parametrized case that asserted "no alert_human channel".
-  Not done: a scheduler for `sweep()`, and tickets for clinical escalations (next change).
+  channel can never acknowledge. A raising or hung channel (`dispatch_timeout_s`) moves to the next tier at
+  once; an unanswered ticket moves up on `sweep()` and ends `exhausted`, open and loud. A log that cannot be
+  written never stops a page; a ticket stranded by a crash is picked up by the next sweep; one writer per log.
+  There are no default timings. `GovernanceOrchestrator(escalations=desk)` replaces `alert_human` (both is
+  refused) and the record gains `escalation_ticket`; `human_alert` says `delivered` only for a channel receipt,
+  `dispatched` for a callable that merely returned. The legacy callable behaves as before. `profile="production"`
+  now requires a valid desk. An independent review found five blockers in the first version; each has a test
+  that fails without its fix, and a mutation check of the module leaves no surviving mutant but two argued
+  equivalents. Edited pre-existing tests (they assert the exact behaviour changed): `test_production_profile.py`
+  fixture `wiring()` and the parametrized case that asserted "no alert_human channel".
+  Not done: a scheduler and watchdog for `sweep()`, and tickets for clinical escalations (next change).
   Document: `docs/race/HUMAN_ESCALATION_AND_RECEIPT_MODEL.md`.
 
 - **`profile="production"` proves its wiring or does not start.** The strict profile asked only that the

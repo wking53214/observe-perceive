@@ -117,8 +117,10 @@ class GovernanceOrchestrator:
                 that would call `alert_human` opens a ticket, dispatched tier
                 by tier, which stays open until a named responder signs an
                 acknowledgement. The record gains `escalation_ticket`.
-                `human_alert` keeps its meaning ("delivered" = dispatched or
-                delivered, never acknowledged). Required by profile
+                `human_alert` becomes "delivered" only when the channel returned
+                its own delivery receipt, "dispatched" when a callable merely
+                returned, "failed" when nobody could be reached; acknowledgement
+                lives on the ticket, never in this field. Required by profile
                 "production". See docs/race/HUMAN_ESCALATION_AND_RECEIPT_MODEL.md.
         """
         # 1.3.0 profile. "advisory" is the historical default: every check
@@ -346,7 +348,9 @@ class GovernanceOrchestrator:
                     f"on request {request_id}; the escalation desk raised {type(desk_error).__name__}: {desk_error}."
                 )
                 return AlertOutcome("failed")
-            return AlertOutcome("failed" if state == "exhausted" else "delivered", ticket_id)
+            # "delivered" only when the channel itself returned a delivery receipt; "dispatched" when a callable
+            # merely returned; "failed" when nobody could be reached. Acknowledgement is on the ticket, not here.
+            return AlertOutcome({"exhausted": "failed", "delivered": "delivered"}.get(state, "dispatched"), ticket_id)
         if self.alert_human is None:
             logger.critical(
                 f"[Orchestrator] HUMAN ALERT NOT SENT: {stage} stage raised {type(error).__name__}: {error} "
