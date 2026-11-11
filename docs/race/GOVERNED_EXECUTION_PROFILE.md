@@ -21,7 +21,7 @@ It is strict, plus a proof at construction. If any item fails the orchestrator d
 | Executor guard on | strict check, and the profile's own | `guard_executor=False` |
 | Receipts exist and are signed | `receipts.signer` | no log, unsigned log |
 | Execution ledger is durable and signed | `path` and `signer` | in-memory ledger, unsigned ledger |
-| A person can be told | `alert_human` is callable | none |
+| A person is told and followed up | an `EscalationDesk`: valid policy, a key for every responder, signed durable log; no bare `alert_human` beside it | no desk, a bare callable, a desk with a bad policy, an unkeyed responder, an in-memory or unsigned log |
 | OBSERVE configured | not `None` | none |
 | Event-time source keys registered | `source_signers` non-empty | none |
 
@@ -34,9 +34,9 @@ Failure behavior: fail closed at construction (`ProductionProfileError`, a `Valu
 * **The canary tests the roster's refusal path, not its approval path.** It cannot prove a roster approves the right documents.
 * **Not clinical.** Nothing here decides a clinical rule, a privacy rule or an authorization. CNS is used only as the roster contract.
 
-## Requirement deferred until it exists (PROPOSED)
+## Requirement the profile cannot prove (stated, not hidden)
 
-A configured human-notification policy with delivery receipts and acknowledgement. That lifecycle is not built, so the profile cannot check it. When it is, the profile must refuse to start without it, with hospital-approved timing and no default values.
+The profile checks that a notification policy exists and is well formed. It cannot check that a scheduler calls `EscalationDesk.sweep()`, that a real person holds each responder key, or that the numbers in the policy are clinically sensible. Those are operator duties and a hospital decision. See `docs/race/HUMAN_ESCALATION_AND_RECEIPT_MODEL.md`.
 
 ## The two pipeline paths
 

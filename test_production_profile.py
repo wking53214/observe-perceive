@@ -16,6 +16,7 @@ from conservation_kernel import ConservationKernel, HmacSigner  # noqa: E402
 from execution_guard import ExecutionLedger  # noqa: E402
 from governance_orchestrator import GovernanceOrchestrator  # noqa: E402
 from governance_record import ReceiptLog  # noqa: E402
+from human_escalation import EscalationDesk, EscalationLog, NotificationPolicy, Tier  # noqa: E402
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot  # noqa: E402
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest  # noqa: E402
 from production_profile import ProductionProfileError, REQUIRED_CNS, production_problems  # noqa: E402
@@ -32,6 +33,16 @@ def perceive():
     return k
 
 
+RESPONDER = HmacSigner(b"production-profile-responder-key-0123456789", key_id="nurse-1")
+
+
+def desk(tmp_path, **override):
+    parts = dict(policy=NotificationPolicy(tiers=(Tier("charge", lambda payload: None, ("nurse-1",), 120.0),)),
+                 log=EscalationLog(tmp_path / "escalations.jsonl", signer=DEPLOYER), responder_keys={"nurse-1": RESPONDER})
+    parts.update(override)
+    return EscalationDesk(**parts)
+
+
 def wiring(tmp_path, **override):
     """A correct production wiring; `override` replaces one part."""
     admission = RootAdmission()
@@ -40,7 +51,7 @@ def wiring(tmp_path, **override):
         observe_engine=ObserveClinicalEngine(), root_admission=admission, profile="production",
         receipts=ReceiptLog(tmp_path / "receipts.jsonl", signer=DEPLOYER),
         execution_ledger=ExecutionLedger(tmp_path / "ledger.jsonl", signer=DEPLOYER),
-        alert_human=lambda alert: None, source_signers=[SOURCE])
+        escalations=desk(tmp_path), source_signers=[SOURCE])
     parts.update(override)
     return parts
 
@@ -179,13 +190,35 @@ def test_a_roster_that_crashes_on_the_canary_is_refused(tmp_path):
 
 @pytest.mark.parametrize("override,expected", [
     ({"receipts": None}, "no receipt log"),
-    ({"alert_human": None}, "no alert_human channel"),
+    ({"escalations": None}, "no escalation desk"),
     ({"observe_engine": None}, "no OBSERVE engine"),
     ({"source_signers": None}, "no event-time source keys"),
     ({"source_signers": []}, "no event-time source keys"),
 ])
 def test_each_missing_part_is_named(tmp_path, override, expected):
     assert expected in refused(tmp_path, **override)
+
+
+def test_a_bare_alert_callable_is_not_a_notification_policy(tmp_path):
+    msg = refused(tmp_path, escalations=None, alert_human=lambda alert: None)
+    assert "no escalation desk" in msg and "beside the production escalation desk" in msg
+
+
+def test_a_desk_and_a_legacy_callable_together_are_refused_before_the_profile_runs(tmp_path):
+    with pytest.raises(ValueError, match="not both"):
+        build(tmp_path, alert_human=lambda alert: None)
+
+
+def test_something_that_is_not_a_desk_is_refused(tmp_path):
+    assert "not an EscalationDesk" in refused(tmp_path, escalations=lambda alert: None)
+
+
+def test_a_desk_with_a_bad_policy_an_unkeyed_responder_or_a_weak_log_is_refused(tmp_path):
+    no_deadline = NotificationPolicy(tiers=(Tier("charge", lambda payload: None, ("nurse-1",), 0),))
+    assert "ack_within_s" in refused(tmp_path, escalations=desk(tmp_path, policy=no_deadline))
+    assert "no registered key" in refused(tmp_path, escalations=desk(tmp_path, responder_keys={}))
+    assert "in memory" in refused(tmp_path, escalations=desk(tmp_path, log=EscalationLog(None, signer=DEPLOYER)))
+    assert "unsigned" in refused(tmp_path, escalations=desk(tmp_path, log=EscalationLog(tmp_path / "u.jsonl")))
 
 
 def test_an_unguarded_executor_is_refused_by_strict_and_by_the_profile_itself(tmp_path):
