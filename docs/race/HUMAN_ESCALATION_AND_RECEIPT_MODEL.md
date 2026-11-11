@@ -1,8 +1,8 @@
 # Human escalation and receipt model
 
 Status: implemented in `human_escalation.py` (PR 5). Evidence class: the behaviour below is EXECUTED by
-`test_human_escalation.py` (67 tests; a mutation check of the module's safety conditions leaves no surviving mutant
-except two argued equivalents, see "How it was checked"). The clinical and operational adequacy of any policy is UNKNOWN
+`test_human_escalation.py` (79 tests; a mutation check of 46 changes to the module's safety conditions leaves no
+surviving mutant, see "How it was checked"). The clinical and operational adequacy of any policy is UNKNOWN
 until a hospital configures one and runs a drill.
 
 ## The problem this closes
@@ -57,8 +57,15 @@ lives on the ticket (`escalation_ticket`).
 6. **Overdue escalates, it does not go quiet.** A ticket past its deadline moves up a tier; past the last tier it is
    `exhausted` and stays in `open_tickets()`. The price of rules 4 and 5 is that a page can be sent twice. That is
    chosen over a page not sent.
-7. **One writer.** A second process opening the same log is refused (POSIX advisory lock). A torn final line from a
-   crash is moved to `<log>.torn` and the log resumes; damage anywhere else is an error, not a repair.
+7. **One writer, and the desk always starts.** A second process opening the same log is refused (POSIX advisory lock;
+   a forked child that inherits the lock cannot write; a platform without the lock is a production problem). A line
+   that is not valid JSON (a crash or a full disk mid-write) is moved to `<log>.torn` (appended, never overwritten) and
+   the log is rewritten without it, atomically. A line that parses but fails the chain or a signature is tampering
+   and refuses the log: restore a backup, or move the file aside and start empty (open tickets are then lost, so
+   page by hand). Everything short of tampering is handled by flagging and re-paging, never by refusing to start:
+   a policy with a renamed tier re-pages the affected tickets; an event whose opening was lost is ignored; an
+   acknowledgement in an unsigned log whose key no longer verifies is ignored so the ticket stays open (in a signed
+   log it is trusted, since the signature covers it). Each is listed in `desk.replay_warnings` and logged at CRITICAL.
 8. **The ticket carries identifiers, not clinical content.** The payload to a channel holds ticket id, the opening hash
    a responder needs to sign, kind, stage, error text, request id and artifact id. It adds nothing about a patient.
 
@@ -73,12 +80,16 @@ log has a signer and a path that can be written. A bare `alert_human` beside a d
 
 ## How it was checked
 
-- EXECUTED: 67 tests, including a reproduction of each defect an independent Opus review found (log failure silencing
-  the page, tickets stranded in `raised` or `overdue`, a failed sweep looking fresh, a hung channel holding the lock,
-  an unkeyed responder passing the profile, two writers on one log, a torn tail).
-- EXECUTED: a mutation check of 35 changes to the module's safety conditions. All are caught except two arguments for
-  equivalence: the ticket id inside the signed digest (it is already inside the opening hash, which is unique per
-  ticket), and `fsync` (not portably observable).
+- EXECUTED: 79 tests, including a reproduction of each defect two independent Opus reviews found (log failure
+  silencing the page, tickets stranded in `raised` or `overdue`, a failed sweep looking fresh, a hung channel holding
+  the lock, an unkeyed responder passing the profile, two writers on one log, a torn tail, a restart bricked by one
+  lost opening or a half-written line or a renamed tier or a rotated key, a `BaseException` from a channel, a sweep
+  killed by one bad ticket, a fork).
+- EXECUTED: a mutation check of 46 changes to the module's safety conditions; none survives. Two further changes were
+  argued equivalent and left out: the ticket id inside the signed digest (already inside the opening hash, which is
+  unique per ticket) and `fsync` (not portably observable).
+- NOT independently re-reviewed: the final round of fixes (tolerant replay, crash-consistent append) was tested and
+  mutation-checked but not given a third independent review.
 - NOT done: a real paging vendor, real responder devices, a drill, multi-process behaviour beyond the writer lock.
 
 ## Residual risks and open decisions
@@ -92,6 +103,12 @@ log has a signer and a path that can be written. A bare `alert_human` beside a d
   returning, and weaker than an acknowledgement.
 - **HMAC responder keys are shared secrets.** A responder's device and the desk hold the same key. Asymmetric
   responder keys are a later hardening. The profile cannot prove a real person holds each key.
+- **Logging blocks.** An append fsyncs under the desk lock before the first page, so a hung disk stalls the page, as it
+  already stalls the receipt and the execution ledger. A failing log is handled (rule 4); a hanging one is not.
+- **Ticket ids can repeat** after a restart if the last openings never reached the log; a ticket's identity is the id
+  plus its `opened_hash`, which acknowledgements are bound to.
+- **A timed-out channel's thread is abandoned,** so a channel that hangs forever leaks one thread per attempt, and a
+  late success is discarded (the responder was paged but that tier is not counted as reached).
 - **A ticket exhausted after delivery has no resolve API.** A late acknowledgement is accepted; closing a ticket as
   "handled outside the system" is a human-governed recovery path that does not exist yet.
 - **The numbers are not provided.** Tiers, deadlines, timeouts and responders are a clinical-operations decision.

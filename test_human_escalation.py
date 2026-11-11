@@ -317,12 +317,15 @@ def test_an_edited_removed_or_foreign_signed_log_does_not_load(tmp_path):
         make(tmp_path, signer=HmacSigner(b"another-log-key-0123456789abcdefgh", key_id="log"))
 
 
-def test_a_tier_the_policy_no_longer_has_stops_the_desk_loudly(tmp_path):
+def test_a_tier_the_policy_no_longer_has_is_flagged_and_the_ticket_is_paged_again_not_a_refusal_to_start(tmp_path):
     desk, *_ = make(tmp_path)
-    raise_one(desk)
+    ticket_id, _ = raise_one(desk)
     desk.log.close()
-    with pytest.raises(EscalationLogError, match="current policy does not have"):
-        make(tmp_path, tiers=(T("renamed", Channel(), ("alice",)),))
+    channel = Channel()
+    again, *_ = make(tmp_path, tiers=(T("renamed", channel, ("alice",)),))
+    assert any("does not have" in w for w in again.replay_warnings)
+    assert again.state(ticket_id) == "raised"
+    assert again.sweep() == [(ticket_id, "dispatched")] and len(channel.calls) == 1
 
 
 def test_the_log_file_is_owner_only_and_refuses_a_symlink(tmp_path):
@@ -613,39 +616,42 @@ def test_a_whole_final_line_that_only_lost_its_newline_is_kept(tmp_path):
     again.log.close()
 
 
-def test_a_damaged_line_that_is_not_the_last_is_an_error_not_a_repair(tmp_path):
+def test_a_damaged_line_anywhere_is_set_aside_but_an_altered_valid_line_still_refuses(tmp_path):
     desk, *_ = make(tmp_path)
-    raise_one(desk)
+    ticket_id, _ = raise_one(desk)
     desk.log.close()
     path = tmp_path / "esc.jsonl"
     path.write_text("not json\n" + path.read_text())
-    with pytest.raises(EscalationLogError, match="not valid JSON"):
-        make(tmp_path)
+    again, *_ = make(tmp_path)
+    assert again.state(ticket_id) == "dispatched" and b"not json" in (tmp_path / "esc.jsonl.torn").read_bytes()
+    assert not (tmp_path / "esc.jsonl.repair").exists() and "not json" not in path.read_text()
 
 
-def test_an_acknowledgement_written_into_an_unsigned_log_without_a_valid_signature_does_not_load(tmp_path):
+def test_an_acknowledgement_in_an_unsigned_log_without_a_valid_signature_is_ignored_and_the_ticket_stays_open(tmp_path):
     desk, *_ = make(tmp_path, signer=None)
     ticket_id, _ = raise_one(desk)
     desk.log.append(ticket_id, "acknowledged", "2026-01-01T12:00:00+00:00",
                     {"actor_id": "alice", "note": "", "signature": {"key_id": "alice", "signature": "00"}})
     desk.log.close()
-    with pytest.raises(EscalationLogError, match="does not verify"):
-        make(tmp_path, signer=None)
+    again, *_ = make(tmp_path, signer=None)
+    assert again.state(ticket_id) == "dispatched" and any("does not verify" in w for w in again.replay_warnings)
 
 
-def test_an_opening_whose_hash_was_tampered_does_not_load(tmp_path):
+def test_an_opening_whose_hash_was_tampered_loads_flagged_and_its_old_acknowledgement_no_longer_counts(tmp_path):
     desk, *_ = make(tmp_path, signer=None)
-    raise_one(desk)
+    ticket_id, _ = raise_one(desk)
+    ack(desk, ticket_id)
     desk.log.close()
     path = tmp_path / "esc.jsonl"
     lines = path.read_text().splitlines()
     first = json.loads(lines[0])
     first["data"]["artifact_id"] = "someone-else"
     from human_escalation import _event_hash
-    first["hash"] = _event_hash(first)                                       # a forger who can recompute the chain
+    first["hash"] = _event_hash(first)
+    # a forger who can recompute the chain still cannot make the later events follow it
     path.write_text(json.dumps(first) + "\n")
-    with pytest.raises(EscalationLogError, match="does not match its hash"):
-        make(tmp_path, signer=None)
+    again, *_ = make(tmp_path, signer=None)
+    assert any("does not match its hash" in w for w in again.replay_warnings)
 
 
 def test_the_startup_probe_creates_the_log_owner_only(tmp_path):
@@ -670,3 +676,164 @@ def test_a_sweep_during_the_first_dispatch_does_not_page_the_same_tier_twice():
     release.set()
     worker.join(5)
     assert len(calls) == 1
+
+
+# ---- second review: the desk always starts and always pages -----------------------------------------------------
+
+def test_an_opening_that_failed_to_log_once_is_written_before_the_next_event_so_the_restart_works(tmp_path, monkeypatch):
+    desk, clock, first, _ = make(tmp_path)
+    real, failures = desk.log.append, {"n": 0}
+
+    def flaky(*a, **k):
+        failures["n"] += 1
+        if failures["n"] == 1:
+            raise OSError("one bad write")
+        return real(*a, **k)
+    monkeypatch.setattr(desk.log, "append", flaky)
+    ticket_id, state = raise_one(desk)
+    assert state == "dispatched" and len(first.calls) == 1
+    desk.log.close()
+    again, *_ = make(tmp_path, clock=clock)
+    assert again.replay_warnings == [] and again.state(ticket_id) == "dispatched"
+
+
+def test_a_half_written_line_in_the_middle_of_the_log_costs_that_line_only(tmp_path, monkeypatch):
+    desk, clock, *_ = make(tmp_path)
+    real_fdopen = os.fdopen
+
+    class HalfWrite:
+        def __init__(self, fh):
+            self.fh = fh
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return self.fh.__exit__(*a)
+
+        def write(self, text):
+            self.fh.write(text[: len(text) // 2])
+            self.fh.flush()
+            raise OSError("no space left on device")
+
+        def __getattr__(self, name):
+            return getattr(self.fh, name)
+    with monkeypatch.context() as m:
+        m.setattr(os, "fdopen", lambda *a, **k: HalfWrite(real_fdopen(*a, **k)))
+        one, _ = raise_one(desk)                                             # every write fails halfway
+    two, _ = raise_one(desk)                                                 # the disk recovered
+    desk.log.close()
+    again, *_ = make(tmp_path, clock=clock)
+    assert again.state(two) == "dispatched" and again.replay_warnings == []
+    assert (tmp_path / "esc.jsonl.torn").exists()
+    assert one in desk.open_tickets()
+
+
+def test_tearing_twice_appends_to_the_set_aside_file_and_leaves_no_repair_file(tmp_path):
+    desk, clock, *_ = make(tmp_path)
+    raise_one(desk)
+    desk.log.close()
+    path = tmp_path / "esc.jsonl"
+    for n in (1, 2):
+        path.write_text(path.read_text() + f"torn-{n}")
+        again, *_ = make(tmp_path, clock=clock)
+        again.log.close()
+    torn = (tmp_path / "esc.jsonl.torn").read_text()
+    assert "torn-1" in torn and "torn-2" in torn and not (tmp_path / "esc.jsonl.repair").exists()
+
+
+def test_a_rotated_responder_key_does_not_stop_a_signed_log_loading(tmp_path):
+    desk, clock, *_ = make(tmp_path)
+    ticket_id, _ = raise_one(desk)
+    ack(desk, ticket_id)
+    desk.log.close()
+    new_key = HmacSigner(b"alice-rotated-key-0123456789abcdefgh", key_id="alice")
+    again = EscalationDesk(desk.policy, EscalationLog(tmp_path / "esc.jsonl", signer=LOG_KEY),
+                           responder_keys={"alice": new_key, "bob": BOB}, clock=clock)
+    assert again.state(ticket_id) == "acknowledged" and again.replay_warnings == []
+
+
+def test_in_an_unsigned_log_a_rotated_key_leaves_the_ticket_open_and_flagged(tmp_path):
+    desk, clock, *_ = make(tmp_path, signer=None)
+    ticket_id, _ = raise_one(desk)
+    ack(desk, ticket_id)
+    desk.log.close()
+    new_key = HmacSigner(b"alice-rotated-key-0123456789abcdefgh", key_id="alice")
+    again = EscalationDesk(desk.policy, EscalationLog(tmp_path / "esc.jsonl"),
+                           responder_keys={"alice": new_key, "bob": BOB}, clock=clock)
+    assert again.state(ticket_id) == "dispatched" and any("does not verify" in w for w in again.replay_warnings)
+
+
+class Cancel(BaseException):
+    """What asyncio.CancelledError is: not an Exception."""
+
+
+def test_a_channel_that_ends_with_a_base_exception_is_a_failed_dispatch_not_a_stranded_sweep():
+    def cancelled(payload):
+        raise Cancel("cancelled")
+    second = Channel()
+    desk, clock, *_ = make(tiers=(T("charge", cancelled, ("alice",)), T("physician", second, ("bob",))))
+    ticket_id, state = raise_one(desk)
+    assert state == "dispatched" and desk.ticket(ticket_id)["tier"] == "physician" and len(second.calls) == 1
+    clock.advance(1000)
+    desk.sweep()
+    assert not desk._tickets[ticket_id].busy and desk.seconds_since_sweep() is not None
+
+
+def test_a_deadline_the_calendar_cannot_hold_is_a_problem_not_a_broken_sweep():
+    policy = NotificationPolicy((Tier("t", Channel(), ("alice",), 1e12, 5.0),))
+    assert any("ack_within_s" in p for p in policy.problems())
+
+
+def test_a_ticket_that_cannot_be_assessed_does_not_stop_the_others_or_the_busy_flags(monkeypatch):
+    desk, clock, _, second = make()
+    bad, _ = raise_one(desk)
+    good, _ = raise_one(desk)
+    desk._tickets[bad].dispatched_at = datetime(2020, 1, 1)                  # a naive time: comparing it raises
+    clock.advance(60)
+    changed = desk.sweep()
+    assert (good, "dispatched") in changed and len(second.calls) == 1
+    assert desk.seconds_since_sweep() is None and not any(t.busy for t in desk._tickets.values())
+
+
+def test_a_log_opened_before_a_fork_cannot_write_in_the_child_but_the_page_still_goes_out(tmp_path):
+    desk, _, first, _ = make(tmp_path)
+    desk.log._owner_pid = -1                                                 # as if this were a forked child
+    ticket_id, state = raise_one(desk)
+    assert state == "dispatched" and len(first.calls) == 1 and desk.ticket(ticket_id)["logged"] is False
+
+
+def test_a_ticket_acknowledged_between_being_marked_overdue_and_being_paged_is_not_paged_again():
+    desk, clock, _, second = make()
+    ticket_id, _ = raise_one(desk)
+    real_log = desk._log
+
+    def acknowledge_after_overdue(t, event, at, data):
+        real_log(t, event, at, data)
+        if event == "overdue":
+            ack(desk, ticket_id)
+    desk._log = acknowledge_after_overdue
+    clock.advance(60)
+    desk.sweep()
+    assert desk.state(ticket_id) == "acknowledged" and second.calls == []
+
+
+def test_a_platform_without_the_single_writer_lock_is_a_problem(tmp_path, monkeypatch):
+    import human_escalation
+    desk, *_ = make(tmp_path)
+    assert not any("single-writer" in p for p in desk.problems())
+    monkeypatch.setattr(human_escalation, "fcntl", None)
+    assert any("single-writer" in p for p in desk.problems())
+
+
+def test_an_escalated_ticket_whose_last_tier_was_renamed_is_paged_again_from_the_top(tmp_path):
+    desk, clock, *_ = make(tmp_path)
+    ticket_id, _ = raise_one(desk)
+    clock.advance(60)
+    desk.sweep()                                                             # now on "physician"
+    desk.log.close()
+    charge, renamed = Channel(), Channel()
+    again, *_ = make(tmp_path, clock=clock,
+                     tiers=(T("charge", charge, ("alice",), 60.0), T("attending", renamed, ("bob",), 120.0)))
+    assert again.state(ticket_id) == "raised"
+    assert again.sweep() == [(ticket_id, "dispatched")] and len(charge.calls) == 1

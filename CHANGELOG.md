@@ -13,7 +13,7 @@
   There are no default timings. `GovernanceOrchestrator(escalations=desk)` replaces `alert_human` (both is
   refused) and the record gains `escalation_ticket`; `human_alert` says `delivered` only for a channel receipt,
   `dispatched` for a callable that merely returned. The legacy callable behaves as before. `profile="production"`
-  now requires a valid desk. An independent review found five blockers in the first version; each has a test
+  now requires a valid desk. Two independent reviews found defects in the first versions (a log failure silencing the page, tickets stranded after a crash, a restart bricked by routine changes); each has a test
   that fails without its fix, and a mutation check of the module leaves no surviving mutant but two argued
   equivalents. Edited pre-existing tests (they assert the exact behaviour changed): `test_production_profile.py`
   fixture `wiring()` and the parametrized case that asserted "no alert_human channel".
