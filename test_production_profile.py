@@ -2,6 +2,7 @@
 
 Needs CNS (the roster is CNS's). In CI's `cns` job a missing CNS is an error; elsewhere these skip.
 """
+import itertools
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -36,9 +37,14 @@ def perceive():
 RESPONDER = HmacSigner(b"production-profile-responder-key-0123456789", key_id="nurse-1")
 
 
+_LOGS = itertools.count()
+
+
 def desk(tmp_path, **override):
-    parts = dict(policy=NotificationPolicy(tiers=(Tier("charge", lambda payload: None, ("nurse-1",), 120.0),)),
-                 log=EscalationLog(tmp_path / "escalations.jsonl", signer=DEPLOYER), responder_keys={"nurse-1": RESPONDER})
+    """A valid desk. Each gets its own log file: one writer per log is enforced."""
+    parts = dict(policy=NotificationPolicy(tiers=(Tier("charge", lambda payload: None, ("nurse-1",), 120.0, 5.0),)),
+                 log=EscalationLog(tmp_path / f"escalations-{next(_LOGS)}.jsonl", signer=DEPLOYER),
+                 responder_keys={"nurse-1": RESPONDER})
     parts.update(override)
     return EscalationDesk(**parts)
 
@@ -214,7 +220,7 @@ def test_something_that_is_not_a_desk_is_refused(tmp_path):
 
 
 def test_a_desk_with_a_bad_policy_an_unkeyed_responder_or_a_weak_log_is_refused(tmp_path):
-    no_deadline = NotificationPolicy(tiers=(Tier("charge", lambda payload: None, ("nurse-1",), 0),))
+    no_deadline = NotificationPolicy(tiers=(Tier("charge", lambda payload: None, ("nurse-1",), 0, 5.0),))
     assert "ack_within_s" in refused(tmp_path, escalations=desk(tmp_path, policy=no_deadline))
     assert "no registered key" in refused(tmp_path, escalations=desk(tmp_path, responder_keys={}))
     assert "in memory" in refused(tmp_path, escalations=desk(tmp_path, log=EscalationLog(None, signer=DEPLOYER)))

@@ -21,7 +21,7 @@ It is strict, plus a proof at construction. If any item fails the orchestrator d
 | Executor guard on | strict check, and the profile's own | `guard_executor=False` |
 | Receipts exist and are signed | `receipts.signer` | no log, unsigned log |
 | Execution ledger is durable and signed | `path` and `signer` | in-memory ledger, unsigned ledger |
-| A person is told and followed up | an `EscalationDesk`: valid policy, a key for every responder, signed durable log; no bare `alert_human` beside it | no desk, a bare callable, a desk with a bad policy, an unkeyed responder, an in-memory or unsigned log |
+| A person is told and followed up | an `EscalationDesk`: valid policy, a key that can verify for every responder, a signed log at a path that can be written; no bare `alert_human` beside it | no desk, a bare callable, a bad policy, an unkeyed responder, an in-memory, unsigned or unwritable log |
 | OBSERVE configured | not `None` | none |
 | Event-time source keys registered | `source_signers` non-empty | none |
 
