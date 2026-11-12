@@ -46,7 +46,7 @@ HERE = Path(__file__).resolve().parent
 MODULE_PATH = HERE / "cns_governed_decision.py"
 PYPROJECT = HERE / "pyproject.toml"
 
-CNS_PIN = "v2.3.0"
+CNS_PIN = "v3.0.0"
 HINT = "pip install 'observe-perceive[cns]'"
 
 
@@ -431,7 +431,7 @@ def test_r2_a_gate_that_returns_something_else_fails_closed(rig, cg, bad):
 def test_r2_a_verdict_whose_outcome_is_a_bare_string_is_not_read_as_pass(rig, cg):
     # resolve() compares by identity, so this would otherwise add up to PASS.
     forged = cg.GateResult("g1", cg.GatePosition.ALPHA, "terminal_breach", "x", "s", "d")
-    assert cg.resolve([forged]) is cg.GateOutcome.PASS  # the hole this closes
+    assert cg.resolve([forged]) is cg.GateOutcome.TERMINAL_BREACH  # CNS 3.0.0 closed the hole this once documented
     d = rig.run([rig.slot("alpha", rig.alpha("g1", returns=forged))])
     assert d.outcome == "terminal_breach" and rig.work.calls == 0
 
