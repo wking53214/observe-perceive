@@ -251,7 +251,7 @@ def test_every_problem_is_reported_together(tmp_path):
 # ---- CNS version -------------------------------------------------------------------------------------------------
 
 def test_an_older_cns_is_refused_and_a_readable_version_is_required(tmp_path, monkeypatch):
-    old = ".".join(map(str, (REQUIRED_CNS[0], REQUIRED_CNS[1] - 1, 0)))
+    old = ".".join(map(str, (REQUIRED_CNS[0] - 1, 0, 0)))
     monkeypatch.setattr(cns, "__version__", old)
     assert f"the installed CNS is {old}" in refused(tmp_path)
     monkeypatch.setattr(cns, "__version__", "not-a-version")

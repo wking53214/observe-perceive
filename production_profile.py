@@ -29,9 +29,9 @@ __all__ = ["PRODUCTION_PROFILE", "ProductionProfileError", "REQUIRED_CNS", "prod
 
 PRODUCTION_PROFILE = "production"
 
-#: The lowest CNS release the production path accepts: the release this repository pins (the tag v2.3.0).
+#: The lowest CNS release the production path accepts (the tag v3.0.0, which is what this repository pins).
 #: DecisionGuard, which root admission needs, arrived in v2.2.0. Raising it is a policy change made in review.
-REQUIRED_CNS: Tuple[int, int, int] = (2, 3, 0)
+REQUIRED_CNS: Tuple[int, int, int] = (3, 0, 0)
 
 
 class ProductionProfileError(ValueError):
