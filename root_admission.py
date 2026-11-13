@@ -76,7 +76,7 @@ def _guard_for(guard_type: Any) -> Any:
 
     `SuperGate(required=...)` is checked at construction, but whoever builds a roster can name fewer seats and
     still get a complete-looking decision. CNS `DecisionGuard(expected_seats=...)` refuses a decision whose
-    roster lacks a seat the ACTING side needs. The CNS this repository pins (v3.0.0) has it; an older CNS predates it, and there the guard is built as
+    roster lacks a seat the ACTING side needs. The CNS this repository pins (v4.0.0) has it; an older CNS predates it, and there the guard is built as
     before and `expected_seats` does not exist: use a CNS that has it to get the check.
     """
     if "expected_seats" in inspect.signature(guard_type.__init__).parameters:
