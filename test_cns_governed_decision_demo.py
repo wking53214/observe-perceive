@@ -11,20 +11,12 @@ and README section that say what they should.
 The connected half runs the real demo against the real libraries and asserts
 every scenario's verdicts, its not-evaluated list, how often each gate was
 asked, and how often the work ran. It skips cleanly, with a reason, when CNS or
-any of the five libraries (or a version of one that has no CNS connector) is
+any of the four libraries (or a version of one that has no CNS connector) is
 not installed, unless OBSERVE_PERCEIVE_REQUIRE_CNS=1 (CI's CNS job), which
 makes each of those a failure instead:
 
     pip install -r requirements-demo.txt
-    export AUGUR_AUDIT_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"
     PYTHONPATH=. python -m pytest test_cns_governed_decision_demo.py
-
-AUGUR_AUDIT_KEY must be set (to a fresh random value; never a fixed one) for
-the test that runs the demo as a script and requires empty stderr. Without it,
-AUGUR warns on stderr that it signs its audit log with a key held only by that
-process, and the test fails saying so. The script runs in a minimal
-environment, which carries AUGUR_AUDIT_KEY through and nothing else from the
-caller's. CI's CNS job generates one per run.
 """
 
 from __future__ import annotations
@@ -49,15 +41,15 @@ REQUIREMENTS = HERE / "requirements-demo.txt"
 README = HERE / "README.md"
 RECORDED = HERE / "docs" / "CNS_GOVERNED_DECISION_DEMO.md"
 
-LIBRARY_MODULES = ("governance_gateway", "ccc", "augur", "dit", "conservation_kernel")
+LIBRARY_MODULES = ("governance_gateway", "ccc", "dit", "conservation_kernel")
 CNS_MODULES = ("cns", "cns.gate")
 BRANCH = "claude/lean-technical-review-9n6xwk"
 CNS_PIN = "v4.0.0"
 
 EM_DASH, EN_DASH = chr(0x2014), chr(0x2013)
 
-GATE_NAMES = ["governance_gateway", "ccc.transition", "augur_screen", "dit", "conservation"]
-ALPHA_GATES, OMEGA_GATES = GATE_NAMES[:3], GATE_NAMES[3:]
+GATE_NAMES = ["governance_gateway", "ccc.transition", "dit", "conservation"]
+ALPHA_GATES, OMEGA_GATES = GATE_NAMES[:2], GATE_NAMES[2:]
 
 
 # ---------------------------------------------------------------------------
@@ -72,8 +64,6 @@ def _block(*modules: str) -> str:
 
 def _python(code: str, *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     env = {"PYTHONPATH": str(HERE), "PATH": os.environ.get("PATH", ""), "PYTHONDONTWRITEBYTECODE": "1"}
-    if os.environ.get("AUGUR_AUDIT_KEY"):  # the caller's key, never a fixed one: see the module docstring
-        env["AUGUR_AUDIT_KEY"] = os.environ["AUGUR_AUDIT_KEY"]
     return subprocess.run(
         [sys.executable, "-c", textwrap.dedent(code)],
         capture_output=True,
@@ -185,7 +175,7 @@ def test_running_the_demo_without_cns_exits_2_and_says_what_to_install(tmp_path)
 
 def test_no_new_file_imports_cns_or_a_library_at_module_level():
     files = [DEMO, *sorted(FIXTURE_DIR.glob("*.py")), Path(__file__)]
-    assert len(files) >= 8, files
+    assert len(files) >= 7, files
     forbidden = set(CNS_MODULES[:1]) | set(LIBRARY_MODULES)
     for path in files:
         assert _top_level_imports(path).isdisjoint(forbidden), (
@@ -197,7 +187,6 @@ def test_no_new_file_imports_cns_or_a_library_at_module_level():
 def test_the_demo_is_a_runnable_script_and_a_package_next_to_it():
     assert DEMO.is_file() and (FIXTURE_DIR / "__init__.py").is_file()
     assert {p.name for p in FIXTURE_DIR.glob("fixture_*.py")} == {
-        "fixture_augur.py",
         "fixture_ccc.py",
         "fixture_conservation_kernel.py",
         "fixture_dit.py",
@@ -235,7 +224,6 @@ def test_requirements_demo_names_cns_and_each_library_at_its_branch():
         "cns",
         "governance-gateway",
         "cognitive-continuity-constitution",
-        "augur",
         "dit",
         "conservation-kernel",
     }
@@ -243,7 +231,6 @@ def test_requirements_demo_names_cns_and_each_library_at_its_branch():
     repos = {
         "governance-gateway": "governance_gateway",
         "cognitive-continuity-constitution": "ccc",
-        "augur": "augur",
         "dit": "dit",
         "conservation-kernel": "conservation_kernel",
     }
@@ -299,7 +286,7 @@ def test_the_recorded_run_is_the_demo_output_with_every_scenario_as_expected():
 
 
 # ---------------------------------------------------------------------------
-# Connected half: needs CNS and the five libraries, skips cleanly without them.
+# Connected half: needs CNS and the four libraries, skips cleanly without them.
 # ---------------------------------------------------------------------------
 
 
@@ -353,7 +340,6 @@ def verdict(report, gate):
 ALL_PASS = [
     ("governance_gateway", "ALPHA", "PASS"),
     ("ccc.transition", "ALPHA", "PASS"),
-    ("augur_screen", "ALPHA", "PASS"),
     ("dit", "OMEGA", "PASS"),
     ("conservation", "OMEGA", "PASS"),
 ]
@@ -377,7 +363,7 @@ def test_every_gate_is_the_librarys_own_and_sits_in_the_slot_for_its_declared_en
         assert gate.position.name == lib.fixture.POSITION
         assert type(gate._gate).__module__ == f"{lib.key}.cns_connector"
     chain = GateChain(
-        alpha=tuple(gates[k] for k in ("governance_gateway", "ccc", "augur")),
+        alpha=tuple(gates[k] for k in ("governance_gateway", "ccc")),
         omega=tuple(gates[k] for k in ("dit", "conservation_kernel")),
     )
     assert chain.misplaced() == () and chain.complete()
@@ -393,15 +379,12 @@ def test_s1_everything_passes_and_the_work_runs_once(reports):
     assert d.not_evaluated == () and d.work_error is None and d.result_withheld is False
     assert d.result.text.startswith("Lot L-2291 of Compound X 10 mg tablets was released")
     assert asked(r) == {name: 1 for name in GATE_NAMES}
-    assert verdict(r, "augur_screen").reason.startswith(
-        "no objection: the simulation ended in regime STABLE"
-    )
 
 
 def test_s2_an_omega_text_gate_refuses_retryably_and_the_work_ran(reports):
     r = reports["S2"]
     d = r.decision
-    assert triples(r) == [*ALL_PASS[:3], ("dit", "OMEGA", "RETRY"), ("conservation", "OMEGA", "PASS")]
+    assert triples(r) == [*ALL_PASS[:2], ("dit", "OMEGA", "RETRY"), ("conservation", "OMEGA", "PASS")]
     assert (d.outcome, d.executed, r.work_calls) == ("retry", True, 1)
     assert "hedging" in verdict(r, "dit").reason and "'may'" in verdict(r, "dit").reason
     assert d.result is None and d.result_withheld is True
@@ -411,7 +394,7 @@ def test_s2_an_omega_text_gate_refuses_retryably_and_the_work_ran(reports):
 def test_s3_an_omega_terminal_refusal_overrides_every_passing_gate(reports):
     r = reports["S3"]
     d = r.decision
-    assert triples(r) == [*ALL_PASS[:4], ("conservation", "OMEGA", "TERMINAL_BREACH")]
+    assert triples(r) == [*ALL_PASS[:3], ("conservation", "OMEGA", "TERMINAL_BREACH")]
     assert (d.outcome, d.executed, r.work_calls) == ("terminal_breach", True, 1)
     reason = verdict(r, "conservation").reason
     assert reason.startswith("REJECT: ")
@@ -423,7 +406,7 @@ def test_s3_an_omega_terminal_refusal_overrides_every_passing_gate(reports):
 def test_s3b_a_retry_and_a_terminal_breach_together_resolve_to_terminal(reports):
     r = reports["S3b"]
     assert triples(r) == [
-        *ALL_PASS[:3],
+        *ALL_PASS[:2],
         ("dit", "OMEGA", "RETRY"),
         ("conservation", "OMEGA", "TERMINAL_BREACH"),
     ]
@@ -436,14 +419,12 @@ def test_s4_an_alpha_refusal_means_the_work_is_never_called(reports):
     d = r.decision
     assert r.work_calls == 0, "the work function must never run when an ALPHA gate refuses"
     assert (d.outcome, d.executed) == ("terminal_breach", False)
-    assert triples(r) == [*ALL_PASS[:2], ("augur_screen", "ALPHA", "TERMINAL_BREACH")]
-    assert verdict(r, "augur_screen").reason.startswith(
-        "refused: the simulation predicts regime CRITICAL at its last step"
-    )
+    assert triples(r) == [*ALL_PASS[:1], ("ccc.transition", "ALPHA", "TERMINAL_BREACH")]
+    assert verdict(r, "ccc.transition").reason.startswith("CCC-RATIFICATION-001")
     assert set(not_evaluated(r)) == {"dit", "conservation"}
     assert all("alpha gate did not pass" in why for why in not_evaluated(r).values())
     assert asked(r) == {
-        "governance_gateway": 1, "ccc.transition": 1, "augur_screen": 1, "dit": 0, "conservation": 0,
+        "governance_gateway": 1, "ccc.transition": 1, "dit": 0, "conservation": 0,
     }
     assert d.result is None and d.result_withheld is False
 
@@ -455,11 +436,10 @@ def test_s5_the_first_terminal_alpha_verdict_stops_the_second_gate(reports):
     assert triples(r) == [("governance_gateway", "ALPHA", "TERMINAL_BREACH")]
     assert verdict(r, "governance_gateway").reason == "INTEGRITY_FAILURE"
     skipped = not_evaluated(r)
-    assert list(skipped) == ["ccc.transition", "augur_screen", "dit", "conservation"]
+    assert list(skipped) == ["ccc.transition", "dit", "conservation"]
     assert skipped["ccc.transition"] == "short-circuit: governance_gateway returned TERMINAL_BREACH"
-    assert skipped["augur_screen"] == "short-circuit: governance_gateway returned TERMINAL_BREACH"
     assert asked(r) == {
-        "governance_gateway": 1, "ccc.transition": 0, "augur_screen": 0, "dit": 0, "conservation": 0,
+        "governance_gateway": 1, "ccc.transition": 0, "dit": 0, "conservation": 0,
     }
 
 
@@ -480,7 +460,7 @@ def test_s6_a_required_alpha_library_that_is_missing_fails_closed(reports):
     assert synthetic.subject == "synthetic:gate_unavailable"
     assert "gate unavailable" in synthetic.reason and "required" in synthetic.reason
     assert asked(r)["ccc.transition"] == 0
-    assert "short-circuit" in not_evaluated(r)["augur_screen"]
+    assert set(not_evaluated(r)) == {"dit", "conservation"}
 
 
 def test_s6b_a_required_omega_library_that_is_missing_stops_the_work_before_it_starts(reports):
@@ -488,8 +468,8 @@ def test_s6b_a_required_omega_library_that_is_missing_stops_the_work_before_it_s
     d = r.decision
     assert reports["S6b"].scenario.withhold == ("conservation_kernel",)
     assert r.work_calls == 0 and (d.outcome, d.executed) == ("terminal_breach", False)
-    assert triples(r)[:3] == ALL_PASS[:3]
-    assert triples(r)[3] == ("conservation", "OMEGA", "TERMINAL_BREACH")
+    assert triples(r)[:2] == ALL_PASS[:2]
+    assert triples(r)[2] == ("conservation", "OMEGA", "TERMINAL_BREACH")
     assert verdict(r, "conservation").subject == "synthetic:gate_unavailable"
     assert "the work was not started" in verdict(r, "conservation").reason
     assert not_evaluated(r) == {
@@ -507,16 +487,15 @@ def test_s7_a_real_alpha_gate_that_raises_fails_closed_without_a_crash(reports):
     assert synthetic.subject == "synthetic:gate_error"
     assert "raised TypeError" in synthetic.reason
     assert asked(r)["ccc.transition"] == 1, "the real gate was asked, and it was the real gate that raised"
-    assert asked(r)["augur_screen"] == 0
-    assert set(not_evaluated(r)) == {"augur_screen", "dit", "conservation"}
+    assert set(not_evaluated(r)) == {"dit", "conservation"}
 
 
 def test_s7b_a_real_omega_gate_that_raises_withholds_the_result(reports):
     r = reports["S7b"]
     d = r.decision
     assert r.work_calls == 1 and (d.outcome, d.executed) == ("terminal_breach", True)
-    assert triples(r)[:4] == ALL_PASS[:4]
-    assert triples(r)[4] == ("conservation", "OMEGA", "TERMINAL_BREACH")
+    assert triples(r)[:3] == ALL_PASS[:3]
+    assert triples(r)[3] == ("conservation", "OMEGA", "TERMINAL_BREACH")
     assert verdict(r, "conservation").subject == "synthetic:gate_error"
     assert "raised TypeError" in verdict(r, "conservation").reason
     assert d.result is None and d.result_withheld is True
@@ -654,13 +633,6 @@ def test_a_missing_library_is_reported_and_exits_2_when_cns_is_present(tmp_path,
 
 
 def test_run_as_a_script_it_exits_0_prints_the_same_thing_twice_and_leaves_no_files(tmp_path, demo):
-    if not os.environ.get("AUGUR_AUDIT_KEY"):
-        pytest.fail(
-            "AUGUR_AUDIT_KEY is not set, so AUGUR warns on stderr that it signs its audit log "
-            "with a key held only by this process, and this test requires empty stderr. Set it "
-            "to a fresh random value: export AUGUR_AUDIT_KEY=\"$(python -c 'import secrets; "
-            "print(secrets.token_hex(32))')\""
-        )
     first = _run_script(cwd=tmp_path)
     second = _run_script(cwd=tmp_path)
     assert first.returncode == 0, first.stderr
