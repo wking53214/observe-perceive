@@ -27,7 +27,6 @@ class GovernanceOrchestrator:
 
     def __init__(self, perceive=None, conservation_kernel=None, observe_engine=None,
                  fortress_controller: str = None,
-                 simulation_screen: bool = False, simulation_seed: int = 42,
                  require_declared_scope: bool = False,
                  require_vitals: bool = False,
                  raise_on_stage_error: bool = False,
@@ -54,12 +53,6 @@ class GovernanceOrchestrator:
                 Conservation Kernel. None (the default) leaves it out
                 entirely, so the chain behaves as it did before and a missing
                 fortress-kernel checkout is never a hard failure.
-            simulation_screen: place AUGUR's behavioural-simulation screen
-                ahead of PERCEIVE. A different system from fortress-kernel
-                above; the two were both called FORTRESS until AUGUR was
-                renamed. Off by default.
-            simulation_seed: seed for that screen, so its runs are
-                reproducible by a reviewer.
             require_declared_scope: refuse to execute a request that declares
                 no gateway scope at all. Defaults False, matching the advisory
                 pattern PolicyEnforcementConfig uses in PERCEIVE: the check
@@ -212,17 +205,6 @@ class GovernanceOrchestrator:
         if fortress_controller:
             from fortress_perceive_adapter import FortressPerceiveAdapter
             self.fortress_adapter = FortressPerceiveAdapter(controller_mode=fortress_controller)
-
-        # AUGUR's behavioural-simulation screen, also opt-in. A different
-        # system from the fortress-kernel containment adapter above -- both
-        # were called FORTRESS until AUGUR took its own name. Runs first
-        # among the judging stages: it can only
-        # refuse, never approve, which is the right shape for a screen and
-        # means it cannot smuggle an endorsement into the chain.
-        self.simulation_screen = None
-        if simulation_screen:
-            from augur_screen_adapter import AugurScreenAdapter
-            self.simulation_screen = AugurScreenAdapter(seed=simulation_seed)
 
     def _verify_on_the_way_out(self, result: dict, forensic_proof) -> dict:
         """Recompute the whole chain before handing the record over.
@@ -542,59 +524,6 @@ class GovernanceOrchestrator:
         temporal_anomalies = self._temporal_anomalies(governance_request)
         if temporal_anomalies:
             logger.warning(f"[Orchestrator] Temporal anomalies on {governance_request.request_id}: {temporal_anomalies}")
-
-        # PHASE 1b: behavioural-simulation screen
-        #
-        # First of the judging stages, and veto-only by construction: it can
-        # refuse but can never approve, so it cannot smuggle an endorsement
-        # into the chain. Removing doomed work here costs one model run
-        # instead of the whole chain.
-        #
-        # It abstains on any request with no trajectory to simulate, which is
-        # most of them. `screened` distinguishes "looked at it and had no
-        # objection" from "could not evaluate it" -- both proceed, only one is
-        # coverage.
-        screen_result = None
-        if self.simulation_screen:
-            try:
-                screen_result = self.simulation_screen.screen_request(context)
-            except Exception as e:
-                # The screen can only refuse, never approve. A screen that
-                # crashed did neither; letting the request through would treat
-                # "could not evaluate" as "no objection", so it refuses, and
-                # the record says it was a crash, not a verdict.
-                logger.warning(
-                    "[Orchestrator] Simulation screen did not run to a verdict -- "
-                    f"it raised {type(e).__name__}: {e}. Recording REJECTED with "
-                    "stage_refused=False."
-                )
-                human_alert = self._alert_stage_error("simulation_screen", e, governance_request)
-                if self.raise_on_stage_error:
-                    raise
-                return self._stamp({
-                    "status": "REJECTED",
-                    "reason": f"Simulation screen did not run to a verdict: {type(e).__name__}: {e}",
-                    "refused_by": None,
-                    "stage_refused": False,
-                    "stage_error": f"{type(e).__name__}: {e}",
-                    **self._alert_field(human_alert),
-                    "simulation_screen": None,
-                    "governance_decision": None,
-                    "audit_chain": None,
-                }, governance_request)
-            if screen_result.screened:
-                logger.info(f"[Orchestrator] Phase 1b: simulation screen -- {screen_result.reason}")
-            else:
-                logger.info(f"[Orchestrator] Phase 1b: simulation screen abstained -- {screen_result.reason}")
-            if not screen_result.proceed:
-                logger.error("[Orchestrator] Simulation screen refused: halting before PERCEIVE")
-                return self._stamp({
-                    "status": "REJECTED",
-                    "reason": f"Simulation screen refused: {screen_result.reason}",
-                    "simulation_screen": screen_result,
-                    "governance_decision": None,
-                    "audit_chain": None,
-                }, governance_request)
 
         # PHASE 2: PERCEIVE evaluation
         #
@@ -1030,7 +959,6 @@ class GovernanceOrchestrator:
                 "scope_sealed": scope_sealed,
                 "declared_scope": declared_scope,
                 "governance_decision": perceive_decision,
-                "simulation_screen": screen_result,
                 "fortress_result": fortress_result,
                 "conservation_decision": conservation_decision,
                 "execution_approval": execution_approval,
@@ -1113,7 +1041,6 @@ class GovernanceOrchestrator:
             "executed_at": executed_at,
             "advisory_violations": list(getattr(perceive_decision, "advisory_violations", None) or []),
             "governance_decision": perceive_decision,
-            "simulation_screen": screen_result,
             "fortress_result": fortress_result,
             "conservation_decision": conservation_decision,
             "execution_approval": execution_approval,

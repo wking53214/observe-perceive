@@ -1,6 +1,6 @@
 # observe-perceive
 
-**Hub of the governed action stack.** Version `1.3.0`. Python ≥ 3.11. Hard dependency: [`Conservation_Kernel`](https://github.com/wking53214/Conservation_Kernel) `@4e7c0d9`. Optional extras: Gateway, CCC, AUGUR, GEMS (pinned to last commit that still has `HumanAuthorityGuard`), fortress-kernel.
+**Hub of the governed action stack.** Version `1.3.0`. Python ≥ 3.11. Hard dependency: [`Conservation_Kernel`](https://github.com/wking53214/Conservation_Kernel) `@4e7c0d9`. Optional extras: Gateway, CCC, GEMS (pinned to last commit that still has `HumanAuthorityGuard`), fortress-kernel.
 
 Pediatric sepsis monitoring is the **reference domain**, not the product boundary.
 
@@ -24,8 +24,7 @@ Signals / artifacts
  POLICY             perceive_consolidated       PERCEIVE gates (advisory default)
         │
         ▼
- OPTIONAL SCREENS   AUGUR (veto-only)           may refuse; may never approve
-                    fortress-kernel             containment / slew
+ OPTIONAL SCREENS   fortress-kernel             containment / slew
         │
         ▼
  CONSERVATION       Conservation_Kernel.submit  undeclared epistemic shift → REJECT
@@ -72,7 +71,7 @@ Integrity ≠ authenticity: anyone in-process can recompute hashes. With a signe
 
 ### Adapters (vocabulary translation at seams)
 
-`gateway_admission_adapter` · `augur_screen_adapter` · `fortress_perceive_adapter` · `perceive_conservation_adapter` · `gsa815_observe_adapter` · `sentinel_perceive_adapter` · `gems_governance_adapter` · `herald_governance_adapter` · `approval_governance_adapter` · `tie_governance_adapter` · `orchestrator_ccc_adapter` · `conservation_gsa815_adapter`
+`gateway_admission_adapter` · `fortress_perceive_adapter` · `perceive_conservation_adapter` · `gsa815_observe_adapter` · `sentinel_perceive_adapter` · `gems_governance_adapter` · `herald_governance_adapter` · `approval_governance_adapter` · `tie_governance_adapter` · `orchestrator_ccc_adapter` · `conservation_gsa815_adapter`
 
 `approval_governance_adapter` has **no caller yet**: nothing in this repo or the rest of the stack feeds it records, so it does nothing until a caller is added. It was written for innovation_os approvals (that repo is retired) and is kept as a general seam for approval records, for example CCC decision records. It reads a record by shape and does not import its source. The rule that an approval with no named reviewer is not human review is built in.
 
@@ -107,7 +106,7 @@ From `CLAUDE_ARCHITECTURE_STATE.md` and `docs/audit/COMMERCIAL_RED_TEAM_2026-09-
 | Untyped orchestrator output | Commercial audit: result is an untyped dict. |
 | No actor registry / grant lifecycle | Architecture epic, missing. |
 | sentinel_os / GSA-815 | Never imported. Diagrams that show them as chain stages are conceptual. |
-| Optional stages | AUGUR/CCC/fortress/Gateway/GEMS skipped if absent. A clone without extras is a shorter chain. |
+| Optional stages | CCC/fortress/Gateway/GEMS skipped if absent. A clone without extras is a shorter chain. |
 | Root guard | `root_admission.RootAdmission` makes the kernel register a root only after a CNS roster approves that document (needs the `cns` extra). The two examples (`demo_why.py`, `vertical_slice.py`) build the kernel with this guard, so they need the `cns` extra and stop at the start, naming the install command, without it. Test fixtures for other components still build the kernel with `allow_unguarded_roots=True`. The approval proof is process-local, so it does not stop hostile code in the same process or mean anything to another process. |
 
 Measured (architecture state): 610 passed / 5 skipped with all packs. `pip install -e ".[test,chain,fortress]" && pytest`.
@@ -132,7 +131,6 @@ Duck-typed sentinel artifact with event time → orchestrator result dict + rece
 ```text
                     ┌── Governance_Gateway (opt, extra `chain`)
                     ├── CCC (opt)
-                    ├── AUGUR (opt, veto-only)
                     ├── GEMS @f70da70 (opt; pinned, see pyproject)
                     └── fortress-kernel (opt, extra `fortress`)
 observe-perceive ───┤
@@ -163,7 +161,7 @@ What it is not. It is a verdict-combining layer. It does not replace `Governance
 
 What it needs. CNS, a private package, through the optional extra `cns` (pinned to the tag v4.0.0; `DecisionGuard`, which root admission needs, arrived in v2.2.0; `requirements-demo.txt` pins the same tag and installs the other libraries without their `[cns]` extras, whose pins at those commits are older and conflict). This repository imports CNS only when a pipeline is built or run. Without CNS, everything else here works as before and building a pipeline raises `CnsNotInstalled` with the install command. No runtime dependency was added.
 
-Run the demo. It builds one pipeline from the real CNS gates of five libraries (governance_gateway, ccc and augur before the work; dit and conservation_kernel on the result) and a stub work function, then runs eleven scenarios and prints every verdict, whether the work ran, and the final decision:
+Run the demo. It builds one pipeline from the real CNS gates of four libraries (governance_gateway and ccc before the work; dit and conservation_kernel on the result) and a stub work function, then runs eleven scenarios and prints every verdict, whether the work ran, and the final decision:
 
 ```text
 python -m venv .venv-demo && . .venv-demo/bin/activate
@@ -171,9 +169,9 @@ pip install -r requirements-demo.txt
 PYTHONPATH=. python examples/cns_governed_decision_demo.py
 ```
 
-`requirements-demo.txt` installs each library from the branch that carries its connector. Those are branch refs, not commit SHAs, and should be pinned once the branches are final. A recorded run is in `docs/CNS_GOVERNED_DECISION_DEMO.md`. The tests are in `test_cns_governed_decision_demo.py` and skip cleanly, with a reason, where CNS or a library is missing. CI's `cns` job installs `requirements-demo.txt` and sets `OBSERVE_PERCEIVE_REQUIRE_CNS=1`, which turns each of those skips into a failure. The test that runs the demo as a script requires empty stderr, so it needs `AUGUR_AUDIT_KEY` set to a fresh random value (for example `export AUGUR_AUDIT_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"`); without it AUGUR warns on stderr and the test fails saying so. CI generates a new key on every run; no key is written anywhere in this repository.
+`requirements-demo.txt` installs each library from the branch that carries its connector. Those are branch refs, not commit SHAs, and should be pinned once the branches are final. A recorded run is in `docs/CNS_GOVERNED_DECISION_DEMO.md`. The tests are in `test_cns_governed_decision_demo.py` and skip cleanly, with a reason, where CNS or a library is missing. CI's `cns` job installs `requirements-demo.txt` and sets `OBSERVE_PERCEIVE_REQUIRE_CNS=1`, which turns each of those skips into a failure.
 
-Limits of the demo. The work is a stub, not a model. Two scenarios (a required library is missing) are simulated by leaving a slot empty; nothing stands in for the missing gate. AUGUR's gate appends audit lines to a log, and the demo sends them to a temporary file that is not deleted. The digests are tamper-evidence, not tamper-proofing: someone who rebuilds a verdict with a recomputed digest is not caught by the digest alone, and the demo shows that too.
+Limits of the demo. The work is a stub, not a model. Two scenarios (a required library is missing) are simulated by leaving a slot empty; nothing stands in for the missing gate. The digests are tamper-evidence, not tamper-proofing: someone who rebuilds a verdict with a recomputed digest is not caught by the digest alone, and the demo shows that too.
 
 The rules the layer enforces, each with tests that fail without it (`test_cns_governed_decision.py`):
 

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **AUGUR's simulation screen is removed from the chain.** The optional veto-only screen
+  (`simulation_screen`, `simulation_seed`, the PHASE 1b stage, the `simulation_screen` record key) is gone, and so
+  are `augur_screen_adapter.py`, its test file and the demo stand-in `fixture_augur.py`; they are buried verbatim in
+  the Graveyard repo (`observe-perceive/2026-11-13-augur-screen-adapter`). The demo chain goes from five gates to
+  four (governance_gateway, ccc, dit, conservation_kernel), the `augur` pins leave `pyproject.toml` and
+  `requirements-demo.txt`, and CI no longer makes an `AUGUR_AUDIT_KEY`. `demo_why.py` keeps step 6 as an
+  explicit "no stage" line so the ten-step numbering holds. Edited pre-existing tests (they assert the exact
+  behaviour changed): `test_cns_governed_decision_demo.py` (gate list, S1 to S7b expectations, S4 now refused by ccc,
+  fixture file set, requirements set, script test no longer needs the key, fixture file count 8 to 7);
+  removed: `test_a_crashing_screen_refuses_and_says_it_crashed` in `test_chain_failure_paths.py` and
+  `test_augur_screen_adapter.py` (both test only the removed stage). Dated audit and closure documents still
+  mention AUGUR on purpose: they are history.
+
 - **A person who is told can be followed up, and "delivered" stops meaning "a function returned".**
   `human_escalation.py` adds an `EscalationDesk`. Every event that used to call `alert_human` (a crashed
   stage, a lost receipt, a failed execution) opens a ticket in a hash-chained, signed log. A ticket is
