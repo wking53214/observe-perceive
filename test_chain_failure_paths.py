@@ -86,21 +86,6 @@ def test_advisory_denial_is_visible_on_an_approved_record(orchestrator):
     assert result["advisory_violations"], "the export gate's objection was dropped from the record"
 
 
-# --- prediction failure ------------------------------------------------------------------
-
-def test_a_crashing_screen_refuses_and_says_it_crashed(perceive, kernel, monkeypatch):
-    if pytest.importorskip("augur_screen_adapter").Augur is None:
-        pytest.skip("AUGUR checkout not available")
-    orchestrator = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), simulation_screen=True)
-
-    def crash(context):
-        raise RuntimeError("simulator exploded")
-    monkeypatch.setattr(orchestrator.simulation_screen, "screen_request", crash)
-    result, ran = run_chain(orchestrator, "screen-crash")
-    assert result["status"] == "REJECTED" and not ran
-    assert result["stage_refused"] is False and "RuntimeError" in result["stage_error"]
-
-
 # --- execution failure / partial execution -------------------------------------------------
 
 def test_execution_failure_is_a_recorded_state_that_keeps_the_approval(orchestrator):

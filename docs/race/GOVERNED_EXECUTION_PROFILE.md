@@ -14,7 +14,7 @@ It is strict, plus a proof at construction. If any item fails the orchestrator d
 
 | Requirement | How it is checked | Refused example |
 |---|---|---|
-| CNS importable, at least v3.0.0 (the floor, which is also what this repository pins) | imports the roster's dependencies and reads `cns.__version__` | CNS missing, v2.3.0, an unreadable version |
+| CNS importable, at least v4.0.0 (the floor, which is also what this repository pins) | imports the roster's dependencies and reads `cns.__version__` | CNS missing, v2.3.0, an unreadable version |
 | `root_admission` is a real `RootAdmission` | `isinstance` | a lookalike callable with `admit` and `close` |
 | The kernel's root guard **is that object** | identity (`kernel.ledger._root_guard is root_admission`) | a kernel guarded by `lambda a: True`; a second `RootAdmission` the kernel does not hold |
 | The roster refuses | a canary request that must be refused is put to the roster; nothing is registered; the guard must be closed afterwards | a roster that admits the canary, crashes on it, or leaves the guard open |

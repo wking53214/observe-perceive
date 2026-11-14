@@ -1,10 +1,10 @@
-"""End-to-end demo: one GovernedPipeline over five libraries' real CNS gates.
+"""End-to-end demo: one GovernedPipeline over four libraries' real CNS gates.
 
 What this runs. ``cns_governed_decision.GovernedPipeline`` combines gates from
 separate libraries into one fail-closed decision. Here it holds the real CNS
-connector gate of each of five libraries, placed by the end each one declares:
+connector gate of each of four libraries, placed by the end each one declares:
 
-    ALPHA, judged before the work    governance_gateway, ccc, augur
+    ALPHA, judged before the work    governance_gateway, ccc
     the work                         a stub that writes a release summary
     OMEGA, judged on the result      dit, conservation_kernel
 
@@ -22,7 +22,7 @@ Scenarios. S1 to S8 plus three variants (S3b, S6b, S7b) the fixtures support:
     S3   an OMEGA gate (conservation_kernel) refuses terminally while every
          other gate passed: TERMINAL_BREACH
     S3b  a RETRY and a TERMINAL_BREACH together: terminal wins
-    S4   an ALPHA gate (augur) refuses: the work is never called and the OMEGA
+    S4   an ALPHA gate (ccc) refuses: the work is never called and the OMEGA
          gates are not evaluated
     S5   two ALPHA gates would refuse; the first terminal one stops the rest
     S6   a required ALPHA library is missing (a Slot with gate None): fail closed
@@ -37,14 +37,13 @@ the point of those two is a pipeline that has a required slot with no gate.
 
 Not shown, because the fixtures cannot drive it: a gate that returns RETRY
 from an ALPHA library (ccc's RETRY path needs an artifact id that a
-zero-argument candidate cannot name; augur reserves RETRY for scenarios it
-cannot screen).
+zero-argument candidate cannot name).
 
 Limits, stated plainly. This is a verdict-combining layer. It does not replace
 GovernanceOrchestrator, and it only works for libraries that ship a CNS
 connector. APPROVED means every gate in this pipeline passed; a library's PASS
 is "no objection", not proof that the summary is correct (the conservation
-kernel checks the typed envelope, not the prose; AUGUR cannot approve). The
+kernel checks the typed envelope, not the prose). The
 digests are tamper-evidence, not tamper-proofing: someone who rebuilds a
 verdict with a recomputed digest is not caught by the digest alone (S8 shows
 this).
@@ -77,7 +76,6 @@ for _path in (_HERE, _HERE.parent):
 
 import cns_governed_decision as cgd  # noqa: E402
 from cns_demo import (  # noqa: E402
-    fixture_augur,
     fixture_ccc,
     fixture_conservation_kernel,
     fixture_dit,
@@ -127,9 +125,6 @@ class Plan:
     #: "ok" (INFERENCE), "refused" (HISTORICAL_RECORD) or "malformed" (not an
     #: Attempt, so the real gate raises).
     filing: str = "ok"
-    #: augur simulates the planned action's scenario: "ok" (calm) or "refused"
-    #: (violent).
-    scenario: str = "ok"
     #: What the stub work writes: "ok", or "hedged" (a hedge word for dit).
     wording: str = "ok"
     #: The typed record of source to summary that conservation_kernel judges:
@@ -240,12 +235,6 @@ LIBRARIES: tuple[Library, ...] = (
         fixture_ccc,
         lambda plan: _candidate(fixture_ccc, plan.filing),
     ),
-    Library(
-        "augur",
-        "augur",
-        fixture_augur,
-        lambda plan: _candidate(fixture_augur, plan.scenario),
-    ),
     Library("dit", "dit", fixture_dit, lambda plan, release: release.text),
     Library(
         "conservation_kernel",
@@ -255,7 +244,7 @@ LIBRARIES: tuple[Library, ...] = (
     ),
 )
 
-_PLAN_FIELD = {"governance_gateway": "source", "ccc": "filing", "augur": "scenario"}
+_PLAN_FIELD = {"governance_gateway": "source", "ccc": "filing"}
 
 
 def load_gates() -> tuple[dict[str, CountingGate], dict[str, str]]:
@@ -325,7 +314,7 @@ SCENARIOS: tuple[Scenario, ...] = (
         "S3",
         "An OMEGA gate refuses terminally; every other gate passed",
         "The work restates the shelf-life estimate as fact. conservation_kernel answers "
-        "TERMINAL_BREACH. The three ALPHA gates and dit all passed, and the refusal still "
+        "TERMINAL_BREACH. The two ALPHA gates and dit all passed, and the refusal still "
         "decides the whole run.",
         Plan(transformation="refused"),
         "terminal_breach",
@@ -343,9 +332,9 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
         "S4",
         "An ALPHA gate refuses: the work is never called",
-        "augur is handed a violent scenario and vetoes it. The two ALPHA gates before it "
-        "passed. The work does not run and neither OMEGA gate is asked.",
-        Plan(scenario="refused"),
+        "ccc is asked to file the summary as human-established history and refuses. The "
+        "ALPHA gate before it passed. The work does not run and neither OMEGA gate is asked.",
+        Plan(filing="refused"),
         "terminal_breach",
         0,
     ),
@@ -561,7 +550,6 @@ def _render_header(run: DemoRun) -> list[str]:
         "after sealing)",
         "  filing          the status ccc is asked to file the summary under (refused: "
         "HISTORICAL_RECORD; malformed: not an Attempt)",
-        "  scenario        the planned action augur simulates (refused: a violent one)",
         "  wording         what the work writes (hedged: 'may be')",
         "  transformation  the typed record conservation_kernel judges (refused: the "
         "shelf-life estimate restated as fact; malformed: not a TransformationCandidate)",
@@ -672,7 +660,7 @@ def main() -> int:
     except ImportError as exc:
         print(f"The demo cannot run: {exc}", file=sys.stderr)
         print(
-            "It needs CNS and the five libraries with their CNS connectors. "
+            "It needs CNS and the four libraries with their CNS connectors. "
             "Install them with: pip install -r requirements-demo.txt",
             file=sys.stderr,
         )
