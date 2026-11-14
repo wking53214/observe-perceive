@@ -16,7 +16,9 @@ The ten steps the mission asks for, and where each lives in this run:
   4. epistemic status        carried from the artifact into the request,
                              the handoff, and the commitment; never collapsed
   5. authority               same: recorded and committed, refused if absent
-  6. prediction              AUGUR's simulation screen, veto-only, when present
+  6. prediction              no stage: the veto-only simulation screen was retired
+                             (moved to the Graveyard repo); the step is kept so
+                             the ten-step numbering stays stable
   7. permission              PERCEIVE's decision, in its audit ledger
   8. execution               the caller's operation, with the approval and
                              context that authorised it
@@ -105,18 +107,12 @@ def run_scenario(quiet: bool = False):
     artifact = Artifact("demo-escalation-001", content)
     context = {"patient_id": "P001", "severity": "high", "execution_id": "exec-demo-001"}
 
-    try:
-        import augur_screen_adapter
-        screen = augur_screen_adapter.Augur is not None   # the adapter imports without the pack
-    except ImportError:
-        screen = False
-
     # The kernel holds the real root guard: a root registers only after a CNS roster approves that document.
     require_root_admission()
     admission = RootAdmission()
     orchestrator = GovernanceOrchestrator(
         _perceive(), ConservationKernel(root_guard=admission), ObserveClinicalEngine(),
-        simulation_screen=screen, root_admission=admission,
+        root_admission=admission,
     )
 
     def operation(execution_context):
@@ -152,11 +148,7 @@ def run_scenario(quiet: bool = False):
     _say(3, "interpretation", f"PERCEIVE gates: {', '.join(result['governance_decision'].applied_gates) or 'none applied'}")
     _say(4, "epistemic status", f"{request.epistemic_status} (carried in request, handoff and commitment)")
     _say(5, "authority", f"{request.authority}, origin {request.origin}")
-    screen_result = result.get("simulation_screen")
-    if screen_result is None:
-        _say(6, "prediction", "AUGUR not checked out beside this repo: no screen (stated)")
-    else:
-        _say(6, "prediction", f"screen {'evaluated' if screen_result.screened else 'abstained'}: {screen_result.reason}")
+    _say(6, "prediction", "no simulation screen in this chain (retired); nothing here can predict, so nothing is claimed")
     decision = result["governance_decision"]
     _say(7, "permission", f"{decision.approval.value} by PERCEIVE, decision {decision.decision_id}")
     _say(8, "execution", f"{result['status']} / {result.get('execution_status')}: {result.get('gsa815_result')}")

@@ -1678,29 +1678,6 @@
     "disposition": null,
     "disposition_note": "",
     "evidence": {
-      "file": "/home/wking53214/observe-perceive/augur_screen_adapter.py",
-      "line_end": 289,
-      "line_start": 289,
-      "related_files": [
-        "/home/wking53214/observe-perceive/augur_screen_adapter.py:290-290"
-      ],
-      "snippet": null
-    },
-    "first_seen": "2026-09-08T03:44:07.001157+00:00",
-    "id": "ghost-52ed03e60f30",
-    "layer": "mechanical",
-    "severity": "minor",
-    "status": "suppressed",
-    "summary": "'screen_request' repeats the same single statement 2 times (lines 289-289, 290-290): same shape, names/literals differ"
-  },
-  {
-    "category": "duplication",
-    "confidence": null,
-    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
-    "detector": "intra_function_duplicate_block",
-    "disposition": null,
-    "disposition_note": "",
-    "evidence": {
       "file": "/home/wking53214/observe-perceive/capacity_planning.py",
       "line_end": 231,
       "line_start": 231,
@@ -2065,52 +2042,6 @@
     "severity": "minor",
     "status": "suppressed",
     "summary": "'escalation_window_counts' repeats the same single statement 2 times (lines 840-840, 841-841): same shape, names/literals differ"
-  },
-  {
-    "category": "duplication",
-    "confidence": null,
-    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
-    "detector": "intra_function_duplicate_block",
-    "disposition": null,
-    "disposition_note": "",
-    "evidence": {
-      "file": "/home/wking53214/observe-perceive/test_augur_screen_adapter.py",
-      "line_end": 135,
-      "line_start": 135,
-      "related_files": [
-        "/home/wking53214/observe-perceive/test_augur_screen_adapter.py:136-136"
-      ],
-      "snippet": null
-    },
-    "first_seen": "2026-09-08T03:44:07.188486+00:00",
-    "id": "ghost-b34386cc7590",
-    "layer": "mechanical",
-    "severity": "minor",
-    "status": "suppressed",
-    "summary": "'test_the_same_seed_reproduces_the_same_run' repeats the same single statement 2 times (lines 135-135, 136-136): same shape, names/literals differ"
-  },
-  {
-    "category": "duplication",
-    "confidence": null,
-    "detail": "Structural fingerprint match within one function, not a whole-function match (near_duplicate_function's detection is blind to this shape). Typical real cause: several branches each hand-build the same kind of object or perform the same sequence of calls -- worth a single shared helper if the branches really are doing the same thing, not just a coincidental resemblance.",
-    "detector": "intra_function_duplicate_block",
-    "disposition": null,
-    "disposition_note": "",
-    "evidence": {
-      "file": "/home/wking53214/observe-perceive/test_augur_screen_adapter.py",
-      "line_end": 254,
-      "line_start": 254,
-      "related_files": [
-        "/home/wking53214/observe-perceive/test_augur_screen_adapter.py:255-255"
-      ],
-      "snippet": null
-    },
-    "first_seen": "2026-09-08T03:44:07.189678+00:00",
-    "id": "ghost-e426c8da8194",
-    "layer": "mechanical",
-    "severity": "minor",
-    "status": "suppressed",
-    "summary": "'test_the_screen_runs_before_perceive_in_the_chain' repeats the same single statement 2 times (lines 254-254, 255-255): same shape, names/literals differ"
   },
   {
     "category": "duplication",
