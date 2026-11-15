@@ -73,6 +73,7 @@ class GovernanceStatus(str, Enum):
     APPROVED = "approved"
     BLOCKED = "blocked"
     UNAVAILABLE = "unavailable"       # governance was asked and failed; a human is alerted
+    ASSESSMENT_UNAVAILABLE = "assessment_unavailable"  # OBSERVE itself failed; nothing was assessed, a human is alerted
 
 
 @dataclass
@@ -225,7 +226,10 @@ class ClinicalGovernanceSystem:
         """
 
         # --- Clinical layer ---
-        verdict: FusedVerdict = self.observe.evaluate(vitals)
+        try:
+            verdict: FusedVerdict = self.observe.evaluate(vitals)
+        except Exception as e:  # noqa: BLE001 - a failed assessment is never a quiet one
+            return self._assessment_unavailable(vitals, e)
 
         decision = ClinicalDecision(
             patient_id=vitals.patient_id,
@@ -331,7 +335,31 @@ class ClinicalGovernanceSystem:
         self._tell_a_person(decision, verdict, request)
         return decision
 
-    def _tell_a_person(self, decision: ClinicalDecision, verdict: FusedVerdict, request: PolicyRequest) -> None:
+    def _assessment_unavailable(self, vitals: VitalsSnapshot, error: Exception) -> ClinicalDecision:
+        """OBSERVE crashed, so the patient was not assessed. An OBSERVE exception used to propagate: no decision came
+        back and nobody was told, and the patient simply was not assessed with nothing saying so. Return a decision that
+        says exactly that, mark it as needing a person, and tell one. It carries no risk judgement (risk_score is 0.0
+        only because the field is required; the regime says no assessment exists)."""
+        logger.error(f"ASSESSMENT UNAVAILABLE for {vitals.patient_id}: {type(error).__name__}: {error}")
+        decision = ClinicalDecision(
+            patient_id=vitals.patient_id, timestamp=vitals.timestamp, risk_score=0.0,
+            regime="assessment_unavailable", escalation_required=True, active_engines=[], triggered_rules=[],
+            observe_audit_hash="", governance_status=GovernanceStatus.ASSESSMENT_UNAVAILABLE,
+            governance_violations=[f"ASSESSMENT_UNAVAILABLE: {type(error).__name__}: {error}"],
+            action="escalate_assessment_unavailable",
+        )
+        # evaluate() moves the patient's escalation state before it records, so a crash part way can leave "already
+        # escalated, locked" for a reading no ledger holds and swallow the next critical reading as a repeat. Start the
+        # patient again: the cost is a possible repeat page, never silence.
+        try:
+            self.observe.reset_tracked_state(vitals)
+        except Exception as reset_error:  # noqa: BLE001 - still tell a person, whatever else is broken
+            decision.governance_violations.append(f"TRACKED_STATE_RESET_FAILED: {reset_error}")
+            logger.error(f"TRACKED STATE RESET FAILED for {vitals.patient_id}: {reset_error}")
+        self._tell_a_person(decision, None, None)
+        return decision
+
+    def _tell_a_person(self, decision: ClinicalDecision, verdict: Optional[FusedVerdict], request: Any) -> None:
         """Route an escalation EVENT to a person when the settings say it must reach one.
 
         With an EscalationDesk: open a ticket and record it on the decision. Without one, behaviour is as before
@@ -344,17 +372,17 @@ class ClinicalGovernanceSystem:
             logger.critical(f"CLINICAL NOTIFICATION FAILED for {decision.patient_id}: {type(exc).__name__}: {exc}")
             decision.clinical_notification = {"reason": None, "status": "failed", "ticket": None}
 
-    def _route_to_a_person(self, decision: ClinicalDecision, verdict: FusedVerdict, request) -> None:
+    def _route_to_a_person(self, decision: ClinicalDecision, verdict: Optional[FusedVerdict], request) -> None:
         unassessable = bool(getattr(verdict, "unassessable", False))
         reason = notification_reason(
             self.notification_settings, regime=decision.regime,
-            escalation_required=bool(verdict.escalation_required),      # OBSERVE's event, not a proactive escalation
+            escalation_required=bool(getattr(verdict, "escalation_required", decision.escalation_required)),  # OBSERVE's event
             escalation_kind=decision.escalation_kind, unassessable=unassessable,
             governance_status=decision.governance_status.value)
         if reason is None:
             return
         if self.escalations is None:
-            if reason in ("governance_unavailable", "blocked_escalation"):
+            if reason in ("governance_unavailable", "blocked_escalation", "assessment_unavailable"):
                 self._alert_human(decision)
             return
         context = ticket_context(
@@ -365,7 +393,7 @@ class ClinicalGovernanceSystem:
             governance_violations=decision.governance_violations, perceive_audit_hash=decision.perceive_audit_hash)
         ticket, status = notify(self.escalations, context=context, request_id=getattr(request, "request_id", None))
         decision.clinical_notification = {"reason": reason, "status": status, "ticket": ticket}
-        if reason in ("governance_unavailable", "blocked_escalation"):
+        if reason in ("governance_unavailable", "blocked_escalation", "assessment_unavailable"):
             decision.human_alert = status                       # the field the legacy channel has always set
             if status == "failed":
                 decision.governance_violations.append("HUMAN_ALERT_FAILED: the escalation desk reached no one")

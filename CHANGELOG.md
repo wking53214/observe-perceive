@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **An OBSERVE crash is never a quiet one.** OBSERVE moves a patient's escalation state before it records the reading, so a
+  crash part way left "already escalated, locked" for a reading no ledger holds and the patient's next CRITICAL was swallowed
+  as a repeat; `ClinicalGovernanceSystem` let the exception propagate (no decision, nobody told); and the orchestrator's advisory
+  path recorded `observe_error` and told nobody. Now `ObserveClinicalEngine.reset_tracked_state` starts the patient again (a
+  repeat page, never silence; the hard-rule history is kept), `process_vitals` returns a decision with regime
+  `assessment_unavailable`, `escalation_required` True, action `escalate_assessment_unavailable` and its own
+  `GovernanceStatus.ASSESSMENT_UNAVAILABLE`, and a person is always told (desk ticket naming the patient, not switchable off, or
+  the legacy `alert_human`). The orchestrator resets and alerts on both the strict and the advisory path, and `observe`-stage
+  alerts name the patient. No existing test edited. Not done: the advisory path still runs OBSERVE after the action. Document:
+  `docs/race/OBSERVE_CRASH_HANDLING.md`.
+
 - **A hard rule that fusion would dilute is held at WARNING once confirmed.** A hard rule (the pediatric `CRITICAL_O2`,
   SpO2 below 88%) skipped the dwell only when the fused regime was already WARNING or CRITICAL, so any `previous_*` history,
   which adds the trajectory engine and pulls the average down, could fuse it away. Measured: a child with SpO2 86%, fever
