@@ -104,7 +104,8 @@ def ticket_context(*, reason: str, patient_id: Any, regime: str, escalation_kind
                    risk_score: Optional[float] = None, triggered_rules: Optional[Sequence[Any]] = None,
                    unassessable: bool = False, observe_audit_hash: str = "", governance_status: Optional[str] = None,
                    governance_violations: Optional[Sequence[Any]] = None,
-                   perceive_audit_hash: Optional[str] = None, record_status: Optional[str] = None) -> Dict[str, Any]:
+                   perceive_audit_hash: Optional[str] = None, record_status: Optional[str] = None,
+                   attempt_id: Optional[str] = None) -> Dict[str, Any]:
     """What a person needs to act, and no raw vitals: the patient, the regime and why, what governance said, and the
     audit hashes that let the full record be found. The patient identifier is needed to act and is therefore in the
     ticket log: classify that log accordingly (docs/race/CLINICAL_ESCALATION_NOTIFICATION.md)."""
@@ -113,6 +114,8 @@ def ticket_context(*, reason: str, patient_id: Any, regime: str, escalation_kind
         "previous_regime": previous_regime, "risk_score": risk_score, "triggered_rules": _limited(triggered_rules),
         "unassessable": bool(unassessable), "observe_audit_hash": observe_audit_hash,
     }
+    if attempt_id is not None:
+        context["attempt_id"] = attempt_id                 # which orchestrator call this page belongs to
     if record_status is not None:
         context["record_status"] = record_status          # e.g. the orchestrator's REJECTED or EXECUTION_FAILED
     if governance_status is not None:

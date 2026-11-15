@@ -319,7 +319,7 @@ def test_a_strict_observe_crash_still_refuses_and_names_the_patient_in_the_alert
     from conftest import make_vitals
     from test_audit_p5_fixes import run_strict, strict
     alerts = []
-    result, order = run_strict(strict(CrashingObserve(), alerts), "oc-6", make_vitals(), "P112")
+    result, order = run_strict(strict(CrashingObserve(), alerts), "oc-6", make_vitals(), "P001")
     assert result["status"] == "REJECTED" and result["refused_by"] == "observe" and "executed" not in order
     assert alerts[0]["patient_id"] == "P001" and alerts[0]["reason"] == "assessment_unavailable"
 

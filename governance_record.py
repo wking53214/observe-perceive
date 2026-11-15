@@ -281,6 +281,7 @@ class ReceiptLog:
             "hash": _receipt_hash(previous, digest, written_at),
             "status": result.get("status"),
             "request_id": getattr(result.get("governance_request"), "request_id", None),
+            "attempt_id": result.get("attempt_id"),
             "execution_id": getattr(result.get("execution_context"), "execution_id", None),
         }
         if self.signer is not None:
@@ -302,10 +303,13 @@ class ReceiptLog:
     def records(self) -> List[Dict[str, Any]]:
         return [e["record"] for e in self._entries]
 
-    def find(self, execution_id: Optional[str] = None, request_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def find(self, execution_id: Optional[str] = None, request_id: Optional[str] = None,
+             attempt_id: Optional[str] = None) -> List[Dict[str, Any]]:
         out = []
         for e in self._entries:
             r = e["receipt"]
+            if attempt_id is not None and r.get("attempt_id") != attempt_id:
+                continue
             if execution_id is not None and r.get("execution_id") != execution_id:
                 continue
             if request_id is not None and r.get("request_id") != request_id:
