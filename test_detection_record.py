@@ -39,11 +39,12 @@ from adversarial_sensor_faults import AdversarialSensorTestSuite
 from deterioration_simulator import SCENARIOS, DeteriorationSimulator
 
 #: Sensor-fault cases the engine currently handles unsafely.
-#: All five are FAILURES TO ESCALATE. There is no false alarm in this set;
+#: All four are FAILURES TO ESCALATE. There is no false alarm in this set;
 #: there was one until the harness identity fix on 2026-09-10.
+#: repeated_spikes_o2 left this set with the hard-rule floor: a hard rule that fires again within the confirmation
+#: window now holds the regime at WARNING whatever the fusion says.
 KNOWN_RISKY_FAULT_CASES = frozenset({
     "coordinated_lie_sepsis_masking",
-    "repeated_spikes_o2",
     "slow_o2_drift_downward",
     "stuck_hr_baseline",
     "stuck_o2_sensor",
