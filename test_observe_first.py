@@ -210,3 +210,47 @@ def test_an_identity_mismatch_is_assessed_once_and_the_crash_is_told_once():
     assert result["refused_by"] == "identity" and result["observe_error"].startswith("RuntimeError")
     assert [a["stage"] for a in seen] == ["observe", "identity"] or [a["stage"] for a in seen] == ["identity", "observe"]
     assert len(seen) == 2
+
+
+# ---- 6. a verifier can check the assessment against OBSERVE's own ledger and the reading the request names -----------------
+
+def test_a_verifier_with_the_engine_checks_the_assessment_against_its_ledger_and_the_reading():
+    o = orch()
+    result = run(o, "f20", vit("P1", **CRIT))
+    names = [c.name for c in verify_result(result, kernel=o.conservation_kernel, perceive=o.perceive,
+                                           observe=o.observe_engine).checks]
+    assert {"assessment.matches_verdict", "assessment.in_observe_ledger", "assessment.matches_reading",
+            "observe_ledger.integrity"} <= set(names)
+    assert result["chain_verification"]["valid"]                              # the orchestrator verifies on the way out too
+
+
+def test_an_assessment_that_is_not_in_the_engines_ledger_fails_verification():
+    o, other = orch(), ObserveClinicalEngine()
+    result = run(o, "f21", vit("P1", **CRIT))
+    check = verify_result(result, kernel=o.conservation_kernel, perceive=o.perceive, observe=other)
+    assert not check.valid and "assessment.in_observe_ledger" in [c.name for c in check.failed]
+
+
+def test_a_record_whose_verdict_was_swapped_fails_verification():
+    import dataclasses
+    o = orch()
+    result = run(o, "f22", vit("P1", **CRIT))
+    result["observe_verdict"] = dataclasses.replace(result["observe_verdict"], decision_fingerprint="0" * 64)
+    check = verify_result(result, kernel=o.conservation_kernel, perceive=o.perceive, observe=o.observe_engine)
+    assert "assessment.matches_verdict" in [c.name for c in check.failed]
+
+
+def test_the_reading_in_the_ledger_must_be_the_one_the_request_names():
+    o = orch()
+    result = run(o, "f23", vit("P1", **CRIT))
+    result["identity"] = {**result["identity"], "observation_digest": "0" * 64}
+    check = verify_result(result, kernel=o.conservation_kernel, perceive=o.perceive, observe=o.observe_engine)
+    assert "assessment.matches_reading" in [c.name for c in check.failed]
+
+
+def test_a_request_that_commits_to_no_assessment_cannot_carry_one():
+    o = orch(engine=Crashes(), alert_human=lambda a: None)
+    result = run(o, "f24", vit("P1"))
+    assert verify_result(result, kernel=o.conservation_kernel, perceive=o.perceive).valid
+    result["observe_verdict"] = ObserveClinicalEngine().evaluate(vit("P1"))
+    assert "assessment.none_recorded" in [c.name for c in verify_result(result).failed]

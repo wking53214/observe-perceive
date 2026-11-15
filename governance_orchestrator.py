@@ -257,7 +257,8 @@ class GovernanceOrchestrator:
         decision is in both kernels' ledgers -- AND the chain reached an
         outcome. The per-check detail travels in `chain_verification`.
         """
-        verification = verify_result(result, kernel=self.conservation_kernel, perceive=self.perceive)
+        verification = verify_result(result, kernel=self.conservation_kernel, perceive=self.perceive,
+                                     observe=self.observe_engine)
         result["chain_verification"] = verification.as_dict()
         result["audit_chain_valid"] = verification.valid and verification.complete
         if forensic_proof is not None:
