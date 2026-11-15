@@ -2,12 +2,27 @@
 
 ## Unreleased
 
+- **Clinicians can now adjust the clinical lines, and a patient above the supported population is no longer scored silently as a
+  child.** Measured on `main`: every age from 36 months to 125 years used the "child" norms, so a healthy 40 year old at heart rate 70
+  was reported with `BRADYCARDIA: 70 < 100` and nothing said the patient was out of scope. New `clinical_settings.ClinicalSettings`
+  (unknown keys, wrong types and values that break an engine assumption raise; frozen; a digest covers every value): population bound
+  and action, `require_age`, age-group boundaries, the norms table, the SpO2 hard line, the hypothermia line, and the three
+  hard-rule values. `PediatricCassette(settings=...)`, `ClinicalGovernanceSystem(settings=...)` and both builders take it (a path, a
+  mapping or an object); a bad or missing file stops the system rather than running on the defaults. Every `ClinicalDecision` has
+  `settings_digest`; every non-default value is named in the OBSERVE record's cassette identity, and the ones that alert less are
+  listed and logged. **New default behaviour:** a reading above 216 months is assessed exactly as before but reported at WARNING at
+  least with the finding `OUTSIDE_SUPPORTED_POPULATION`, paged once per window, never lowering a tracked regime
+  (`outside_population=assess_anyway` or `max_age_months` turns it off). Engines gained keyword arguments with the old values as
+  defaults; the hard-rule cassette arguments still work and still record under the same names (given beside `settings` they raise).
+  No pre-existing test edited. Not done: school-age and adolescent norm rows (clinical content, needs sign-off), the remaining
+  constants listed in the document. Document: `docs/race/CLINICIAN_SETTINGS_AND_POPULATION.md`.
+
 - **A governance decision is now bound to the attempt, the patient and the reading.** Measured on `main`: a refused attempt and its retry
   shared one `request_id` (it is the artifact id); an action about patient A executed with patient B's vitals in advisory and in strict,
   with nothing naming it; with no patient in the context PERCEIVE's subject was the artifact, so a patient's per-subject limits never
   accumulated; and the request commitment was identical for calm and CRITICAL vitals. Now every `orchestrate_request` call has an
   `attempt_id` (on the result, the receipt envelope, every alert and ticket); a request whose context patient disagrees with the vitals'
-  patient (or names two subjects, or carries a wrong `observation_digest`) is refused in every profile before anything runs; the vitals'
+  patient (or carries a wrong `observation_digest`) is refused in every profile before anything runs; the vitals'
   patient is bound into the request when none is named, so limits accumulate per patient; and an `observation_digest` of the reading is in
   the request, so the commitment covers which reading. Only `patient_id` is compared with the vitals (five adapters legitimately put a
   non-patient entity in `subject_id`); a mismatch also tells a person and still assesses and pages the reading for the vitals' patient. Results record `identity` with a `subject_source`. `orchestrate_request` no longer

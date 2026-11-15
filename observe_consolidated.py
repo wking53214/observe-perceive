@@ -1739,11 +1739,12 @@ class ObserveClinicalEngine:
             floor_notes.append(floor_note)
             floor_regime = OperationalRegime(floor_value)
             if _REGIME_SEVERITY[final_regime] < _REGIME_SEVERITY[floor_regime]:
-                tracked_below = _REGIME_SEVERITY[policy.current_regime] < _REGIME_SEVERITY[floor_regime]
+                # Reached only when the tracked regime is also below the floor (tracking just produced final_regime), so
+                # this is the "sensor" page kind: a patient lifted from below the floor to the reported floor.
                 final_regime = floor_regime
                 fused_risk = max(fused_risk, REGIME_RISK_FLOOR[final_regime.value])
                 if not escalation:
-                    escalation = self._fault_page(subject, recorded.timestamp, tracked_below, False)
+                    escalation = self._fault_page(subject, recorded.timestamp, True, False)
 
         if escalation:
             moved_up_from_escalated = (_REGIME_SEVERITY[prior_regime] >= _REGIME_SEVERITY[OperationalRegime.WARNING]

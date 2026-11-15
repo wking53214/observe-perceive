@@ -251,6 +251,21 @@ def test_a_tuned_critical_o2_line_moves_the_hard_rule_and_is_marked_weaker():
                for r in engine(critical_o2_below=90.0).evaluate(snap(o2=89.0)).triggered_rules)
 
 
+def test_every_age_group_boundary_is_adjustable():
+    assert get_age_group(4, (6, 12, 36)) == "neonatal" and get_age_group(4) == "infant"
+    assert get_age_group(14, (3, 18, 36)) == "infant" and get_age_group(14) == "toddler"
+    assert get_age_group(30, (3, 12, 48)) == "toddler" and get_age_group(40, (3, 12, 48)) == "toddler"
+    assert get_age_group(40) == "child"
+
+
+def test_a_norm_given_as_a_float_is_the_same_value_everywhere():
+    out = engine(norms={"child": {"hr_high": 125.0}}).evaluate(snap(age=60, hr=128))
+    assert any(r == "TACHYCARDIA: 128 > 125" for r in out.triggered_rules)          # 125, not 125.0
+    same = ClinicalSettings.from_mapping({"norms": {"child": {"hr_high": 125.0}}})
+    assert same.digest() == ClinicalSettings.from_mapping({"norms": {"child": {"hr_high": 125}}}).digest()
+    assert type(same.norms["child"]["hr_high"]) is int
+
+
 def test_age_group_boundaries_are_adjustable_through_the_cassette():
     base = RiskAdapters.heuristic(snap(hr=135, age=30)).triggered_rules
     out = engine(age_group_upper_months=(3, 12, 24)).evaluate(snap(hr=135, age=30))
@@ -328,7 +343,10 @@ def test_an_unknown_age_is_assessed_as_before_unless_the_deployment_requires_one
     required = engine(require_age=True).evaluate(snap(age=None))
     assert has_finding(required) and required.regime == OperationalRegime.WARNING
     for unusable in (-5, "old", float("nan"), 2000):   # present but unusable counts as no age
-        assert has_finding(engine(require_age=True).evaluate(snap(age=unusable))), unusable
+        v = engine(require_age=True).evaluate(snap(age=unusable, pid=f"u{unusable}"))
+        assert has_finding(v) and any("requires the patient's age" in r for r in v.triggered_rules), unusable
+    newborn = engine(require_age=True).evaluate(snap(age=0, pid="newborn"))          # age 0 IS an age
+    assert not has_finding(newborn)
 
 
 def test_a_population_finding_and_a_faulted_channel_together_still_mask_the_channel():
@@ -354,6 +372,14 @@ def test_the_floor_pages_once_per_window_and_never_suppresses_a_later_critical_p
     assert pages == [True, False, False]                                         # one page, then held
     crit = e.evaluate(VitalsSnapshot("A", T0 + timedelta(minutes=3), 168, 83.0, 46, 39.5, {"age_months": 480}))
     assert crit.regime == OperationalRegime.CRITICAL and crit.escalation_required
+
+
+def test_the_floor_never_writes_the_tracked_regime():
+    e = ObserveClinicalEngine()
+    assert e.evaluate(snap(age=480, pid="A")).regime == OperationalRegime.WARNING
+    assert e._patient_policies["A"].current_regime == OperationalRegime.STABLE        # reported, not tracked
+    later = e.evaluate(VitalsSnapshot("A", T0 + timedelta(hours=2), 110, 98.0, 25, 37.0, {"age_months": 100}))
+    assert later.regime == OperationalRegime.STABLE and not later.escalation_required
 
 
 def test_the_floor_is_in_the_audit_entry_only_when_it_applied():
