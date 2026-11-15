@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **A hard rule that fusion would dilute is held at WARNING once confirmed.** A hard rule (the pediatric `CRITICAL_O2`,
+  SpO2 below 88%) skipped the dwell only when the fused regime was already WARNING or CRITICAL, so any `previous_*` history,
+  which adds the trajectory engine and pulls the average down, could fuse it away. Measured: a child with SpO2 86%, fever
+  39.1, HR 138 and RR 34, with 15 minutes of history, was rated STABLE (risk 0.33) with no escalation; now WARNING with an
+  escalation event. A hard rule is confirmed by another abnormal channel, by repeating within `hard_rule_confirm_window`
+  readings (default 3), or at once when the clinician sets the window to 1; a lone uncorroborated reading is judged as
+  before (it may be an artefact). The floor only raises (a patient tracked at CRITICAL stays CRITICAL), the fused risk is
+  floored to match, and the lift is in the decision's `safety_bypass` note. `PediatricCassette` takes
+  `hard_rule_confirm_window`, `hard_rule_corroboration` and `hard_rule_corroboration_margin`, validated, recorded in the
+  cassette identity when not at their defaults; the cassette version and every recorded fingerprint are unchanged.
+  Edited pre-existing test (it asserted the exact behaviour changed): `test_detection_record.py` no longer lists
+  `repeated_spikes_o2` among the recorded unsafe cases. Not done: adults are still scored on pediatric norms; the default
+  window is a clinician's decision. Document: `docs/race/HARD_RULE_FLOOR.md`.
+
 - **An escalation event now reaches a person, per settings the clinician controls.** Until now an approved CRITICAL
   returned `escalate_approved` and told nobody, and a CRITICAL that governance BLOCKED (the default for a first
   CRITICAL without `physician_approved`) returned `escalate_blocked` and told nobody either; only "governance crashed"
