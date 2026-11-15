@@ -12,6 +12,7 @@ industry can supply its own answers without touching the engine.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import replace
 from functools import partial
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
@@ -55,6 +56,8 @@ HARD_RULE_ENGINE = "heuristic"
 #: readings, or any other abnormal finding beside it, is not an artefact and holds the regime at WARNING. All three are
 #: the clinician's to change; the defaults are a starting point, not a clinical finding.
 logger = logging.getLogger("PEDIATRIC_CASSETTE")
+#: The name of the finding a reading outside the supported population carries.
+POPULATION_FINDING = "OUTSIDE_SUPPORTED_POPULATION"
 _UNSET = object()
 #: Heuristic scores are sums of decimals (0.2 + 0.2 + 0.15 is 0.55000000000000004), so the margin comparison is made
 #: with this slack and a score exactly at the margin counts on every platform.
@@ -224,6 +227,32 @@ class PediatricCassette:
     # -- trust boundary -----------------------------------------------
     def validate(self, obs: Any) -> List[str]:
         return validate_vitals(obs)
+
+    def regime_floor(self, obs: Any) -> Optional[Tuple[str, str]]:
+        """A floor on the reported regime, with its reason, or None.
+
+        Pediatric is the supported population; adult norms are a future cassette. A reading above `max_age_months` is
+        assessed on every channel exactly as before (and tracked as before, so a CRITICAL is still held), but is
+        reported no lower than WARNING with a named finding, so a person looks: a deteriorating adult must not be
+        scored less severely for being out of scope, and a healthy one must not be reassured by child norms. It is a
+        floor on the report, not a data fault: nothing about the reading is untrustworthy."""
+        s = self.settings
+        if s.outside_population != "alert":
+            return None
+        context = obs.context if isinstance(getattr(obs, "context", None), dict) else {}
+        age = context.get("age_months")
+        known = (isinstance(age, (int, float)) and not isinstance(age, bool) and math.isfinite(age)
+                 and 0 <= age <= 1500)
+        if not known:
+            if s.require_age:
+                return ("warning", f"{POPULATION_FINDING}: this deployment requires the patient's age and none "
+                                   "usable was given")
+            return None
+        if s.max_age_months is not None and age > s.max_age_months:
+            return ("warning", f"{POPULATION_FINDING}: age {age:g} months is above the supported pediatric "
+                               f"population (max {s.max_age_months:g}); assessed on pediatric norms, "
+                               "interpret with caution")
+        return None
 
     def mask_faults(self, obs: Any, faults: List[str]) -> Optional[Any]:
         """The reading to assess in place of a faulted one, or None.
