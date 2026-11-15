@@ -177,11 +177,16 @@ class ClinicalGovernanceSystem:
         if alert_human is not None and escalations is not None:
             raise ValueError("give alert_human or escalations, not both: there must be no doubt which channel "
                              "tells a person")
+        if escalations is not None and not callable(getattr(escalations, "raise_and_dispatch", None)):
+            raise ValueError(f"escalations must be an EscalationDesk, not {type(escalations).__name__}")
         self.escalations = escalations
         self.notification_settings = notification_settings or ClinicalNotificationSettings()
         settings_problems = self.notification_settings.problems()
         if settings_problems:
             raise ValueError("notification_settings refused: " + "; ".join(settings_problems))
+        if self.notification_settings.silent:
+            logger.critical("every clinical notification is switched off: only a governance verdict that is "
+                            "unavailable will reach a person")
         if alert_human is None and escalations is None and not allow_no_alert_channel:
             raise ValueError(
                 "ClinicalGovernanceSystem needs an alert channel: pass alert_human=<callable that "
@@ -264,7 +269,10 @@ class ClinicalGovernanceSystem:
 
         # --- No escalation: fast path, governance not invoked ---
         if not should_escalate:
-            # action is "continue_monitoring" by default, unless a DEFER set it above.
+            # action is "continue_monitoring" by default, unless a DEFER set it above. A deferred OBSERVE escalation
+            # EVENT is spent (it will not fire again), so a person is still told per the settings.
+            if decision.action == "escalation_deferred_capacity":
+                self._tell_a_person(decision, verdict, None)
             return decision
 
         # --- Escalation: route to governance (baseline OR proactive) ---
@@ -303,8 +311,10 @@ class ClinicalGovernanceSystem:
         )
         decision.governance_approved = gov_verdict.approved
         decision.governance_confidence = gov_verdict.confidence
-        decision.governance_violations = gov_verdict.violations
-        decision.applied_gates = gov_verdict.applied_gates
+        # Copies: these lists are also inside the PERCEIVE ledger entry that was just hashed. Appending to the shared list
+        # (a failed alert does) would edit that entry after the fact and break the audit chain.
+        decision.governance_violations = list(gov_verdict.violations)
+        decision.applied_gates = list(gov_verdict.applied_gates)
         decision.perceive_audit_hash = gov_verdict.audit_hash
         decision.used_multi_node_consensus = gov_verdict.consensus_result is not None
         decision.consensus_detail = gov_verdict.consensus_result
@@ -328,9 +338,18 @@ class ClinicalGovernanceSystem:
         for an unavailable governance verdict (`alert_human`), plus the same call for a BLOCKED escalation, which
         used to vanish with nobody told. An approved escalation reaches a person only through a desk. Never raises
         and never changes the decision's action."""
+        try:
+            self._route_to_a_person(decision, verdict, request)
+        except Exception as exc:  # noqa: BLE001 - telling a person must never lose the decision
+            logger.critical(f"CLINICAL NOTIFICATION FAILED for {decision.patient_id}: {type(exc).__name__}: {exc}")
+            decision.clinical_notification = {"reason": None, "status": "failed", "ticket": None}
+
+    def _route_to_a_person(self, decision: ClinicalDecision, verdict: FusedVerdict, request) -> None:
+        unassessable = bool(getattr(verdict, "unassessable", False))
         reason = notification_reason(
-            self.notification_settings, regime=decision.regime, escalation_required=True,
-            escalation_kind=decision.escalation_kind, unassessable=bool(getattr(verdict, "unassessable", False)),
+            self.notification_settings, regime=decision.regime,
+            escalation_required=bool(verdict.escalation_required),      # OBSERVE's event, not a proactive escalation
+            escalation_kind=decision.escalation_kind, unassessable=unassessable,
             governance_status=decision.governance_status.value)
         if reason is None:
             return
@@ -341,14 +360,15 @@ class ClinicalGovernanceSystem:
         context = ticket_context(
             reason=reason, patient_id=decision.patient_id, regime=decision.regime,
             escalation_kind=decision.escalation_kind, previous_regime=decision.previous_regime,
-            risk_score=decision.risk_score, triggered_rules=decision.triggered_rules,
-            unassessable=bool(getattr(verdict, "unassessable", False)),
+            risk_score=decision.risk_score, triggered_rules=decision.triggered_rules, unassessable=unassessable,
             observe_audit_hash=decision.observe_audit_hash, governance_status=decision.governance_status.value,
             governance_violations=decision.governance_violations, perceive_audit_hash=decision.perceive_audit_hash)
         ticket, status = notify(self.escalations, context=context, request_id=getattr(request, "request_id", None))
         decision.clinical_notification = {"reason": reason, "status": status, "ticket": ticket}
-        if reason == "governance_unavailable":
-            decision.human_alert = status                       # the field this path has always set
+        if reason in ("governance_unavailable", "blocked_escalation"):
+            decision.human_alert = status                       # the field the legacy channel has always set
+            if status == "failed":
+                decision.governance_violations.append("HUMAN_ALERT_FAILED: the escalation desk reached no one")
 
     def _alert_human(self, decision: ClinicalDecision) -> None:
         """Fail loud: an escalation that governance could not judge goes to a person."""
