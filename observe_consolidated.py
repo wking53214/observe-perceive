@@ -50,6 +50,18 @@ class OperationalRegime(Enum):
 
 #: STABLE < CAUTION < WARNING < CRITICAL, named once so the fault overlay can
 #: take a maximum without re-deriving the order from band shapes.
+class _Marker:
+    """A named sentinel that survives copy and is never equal to a real value."""
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def __repr__(self) -> str:
+        return self.name
+
+
+_ABSENT = _Marker("<nothing was tracked>")   # a snapshot of a subject that had no state of this kind
+_DROP = _Marker("<could not be copied>")     # a tracker that could not be snapshotted: it restarts on rollback
+
 _REGIME_SEVERITY = {
     OperationalRegime.STABLE: 0,
     OperationalRegime.CAUTION: 1,
@@ -1390,24 +1402,48 @@ class ObserveClinicalEngine:
                     {"reason": "lru_capacity", "cap": self._max_tracked_patients},
                 )
 
-    def reset_tracked_state(self, vitals: "VitalsSnapshot") -> None:
-        """Forget what is tracked about this reading's subject, so its next reading starts from a fresh STABLE
-        baseline.
+    # -- evaluation is all-or-nothing for a patient's tracked state ---------------------------------------------------
+    def _snapshot_tracked_state(self, subject: str) -> Dict[str, Any]:
+        """What this subject's tracked state is right now, so a failed evaluation can put it back.
 
-        For a caller whose evaluation of the subject crashed. `evaluate` moves the subject's escalation state before it
-        fingerprints and records, so a crash part way through can leave the state saying "already escalated, locked" for
-        a reading no ledger holds, and the subject's next critical reading would then be swallowed as a repeat. Starting
-        again can only cause a repeat page, never silence, which is the direction to be wrong in. The hard-rule history
-        is kept: it only ever makes a later hard rule confirm sooner, and a reading already recorded in it is never its
-        own repeat. Nothing is written to the audit ledger (it may be what failed); the caller records the crash.
-        """
-        subject = self._cassette.subject_id(vitals)
+        The hard-rule history is deliberately not in it: that only ever makes a later hard rule confirm sooner, and a
+        reading already in it is never its own repeat (a retried reading carries the same timestamp)."""
         with self._state_lock:
-            self._patient_policies.pop(subject, None)
-            self._patient_entropy.pop(subject, None)
-            self._state_commitments.pop(subject, None)
-            self._patient_fault_paged.pop(subject, None)
-            self._patient_kalman.pop(subject, None)
+            policy = self._patient_policies.get(subject)
+            paged = self._patient_fault_paged.get(subject)
+            kalman = self._patient_kalman.get(subject)
+            try:
+                kalman_copy = _ABSENT if kalman is None else copy.deepcopy(kalman)
+            except Exception:  # noqa: BLE001 - a tracker that cannot be copied is dropped on rollback: it restarts
+                kalman_copy = _DROP
+            return {
+                "policy": _ABSENT if policy is None else copy.copy(policy),
+                "entropy": self._patient_entropy.get(subject, _ABSENT),
+                "commitment": self._state_commitments.get(subject, _ABSENT),
+                "fault_paged": _ABSENT if paged is None else dict(paged),
+                "kalman": kalman_copy,
+            }
+
+    def _restore_tracked_state(self, subject: str, snapshot: Dict[str, Any]) -> None:
+        """Put the subject's tracked state back as `_snapshot_tracked_state` found it.
+
+        `evaluate` moves a patient's escalation state (tracked regime, post-escalation lock, state-commitment head)
+        BEFORE it fingerprints and writes the reading to its ledger. A crash part way left the state ahead of any
+        record: the patient was marked "already escalated, locked" for a reading no ledger holds, so the next
+        critical reading was swallowed as a repeat. Undoing the crashed evaluation is exact in both directions: a
+        crash after the state moved is as if it never ran (the next reading escalates again, a repeat page and
+        never silence), and a crash before it moved changes nothing (a patient already tracked at CRITICAL stays
+        CRITICAL; nothing falls silently). Nothing is written to the audit ledger: it may be what failed."""
+        stores = {"policy": self._patient_policies, "entropy": self._patient_entropy,
+                  "commitment": self._state_commitments, "fault_paged": self._patient_fault_paged,
+                  "kalman": self._patient_kalman}
+        with self._state_lock:
+            for name, store in stores.items():
+                saved = snapshot[name]
+                if saved is _ABSENT or saved is _DROP:
+                    store.pop(subject, None)
+                else:
+                    store[subject] = saved
 
     def _get_policy(self, patient_id: str) -> EscalationPolicy:
         with self._state_lock:
@@ -1495,8 +1531,21 @@ class ObserveClinicalEngine:
         return self._cassette.select_engines(vitals, entropy)
 
     def evaluate(self, vitals: VitalsSnapshot) -> FusedVerdict:
-        """Fast synchronous evaluation: validate → select → run → fuse → policy → audit."""
+        """Fast synchronous evaluation: validate → select → run → fuse → policy → audit.
 
+        All-or-nothing for the patient's tracked state: if the evaluation raises at any point, the escalation state, entropy,
+        state-commitment head, fault-page stamps and trajectory tracker are put back as they were when it began (see
+        `_restore_tracked_state`), so a crash can neither swallow the patient's next critical reading nor drop a real tracked
+        escalation. The exception is re-raised unchanged."""
+        subject = self._cassette.subject_id(vitals)
+        snapshot = self._snapshot_tracked_state(subject)
+        try:
+            return self._evaluate(vitals)
+        except BaseException:
+            self._restore_tracked_state(subject, snapshot)
+            raise
+
+    def _evaluate(self, vitals: VitalsSnapshot) -> FusedVerdict:
         subject = self._cassette.subject_id(vitals)
         policy = self._get_policy(subject)
         prior_regime = policy.current_regime  # what was tracked before this reading moves anything

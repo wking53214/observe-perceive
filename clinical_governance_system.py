@@ -348,14 +348,8 @@ class ClinicalGovernanceSystem:
             governance_violations=[f"ASSESSMENT_UNAVAILABLE: {type(error).__name__}: {error}"],
             action="escalate_assessment_unavailable",
         )
-        # evaluate() moves the patient's escalation state before it records, so a crash part way can leave "already
-        # escalated, locked" for a reading no ledger holds and swallow the next critical reading as a repeat. Start the
-        # patient again: the cost is a possible repeat page, never silence.
-        try:
-            self.observe.reset_tracked_state(vitals)
-        except Exception as reset_error:  # noqa: BLE001 - still tell a person, whatever else is broken
-            decision.governance_violations.append(f"TRACKED_STATE_RESET_FAILED: {reset_error}")
-            logger.error(f"TRACKED STATE RESET FAILED for {vitals.patient_id}: {reset_error}")
+        # The engine has already put the patient's tracked state back (`evaluate` is all-or-nothing), so the next reading
+        # is judged as if this one had not run: a repeat page, never silence.
         self._tell_a_person(decision, None, None)
         return decision
 

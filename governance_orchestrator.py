@@ -334,18 +334,16 @@ class GovernanceOrchestrator:
             anomalies.append(f"event_time attestation rejected: {problem}")
         return anomalies
 
-    def _reset_observe_state(self, vitals_snapshot):
-        """Start the patient's tracked OBSERVE state again after a crash (a repeat page, never silence). Returns a
-        description of why it could not, or None. Never raises: the record of the crash stands whatever this does."""
-        reset = getattr(self.observe_engine, "reset_tracked_state", None)
-        if not callable(reset):
-            return None
-        try:
-            reset(vitals_snapshot)
-        except Exception as reset_error:  # noqa: BLE001
-            logger.error(f"[Orchestrator] tracked state reset failed: {type(reset_error).__name__}: {reset_error}")
-            return f"{type(reset_error).__name__}: {reset_error}"
-        return None
+    @staticmethod
+    def _patient_context(stage: str, patient_id) -> dict:
+        """The patient an alert is about, when the stage knows one. An OBSERVE crash is named as what it is for the
+        patient (nobody assessed them), in the same words the clinical notification uses."""
+        if patient_id is None:
+            return {}
+        out = {"patient_id": str(patient_id)}
+        if stage == "observe":
+            out["reason"] = "assessment_unavailable"
+        return out
 
     def _alert_stage_error(self, stage: str, error: Exception, governance_request, patient_id=None) -> str:
         """Tell a person that a stage raised instead of reaching a verdict.
@@ -361,7 +359,7 @@ class GovernanceOrchestrator:
                     kind="stage_error", request_id=request_id,
                     artifact_id=getattr(governance_request, "artifact_id", None),
                     context={"stage": stage, "stage_error": f"{type(error).__name__}: {error}",
-                             **({} if patient_id is None else {"patient_id": str(patient_id)})})
+                             **self._patient_context(stage, patient_id)})
             except Exception as desk_error:  # noqa: BLE001 - never alter the rejection
                 logger.critical(
                     f"[Orchestrator] HUMAN ALERT FAILED: {stage} stage raised {type(error).__name__}: {error} "
@@ -383,7 +381,7 @@ class GovernanceOrchestrator:
                 "stage_error": f"{type(error).__name__}: {error}",
                 "request_id": request_id,
                 "artifact_id": getattr(governance_request, "artifact_id", None),
-                **({} if patient_id is None else {"patient_id": str(patient_id)}),
+                **self._patient_context(stage, patient_id),
             })
         except Exception as alert_error:  # noqa: BLE001 - never alter the rejection
             logger.critical(
@@ -973,7 +971,6 @@ class GovernanceOrchestrator:
                 logger.error(f"[Orchestrator] Refusing execution: OBSERVE raised {type(e).__name__}: {e}")
                 human_alert = self._alert_stage_error("observe", e, governance_request,
                                                       patient_id=getattr(vitals_snapshot, "patient_id", None))
-                self._reset_observe_state(vitals_snapshot)
                 if self.raise_on_stage_error:
                     raise
                 return self._stamp({
@@ -1099,14 +1096,10 @@ class GovernanceOrchestrator:
             except Exception as e:
                 observe_error = f"{type(e).__name__}: {e}"
                 logger.error(f"[Orchestrator] OBSERVE did not produce a verdict: {observe_error}")
-                # The patient was not assessed. Tell a person (strict does, and the record alone is read by nobody),
-                # and start the patient's tracked state again: evaluate moves it before it records, so a crash part
-                # way can swallow the next critical reading as a repeat. A repeat page is the error to prefer.
+                # The patient was not assessed. Tell a person (strict does, and the record alone is read by nobody). The
+                # engine has already put the patient's tracked state back, so the next reading is judged fresh.
                 observe_alert = self._alert_stage_error("observe", e, governance_request,
                                                         patient_id=getattr(vitals_snapshot, "patient_id", None))
-                reset_problem = self._reset_observe_state(vitals_snapshot)
-                if reset_problem:
-                    observe_error += f"; tracked state reset failed: {reset_problem}"
         else:
             logger.info("[Orchestrator] No vitals provided, OBSERVE evaluation skipped (warned above)")
 
