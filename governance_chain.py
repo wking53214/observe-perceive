@@ -168,13 +168,14 @@ def _ts(value) -> Optional[datetime]:
         return None
 
 
-def verify_result(result: Dict[str, Any], kernel=None, perceive=None) -> ChainVerification:
+def verify_result(result: Dict[str, Any], kernel=None, perceive=None, observe=None) -> ChainVerification:
     """Verify a result from `orchestrate_request`.
 
-    `kernel` (a ConservationKernel) and `perceive` (a PerceiveGovernanceKernel)
+    `kernel` (a ConservationKernel), `perceive` (a PerceiveGovernanceKernel) and `observe` (an ObserveClinicalEngine)
     are optional. Without them the structural and cryptographic links are
     checked; with them, ledger membership is checked too, which is what
-    catches an approval that never went through the kernels.
+    catches an approval that never went through the kernels, and an assessment
+    that OBSERVE never made.
     """
     checks: List[Check] = []
 
@@ -206,6 +207,39 @@ def verify_result(result: Dict[str, Any], kernel=None, perceive=None) -> ChainVe
         request.state_commitment == compute_state_commitment(None, request_state(request)),
         "request commitment recomputes from the request fields",
     )
+
+    # --- assessment ------------------------------------------------------------
+    # OBSERVE runs first and the request commits to what it found (or that it found nothing). The request commitment
+    # recomputes from the request fields above, so these checks tie that committed statement to the record's verdict, and,
+    # when the engine is given, to OBSERVE's own ledger and to the very reading the request names.
+    binding = (request.context or {}).get("observe_assessment") if isinstance(request.context, dict) else None
+    verdict_on_record = result.get("observe_verdict")
+    if isinstance(binding, dict):
+        if binding.get("status") == "assessed":
+            check("assessment.matches_verdict",
+                  verdict_on_record is not None
+                  and binding.get("decision_fingerprint") == getattr(verdict_on_record, "decision_fingerprint", None)
+                  and binding.get("state_commitment") == getattr(verdict_on_record, "state_commitment", None)
+                  and binding.get("regime") == getattr(getattr(verdict_on_record, "regime", None), "value", None),
+                  "the request commits to the assessment the record carries")
+            ledger = getattr(observe, "audit_ledger", None)
+            entries = getattr(ledger, "entries", None)
+            if entries is not None:
+                entry = next((e for e in entries if isinstance(e, dict) and isinstance(e.get("data"), dict)
+                              and e["data"].get("decision_fingerprint") == binding.get("decision_fingerprint")
+                              and e["data"].get("state_commitment") == binding.get("state_commitment")), None)
+                check("assessment.in_observe_ledger", entry is not None, "the committed assessment is in OBSERVE's ledger")
+                recorded_digest = (result.get("identity") or {}).get("observation_digest")
+                if entry is not None and recorded_digest is not None:
+                    check("assessment.matches_reading",
+                          observation_digest(entry["data"].get("vitals")) == recorded_digest,
+                          "OBSERVE's ledger entry holds the very reading the request names")
+                integrity = getattr(ledger, "verify_integrity", None)
+                if callable(integrity):
+                    check("observe_ledger.integrity", integrity(), "OBSERVE ledger hash chain intact")
+        elif binding.get("status") == "unavailable":
+            check("assessment.none_recorded", verdict_on_record is None,
+                  "the request commits that no assessment was made, so the record carries none")
 
     # --- decision --------------------------------------------------------------
     executed = status in ("APPROVED_AND_EXECUTED", "EXECUTION_FAILED")

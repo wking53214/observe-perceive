@@ -126,6 +126,8 @@ class RecordedVerdict:
     def __init__(self, data: Dict[str, Any]):
         self.regime = RecordedVerdict._Regime(data.get("regime"))
         self.audit_hash = data.get("audit_hash")
+        self.decision_fingerprint = data.get("decision_fingerprint")
+        self.state_commitment = data.get("state_commitment")
         self.risk_score = data.get("risk_score")
         self.confidence = data.get("confidence")
         self.escalation_required = data.get("escalation_required")
