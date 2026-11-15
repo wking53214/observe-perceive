@@ -14,6 +14,7 @@ telling someone about the worst events and not toward telling everyone about eve
   * an escalation that governance BLOCKED (default on): a blocked escalation otherwise vanishes silently;
   * an escalation whose reading could not be assessed (default on): a blind spot a person should know about.
   * governance UNAVAILABLE for an escalation is always told: there is no verdict, and that has always alerted.
+  * an ASSESSMENT unavailable (OBSERVE itself failed) is always told: a patient nobody assessed is not a quiet one.
 
 Only events are notified, never readings: OBSERVE sets `escalation_required` once per new escalation or severity
 increase, so a patient who stays critical does not page again on every reading. Nothing here is a clinical rule; it is
@@ -77,6 +78,8 @@ def notification_reason(settings: ClinicalNotificationSettings, *, regime: str, 
     event and does not page; callers pass OBSERVE's own `escalation_required`.)"""
     if governance_status == "unavailable":
         return "governance_unavailable"
+    if governance_status == "assessment_unavailable":
+        return "assessment_unavailable"          # OBSERVE itself failed: nothing was assessed, always told
     if not escalation_required:
         return None
     if governance_status == "blocked" and settings.notify_on_blocked_escalation:
