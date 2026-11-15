@@ -339,7 +339,18 @@ class GovernanceOrchestrator:
             anomalies.append(f"event_time attestation rejected: {problem}")
         return anomalies
 
-    def _alert_stage_error(self, stage: str, error: Exception, governance_request) -> str:
+    @staticmethod
+    def _patient_context(stage: str, patient_id) -> dict:
+        """The patient an alert is about, when the stage knows one. An OBSERVE crash is named as what it is for the
+        patient (nobody assessed them), in the same words the clinical notification uses."""
+        if patient_id is None:
+            return {}
+        out = {"patient_id": str(patient_id)}
+        if stage == "observe":
+            out["reason"] = "assessment_unavailable"
+        return out
+
+    def _alert_stage_error(self, stage: str, error: Exception, governance_request, patient_id=None) -> str:
         """Tell a person that a stage raised instead of reaching a verdict.
 
         Returns "delivered", "failed" or "no_channel". Never raises: the
@@ -352,7 +363,8 @@ class GovernanceOrchestrator:
                 ticket_id, state = self.escalations.raise_and_dispatch(
                     kind="stage_error", request_id=request_id,
                     artifact_id=getattr(governance_request, "artifact_id", None),
-                    context={"stage": stage, "stage_error": f"{type(error).__name__}: {error}"})
+                    context={"stage": stage, "stage_error": f"{type(error).__name__}: {error}",
+                             **self._patient_context(stage, patient_id)})
             except Exception as desk_error:  # noqa: BLE001 - never alter the rejection
                 logger.critical(
                     f"[Orchestrator] HUMAN ALERT FAILED: {stage} stage raised {type(error).__name__}: {error} "
@@ -374,6 +386,7 @@ class GovernanceOrchestrator:
                 "stage_error": f"{type(error).__name__}: {error}",
                 "request_id": request_id,
                 "artifact_id": getattr(governance_request, "artifact_id", None),
+                **self._patient_context(stage, patient_id),
             })
         except Exception as alert_error:  # noqa: BLE001 - never alter the rejection
             logger.critical(
@@ -948,6 +961,7 @@ class GovernanceOrchestrator:
         # The advisory profile keeps OBSERVE after the action, as before.
         observe_verdict = None
         observe_error = None
+        observe_alert = None
         observed_before_action = False
         if self.profile in ("strict", "production") and vitals_snapshot is not None:
             logger.info("[Orchestrator] Phase 4b: OBSERVE before the action (strict)")
@@ -960,7 +974,8 @@ class GovernanceOrchestrator:
                 # OP-2: in strict, OBSERVE is mandatory, so a crash is a refusal and a person is told, as for any
                 # other stage that raises instead of reaching a verdict.
                 logger.error(f"[Orchestrator] Refusing execution: OBSERVE raised {type(e).__name__}: {e}")
-                human_alert = self._alert_stage_error("observe", e, governance_request)
+                human_alert = self._alert_stage_error("observe", e, governance_request,
+                                                      patient_id=getattr(vitals_snapshot, "patient_id", None))
                 if self.raise_on_stage_error:
                     raise
                 return self._stamp({
@@ -1086,6 +1101,10 @@ class GovernanceOrchestrator:
             except Exception as e:
                 observe_error = f"{type(e).__name__}: {e}"
                 logger.error(f"[Orchestrator] OBSERVE did not produce a verdict: {observe_error}")
+                # The patient was not assessed. Tell a person (strict does, and the record alone is read by nobody). The
+                # engine has already put the patient's tracked state back, so the next reading is judged fresh.
+                observe_alert = self._alert_stage_error("observe", e, governance_request,
+                                                        patient_id=getattr(vitals_snapshot, "patient_id", None))
         else:
             logger.info("[Orchestrator] No vitals provided, OBSERVE evaluation skipped (warned above)")
 
@@ -1113,6 +1132,7 @@ class GovernanceOrchestrator:
             "gateway_admission": admission_summary,
             "observe_enforced": observe_verdict is not None,
             "observe_error": observe_error,
+            **self._alert_field(observe_alert),
             "execution_status": execution_status,
             "executed_at": executed_at,
             "advisory_violations": list(getattr(perceive_decision, "advisory_violations", None) or []),
