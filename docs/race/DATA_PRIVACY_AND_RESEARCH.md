@@ -29,7 +29,7 @@ Facts worth stating plainly:
 
 - **The only de-identified output in the repository is the HIPAA CSV exporter.** Every ledger, receipt, ticket log, alert and
   most log lines carry the raw patient id, and the OBSERVE ledger carries raw vitals and age.
-- **Persistent files are protected by file mode (0600) only.** No encryption at rest, no key management, no retention limit.
+- **Persistent files are protected by file mode (0600) only, and only when this code creates them** (`os.open(..., O_CREAT, 0o600)`; a pre-existing file keeps its old mode). No encryption at rest, no key management, no retention limit.
 - **PERCEIVE's audit hash does not cover the request snapshot** (`perceive_consolidated.py:626-634` hashes `audit_id`, `timestamp`,
   `evaluated_gates`, `final_verdict`). The patient id and the request context in that ledger are therefore not tamper-evident by
   that chain, though the request commitment in the orchestrator record does cover the context (since #83 and #86). See the register.
@@ -67,8 +67,8 @@ set in `OBSERVE_DEID_SALT` and the code refuses to run with a guessable default;
    re-identification risk (k-anonymity or equivalent) before export.
 5. **The CSV is the only exporter that de-identifies.** `export_json`, `export_observe_audit`, `export_perceive_audit` are the easy
    ones to call, and they do not.
-6. **Erasure against an immutable ledger.** `GDPRExporter` describes access and erasure by raw patient id against the ledger, but
-   the ledgers are append-only and hash-chained, so deleting an entry breaks the chain by design. A right-to-erasure request cannot be
+6. **Erasure against an immutable ledger.** `GDPRExporter.export_report` takes only counts and prints that access and erasure requests are
+   "serviceable via patient_id lookup"; it has no lookup logic. The ledgers are append-only and hash-chained, so deleting an entry breaks the chain by design. A right-to-erasure request cannot be
    met by editing them. The honest options (**a decision for counsel, not for code**): keep identifiers out of the chained records and
    hold them in a separate erasable table keyed by the pseudonym; or crypto-shred per patient (encrypt T2/T3 fields under a per-patient
    key and destroy the key). Neither exists.

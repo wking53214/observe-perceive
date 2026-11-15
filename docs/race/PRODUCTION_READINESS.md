@@ -28,9 +28,9 @@ Nothing is above 2 and most clinical rows are 0 or 1. A reader should not averag
 | 6 | Clinical rule approval | 0 | 33 register rows, none approved | needs the clinical owner |
 | 7 | Alarm burden | 0 | none measured; no metric function (only `open_tickets()`) | needs a report over the ticket log and a unit pilot |
 | 8 | Privacy and data protection | 1 | HIPAA CSV exporter pseudonymises; salt required; files 0600 | raw ids in logs, ledgers, tickets (EXECUTED); no encryption at rest, retention or erasure path; 48-bit pseudonym |
-| 9 | Security of the control plane | 1 | HMAC-signed tickets, acknowledgements and receipts (optional); one-writer lock | no authentication of callers (C14); keys and salt custody are the deployer's |
+| 9 | Security of the control plane | 1 | optionally signed tickets, acknowledgements and receipts (the signing scheme is the Conservation Kernel's `signing` package, which is not in this repository, so I did not verify it is HMAC); one-writer lock | no authentication of callers (C14); keys and salt custody are the deployer's |
 | 10 | Operations | 1 | sweep runner with watchdog; settings from a file | OBSERVE ledger is memory-only and unbounded (C7); no deployment, monitoring, backup, or capacity evidence; per-patient state capped at 10000 |
-| 11 | Test evidence | 2 | 1492 passing tests, future-clock pass, ruff, mutation checks per PR, independent reviews | two test files run only in CI; tests are engineering regression, not clinical |
+| 11 | Test evidence | 2 | 1492 passing tests on the #86 branch (1449 on `main` before #85 and #86), future-clock pass, ruff, mutation checks per PR, independent reviews | two test files I could not run locally (CI runs them); tests are engineering regression, not clinical |
 | 12 | Regulatory and quality system | 0 | not assessed | whether this is a regulated medical device is a decision for regulatory counsel; I assumed nothing |
 | 13 | Documentation and training | 1 | design notes and PR documents exist per change; this set | no runbooks, no clinician-facing guide, no training |
 

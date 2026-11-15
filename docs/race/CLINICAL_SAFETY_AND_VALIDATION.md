@@ -14,10 +14,11 @@ short histories, an alert status, optional physiology telemetry). **There is no 
 status, urine output, lactate or oxygen-delivery input**, so a pediatric sepsis pattern that is recognised mainly by perfusion cannot be
 seen here, whatever the thresholds are.
 
-Path: the reading is validated (impossible values are a data fault, never a clinical state) then up to six engines score it
+Path: the reading is validated (impossible values are a data fault, never a clinical state) then up to seven engines score it
 (`heuristic` always; `bayesian`, `trajectory`, `drift`, `behavioral`, `adversarial`, `physiological_reserve` under selection rules) and a
-confidence-weighted fusion gives a risk and a regime. Two bypasses skip the dwell: a **hard rule** (heuristic risk at or above 0.5, in
-practice SpO2 below 88 on its own) once confirmed, and a **named syndrome** (septic shock, respiratory distress, hypovolemic shock).
+confidence-weighted fusion gives a risk and a regime. Two bypasses skip the dwell: a **hard rule** (heuristic risk at or above 0.5; SpO2 below 88 alone is exactly 0.5, and
+other combinations such as 0.2 + 0.2 + 0.15 reach it) which holds WARNING once it is *confirmed* (it fired again within the window, another
+channel is abnormal beside it, or the window is 1), and a **named syndrome** (septic shock, respiratory distress, hypovolemic shock).
 Otherwise a first escalation needs two consecutive confirming readings (`ESCALATION_DWELL_THRESHOLD = 2`) and then locks for 300 s.
 
 ### 1.2 Safety properties that hold (INSPECTED, each pinned by tests)
@@ -48,8 +49,9 @@ page" is the first reading with `escalation_required` true.
 
 I am **not** claiming each of these is a clinical miss: some are single readings in isolation, history changes the trajectory and drift
 engines, and what a given patient needs is a clinical judgement. What the table shows is the **design**: findings add small amounts to a
-heuristic score (0.1 to 0.5), the fusion averages engines by confidence, and so **one abnormal channel does not by itself reach WARNING
-unless it is SpO2 below 88 or a named syndrome**. A clinical owner should read this table first and decide which rows are acceptable.
+heuristic score (0.1 to 0.5), the fusion averages engines by confidence, and so **one abnormal channel does not by itself reach WARNING;
+the exceptions are SpO2 below 88 (a hard rule, held at WARNING once repeated or corroborated, as the register's D1 discusses) and a named
+syndrome, which is a conjunction of vitals**. A clinical owner should read this table first and decide which rows are acceptable.
 The repository's own detection record says the same in another way: it pins three deterioration scenarios that get no escalation at all
 (`gradual_hypoxia_child`, `reactive_airway_toddler`, `toddler_viral_fever`) and four sensor-fault cases that fail to escalate
 (`coordinated_lie_sepsis_masking`, `slow_o2_drift_downward`, `stuck_hr_baseline`, `stuck_o2_sensor`).
@@ -94,7 +96,7 @@ Not available: outcome-labelled data, a pediatrician sign-off, a defined event s
 Every row is **NOT APPROVED: no clinical sign-off is recorded in this repository.** "Provenance" is exactly what the nearby comment
 says. "Adjustable" means through `ClinicalSettings` (the notification settings are separate). Approver is the clinical owner
 (pediatrics) unless stated. Lines are in `observe_consolidated.py` unless a file is named. (Source: a one-pass inventory I spot-checked
-against the code: the syndromes, the norms comment, the Kalman note, the gate note, the dwell and lock lines all match.)
+against the code, then a second claims check that corrected the provenance of R14 and R15.)
 
 | ID | Rule | Value | Provenance stated | Adjustable |
 |---|---|---|---|---|
@@ -111,8 +113,8 @@ against the code: the syndromes, the norms comment, the Kalman note, the gate no
 | R11 | Hard-rule risk | 0.5 | "lifted verbatim from the escalation path" (`pediatric_cassette.py`) | no |
 | R12 | Hard-rule confirmation window | 3 readings (1 = at once) | "a starting point, not a clinical finding" | yes |
 | R13 | Hard-rule corroboration, margin | on, +0.05 | same | yes |
-| R14 | Septic shock | SpO2 < 92 and HR > 140 and RR > 35 and T > 38.5; +0.40; bypass | `pediatric_cassette.py`: "PROVISIONAL -- pending pediatrician sign-off" | no |
-| R15 | Respiratory distress | SpO2 < 90 and RR > 45; +0.35; bypass | same note | no |
+| R14 | Septic shock | SpO2 < 92 and HR > 140 and RR > 35 and T > 38.5; +0.40; bypass | none at the rule (`observe_consolidated.py:679-683`); the engine-gate comment (`pediatric_cassette.py:298-303`) says the gate cutoffs, which "match the lowest syndrome cutoffs", are "PROVISIONAL -- pending pediatrician sign-off" | no |
+| R15 | Respiratory distress | SpO2 < 90 and RR > 45; +0.35; bypass | none at the rule (`:685-688`); same gate comment | no |
 | R16 | Hypovolemic shock | HR > 150 and SpO2 < 88; +0.35; bypass | none | no |
 | R17 | Benign-pattern reductions | fever response (T > 38.5, HR > 130, RR > 28) -0.15; crying (alert "crying", HR > 140) -0.10 | none | no |
 | R18 | Behavioral base risk | SpO2 < 90 +0.4, < 92 +0.2, HR > 150 or < 80 +0.3 | none | no |
