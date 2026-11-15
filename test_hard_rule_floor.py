@@ -183,7 +183,9 @@ def test_with_a_window_of_one_a_single_hard_rule_always_reaches_warning_across_a
                                  dict(hard_rule_confirm_window="3"), dict(hard_rule_corroboration="yes"),
                                  dict(hard_rule_corroboration=1), dict(hard_rule_corroboration_margin=-0.1),
                                  dict(hard_rule_corroboration_margin=2), dict(hard_rule_corroboration_margin=float("nan")),
-                                 dict(hard_rule_corroboration_margin=True)])
+                                 dict(hard_rule_corroboration_margin=True), dict(hard_rule_confirm_window=1001),
+                                 dict(hard_rule_corroboration_margin=0), dict(hard_rule_corroboration_margin=1e-300),
+                                 dict(hard_rule_corroboration_margin=0.0009)])
 def test_an_unusable_setting_is_refused_at_construction(bad):
     with pytest.raises(ValueError, match="hard_rule"):
         PediatricCassette(**bad)
@@ -196,9 +198,9 @@ def test_the_defaults_add_nothing_to_the_recorded_identity_so_old_fingerprints_k
 
 def test_the_cassette_conforms_and_a_declared_but_uncallable_member_is_rejected():
     assert conformance_failures(PediatricCassette()) == []
-    broken = PediatricCassette()
-    broken.hard_rule_confirm_window = 3                                    # declared, not callable
-    assert any("hard_rule_confirm_window" in f for f in conformance_failures(broken))
+    class Declared(PediatricCassette):
+        hard_rule_confirm_window = 3                                       # declared, not callable
+    assert any("hard_rule_confirm_window" in f for f in conformance_failures(Declared()))
 
 
 def test_a_cassette_without_the_optional_members_uses_the_core_default_window():
@@ -220,10 +222,10 @@ def test_a_cassette_without_the_optional_members_uses_the_core_default_window():
     assert r[3].escalation_required                                       # core default window of 3 applies
 
 
-def test_the_per_patient_state_is_evicted_with_the_patient():
+def test_the_per_patient_state_is_evicted_with_a_patient_who_has_nothing_pending():
     eng = ObserveClinicalEngine(max_tracked_patients=2)
     for pid in ("A", "B", "C"):
-        run([CALM, LOW], eng, pid=pid)
+        run([CALM], eng, pid=pid)
     assert set(eng._patient_hard_rule_recent) <= set(eng._patient_policies) and len(eng._patient_hard_rule_recent) <= 2
 
 
@@ -264,3 +266,97 @@ def test_corroboration_is_inclusive_at_the_margin_and_an_abstaining_heuristic_co
     assert not PediatricCassette(hard_rule_corroboration_margin=0.11).hard_rule_corroborated([_heuristic(0.6)])
     assert not PediatricCassette().hard_rule_corroborated([_heuristic(0.9, abstained=True)])
     assert not PediatricCassette().hard_rule_corroborated([])
+
+
+# ---- found by independent review ---------------------------------------------------------------------------------
+
+def test_a_patient_with_a_hard_rule_waiting_for_confirmation_is_not_evicted_to_make_room():
+    """A had one low reading (a lone dip, judged as before). B and C arrive and the table is full. A's next low
+    reading must still be a repeat: forgetting A here would silence exactly the case the window exists to catch."""
+    for cap, expect in ((2, True), (10, True)):
+        eng = ObserveClinicalEngine(max_tracked_patients=cap)
+        run([CALM, LOW], eng, pid="A")
+        for pid in ("B", "C"):
+            run([CALM], eng, pid=pid)
+        again = eng.evaluate(VitalsSnapshot("A", T0 + timedelta(hours=3), 104, 84, 28, 37.6,
+                                            {"age_months": 24, "previous_hr": 102, "previous_o2": 85, "previous_rr": 26,
+                                             "previous_temp": 37.5, "time_delta_seconds": 3600}))
+        assert again.escalation_required is expect, cap
+
+
+def test_a_calm_patient_is_still_evicted_so_memory_stays_bounded():
+    eng = ObserveClinicalEngine(max_tracked_patients=3)
+    for i in range(20):
+        run([CALM], eng, pid=f"calm-{i}")
+    assert len(eng._patient_policies) <= 3 and len(eng._patient_hard_rule_recent) <= 3
+
+
+def test_the_same_reading_submitted_twice_is_not_its_own_repeat():
+    eng = ObserveClinicalEngine()
+    first = run([CALM], eng)
+    reading = VitalsSnapshot("P1", T0 + timedelta(hours=1), 102, 85, 26, 37.5,
+                             {"age_months": 24, "previous_hr": 100, "previous_o2": 98, "previous_rr": 24,
+                              "previous_temp": 37.0, "time_delta_seconds": 3600})
+    one, two = eng.evaluate(reading), eng.evaluate(reading)
+    assert first[0].regime.value == "stable"
+    assert not one.escalation_required and not two.escalation_required and len(eng._patient_hard_rule_recent["P1"]) == 2
+
+
+def test_a_retry_after_a_crash_part_way_through_is_not_a_repeat(monkeypatch):
+    eng = ObserveClinicalEngine()
+    run([CALM], eng)
+    reading = VitalsSnapshot("P1", T0 + timedelta(hours=1), 102, 85, 26, 37.5,
+                             {"age_months": 24, "previous_hr": 100, "previous_o2": 98, "previous_rr": 24,
+                              "previous_temp": 37.0, "time_delta_seconds": 3600})
+    real, calls = eng.audit_ledger.append, {"n": 0}
+
+    def fails_once(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("ledger write failed")
+        return real(*a, **k)
+    monkeypatch.setattr(eng.audit_ledger, "append", fails_once)
+    with pytest.raises(OSError):
+        eng.evaluate(reading)
+    assert not eng.evaluate(reading).escalation_required                      # the retry is the same reading
+
+
+def test_an_earlier_timestamp_is_not_a_repeat_and_a_later_one_is():
+    eng = ObserveClinicalEngine()
+    low = lambda hours: VitalsSnapshot("P1", T0 + timedelta(hours=hours), 102, 85, 26, 37.5,       # noqa: E731
+                                       {"age_months": 24, "previous_hr": 100, "previous_o2": 98, "previous_rr": 24,
+                                        "previous_temp": 37.0, "time_delta_seconds": 3600})
+    eng.evaluate(low(5))
+    assert not eng.evaluate(low(2)).escalation_required                      # a late-arriving older reading
+    assert eng.evaluate(low(8)).escalation_required                          # a genuinely later one
+
+
+def test_a_timestamp_that_cannot_be_ordered_counts_as_a_repeat_the_direction_that_escalates():
+    eng = ObserveClinicalEngine()
+    run([CALM], eng)
+    eng._patient_hard_rule_recent["P1"] = [(datetime(2026, 1, 1), True)]       # naive: cannot be compared with aware
+    r = eng.evaluate(VitalsSnapshot("P1", T0 + timedelta(hours=1), 102, 85, 26, 37.5,
+                                    {"age_months": 24, "previous_hr": 100, "previous_o2": 98, "previous_rr": 24,
+                                     "previous_temp": 37.0, "time_delta_seconds": 3600}))
+    assert r.escalation_required
+
+
+def test_the_window_and_margin_have_sanity_limits_at_their_edges():
+    assert PediatricCassette(hard_rule_confirm_window=1000).hard_rule_confirm_window() == 1000
+    assert PediatricCassette(hard_rule_corroboration_margin=0.001).identity_extras == {
+        "hard_rule_corroboration_margin": "0.001"}                          # the smallest margin that is not vacuous
+    assert PediatricCassette(hard_rule_corroboration_margin=1).identity_extras == {"hard_rule_corroboration_margin": "1.0"}
+
+
+def test_a_score_exactly_at_the_margin_counts_whatever_the_float_arithmetic_did():
+    assert PediatricCassette(hard_rule_corroboration_margin=0.2).hard_rule_corroborated([_heuristic(0.7 - 1e-12)])
+    assert not PediatricCassette(hard_rule_corroboration_margin=0.2).hard_rule_corroborated([_heuristic(0.7 - 1e-6)])
+
+
+@pytest.mark.parametrize("name", ["hard_rule_confirm_window", "hard_rule_corroborated", "engine_gate",
+                                  "_hard_rule_confirm_window", "_hard_rule_corroboration", "_hard_rule_corroboration_margin"])
+def test_a_setting_cannot_be_changed_after_the_cassette_is_built(name):
+    c = PediatricCassette(hard_rule_confirm_window=1)
+    with pytest.raises(AttributeError, match="fixed once"):
+        setattr(c, name, 1)
+    assert c.hard_rule_confirm_window() == 1 and c.identity_extras == {"hard_rule_confirm_window": "1"}

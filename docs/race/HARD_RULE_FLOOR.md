@@ -2,8 +2,9 @@
 
 Status: implemented in `observe_consolidated.py` (the bypass branch of `evaluate`), `pediatric_cassette.py` and the
 cassette seam (`cassette.py`), PR 7. Evidence class: every number below was EXECUTED against the engine before and after
-the change (the same readings are in `test_hard_rule_floor.py`); that file (42 tests) and a mutation check of 39
-changes cover it; whether the defaults are clinically right is UNKNOWN until a clinician reviews them.
+the change (the same readings are in `test_hard_rule_floor.py`); that file (60 tests) and a mutation check of 49
+changes cover it (3 survivors, all in the unreachable named-syndrome branch described under Limits); one independent Opus
+review found six issues, each fixed and tested; whether the defaults are clinically right is UNKNOWN until a clinician reviews them.
 
 ## The defect
 
@@ -27,11 +28,17 @@ escalation whenever the integrator supplied history. That is a failure to escala
 
 A hard rule **holds the regime at WARNING**, whatever the fusion says, once it is **confirmed**. Confirmation is any of:
 
-1. **Corroboration.** Another channel is abnormal in the same assessment (a raised respiratory rate, temperature, heart
-   rate). One sensor's artefact does not raise a child's temperature. In the pediatric domain this is the heuristic score
-   sitting above the hard rule's own score by at least `hard_rule_corroboration_margin`.
-2. **Repeat.** The same rule fired again within `hard_rule_confirm_window` of the patient's readings (the current one
-   included). Counted in readings, not seconds, so it does not depend on how often a unit samples.
+1. **Corroboration.** The heuristic found something else abnormal in the same assessment: its score sits above the hard
+   rule's own score by at least `hard_rule_corroboration_margin`. That is strong evidence for a respiratory rate or
+   temperature (a pulse-oximeter artefact does not move them) and weaker evidence for heart rate, which usually shares
+   the probe with SpO2. The score does not say which channel added to it. **Open clinical question: should heart rate alone
+   count?** Raising the margin asks for more than one extra finding.
+2. **Repeat.** A hard rule fired on an **earlier** reading within the last `hard_rule_confirm_window` of the patient's
+   readings (the current one included). Counted in readings, not seconds, so it does not depend on how often a unit
+   samples. The history records only that *a* hard rule fired, not which one. The same reading seen again (same timestamp:
+   a retransmission, a replay, a retry after a crash) is never its own repeat, and neither is an older reading that
+   arrives late. A timestamp that cannot be ordered against the history (naive against aware) counts as a repeat, the
+   direction that escalates.
 3. **A window of 1.** The clinician chose not to wait: every hard rule holds the floor at once.
 
 A **lone, uncorroborated** hard-rule reading is judged exactly as before. It may be a sensor artefact (a probe slipping
@@ -49,9 +56,14 @@ On `PediatricCassette`, validated at construction (a bad value refuses to start)
 
 | Setting | Default | What it does |
 |---|---|---|
-| `hard_rule_confirm_window` | 3 readings | How many readings make a repeat. 1 holds every hard rule at once. Longer tolerates more artefact and waits longer. |
-| `hard_rule_corroboration` | on | Another abnormal channel confirms at once. Off means only repeats confirm. |
-| `hard_rule_corroboration_margin` | 0.05 | How far above the hard rule's own score the heuristic must sit to count as corroborated. |
+| `hard_rule_confirm_window` | 3 readings (1 to 1000) | How many readings make a repeat. 1 holds every hard rule at once. Longer tolerates more artefact and waits longer. |
+| `hard_rule_corroboration` | on | Another abnormal finding confirms at once. Off means only repeats confirm. |
+| `hard_rule_corroboration_margin` | 0.05 (0.001 to 1) | How far above the hard rule's own score the heuristic must sit to count as corroborated. Not zero: that would make every hard rule corroborated, which is a window of 1 and should be asked for as one. |
+
+The bounds are sanity limits, not clinical ones: a window past 1000 is an unbounded per-patient history, and a margin below
+0.001 is vacuous. Settings are fixed once the cassette is built (assigning one raises), so the identity a verdict records is
+the behaviour it had. A score exactly at the margin counts on every platform (the heuristic sums decimals, and
+0.2 + 0.2 + 0.15 is 0.55000000000000004).
 
 A setting that is not at its default is recorded by name in the cassette identity of every entry made under it, so a
 verdict says it was made with a longer window or without corroboration. At the defaults the identity is unchanged and the
@@ -69,8 +81,13 @@ acting on a lone artefact. This PR ships the earlier agreed default and makes th
 - **A lone low reading beside normal vitals still waits one more reading.** By design, and adjustable.
 - **The corroboration test reads the heuristic score.** It assumes each abnormal finding adds to that score. A change to the
   heuristic's scoring changes what corroboration means; the test pins the current behaviour.
-- **Per-patient history is in memory** and is evicted with the patient; a restart forgets it, so a repeat that straddles a
-  restart is a lone reading. The same is true of the dwell state.
+- **Per-patient history is in memory.** A patient is never evicted for capacity while a hard rule in their window is still
+  waiting for confirmation (found by review: it was, and the next low reading was then a lone one); a patient with nothing
+  pending is, so memory stays bounded. A restart forgets it, so a repeat that straddles a restart is a lone reading. The same
+  is true of the dwell state.
+- **The named-syndrome branch is unreachable today.** None of 972 readings searched produced a syndrome that fusion rates
+  below WARNING, because the syndrome's own risk is already floored into the fused risk. The branch stays as a guard, and its
+  three surviving mutants are that guard, an equivalent mutation, and its note text.
 - **Adults are still scored on pediatric norms.** That is a separate item.
 - **Not exercised:** real monitor data. The readings are constructed.
 

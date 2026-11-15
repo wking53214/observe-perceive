@@ -11,7 +11,8 @@
   before (it may be an artefact). The floor only raises (a patient tracked at CRITICAL stays CRITICAL), the fused risk is
   floored to match, and the lift is in the decision's `safety_bypass` note. `PediatricCassette` takes
   `hard_rule_confirm_window`, `hard_rule_corroboration` and `hard_rule_corroboration_margin`, validated, recorded in the
-  cassette identity when not at their defaults; the cassette version and every recorded fingerprint are unchanged.
+  cassette identity when not at their defaults and fixed once built; the cassette version and every recorded fingerprint are
+  unchanged. A patient is not evicted while a hard rule is pending; a duplicate, replayed or older reading is never a repeat.
   Edited pre-existing test (it asserted the exact behaviour changed): `test_detection_record.py` no longer lists
   `repeated_spikes_o2` among the recorded unsafe cases. Not done: adults are still scored on pediatric norms; the default
   window is a clinician's decision. Document: `docs/race/HARD_RULE_FLOOR.md`.
