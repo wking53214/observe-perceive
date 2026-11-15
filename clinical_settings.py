@@ -113,6 +113,8 @@ class ClinicalSettings:
     hard_rule_confirm_window: int = DEFAULT_HARD_RULE_CONFIRM_WINDOW
     hard_rule_corroboration: bool = DEFAULT_HARD_RULE_CORROBORATION
     hard_rule_corroboration_margin: float = DEFAULT_HARD_RULE_CORROBORATION_MARGIN
+    # --- annotation only: never changes a regime ---
+    probe_off_spo2_at_or_below: Optional[float] = 0.0
 
     def __hash__(self) -> int:
         return hash(self.digest())
@@ -132,7 +134,8 @@ class ClinicalSettings:
         object.__setattr__(self, "norms", MappingProxyType({
             g: MappingProxyType({k: _canon_norm(g, k, v) for k, v in row.items()}) for g, row in self.norms.items()}))
         object.__setattr__(self, "age_group_upper_months", tuple(_canon(x) for x in self.age_group_upper_months))
-        for name in ("max_age_months", "critical_o2_below", "hypothermia_below", "hard_rule_corroboration_margin"):
+        for name in ("max_age_months", "critical_o2_below", "hypothermia_below", "hard_rule_corroboration_margin",
+                     "probe_off_spo2_at_or_below"):
             object.__setattr__(self, name, _canon(getattr(self, name)))
 
     # -- validation ------------------------------------------------------
@@ -180,6 +183,9 @@ class ClinicalSettings:
                 self.hard_rule_corroboration_margin, "hard_rule_corroboration_margin") <= 1:
             raise SettingsError(f"hard_rule_corroboration_margin must be in [{MIN_HARD_RULE_CORROBORATION_MARGIN}, 1] "
                                 "(to hold every hard rule at once, use hard_rule_confirm_window=1)")
+        if self.probe_off_spo2_at_or_below is not None \
+                and not 0 <= _num(self.probe_off_spo2_at_or_below, "probe_off_spo2_at_or_below") < 100:
+            raise SettingsError("probe_off_spo2_at_or_below must be in [0, 100) or None")
 
     # -- construction ------------------------------------------------------
     @classmethod
