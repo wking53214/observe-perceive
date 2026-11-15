@@ -29,6 +29,7 @@ So a verdict can be traced to **the numbers it was made with**, provided those n
 - the heuristic's point values (0.5, 0.2, 0.3, 0.15, 0.1, 0.4 ...),
 - the syndrome definitions (septic shock, respiratory distress, hypovolemic shock),
 - the engine-selection gate cutoffs,
+- the age-group boundaries (3, 12, 36 months) and the population bound (216 months) as source defaults (the settings digest covers them only when a settings object is used),
 - the fusion weights and the corroboration and confirmation defaults,
 - the Kalman and drift internals not listed above.
 

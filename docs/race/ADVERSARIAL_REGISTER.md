@@ -7,6 +7,8 @@ people's mistakes is not a register.
 
 ## A. Found in the code on `main` and fixed
 
+A8 (#86) and A10 (#85) are on open pull requests with green CI; they are rows here on the assumption that you merge them. Everything else in this section is on `main`.
+
 | ID | Finding | Evidence | Status |
 |---|---|---|---|
 | A1 | An approved CRITICAL escalation, and one that governance BLOCKED, returned to the caller and reached no person unless the caller looked | EXECUTED | FIXED #78: every escalation event the clinician's settings name opens a ticket |
