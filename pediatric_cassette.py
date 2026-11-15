@@ -237,8 +237,6 @@ class PediatricCassette:
         scored less severely for being out of scope, and a healthy one must not be reassured by child norms. It is a
         floor on the report, not a data fault: nothing about the reading is untrustworthy."""
         s = self.settings
-        if s.outside_population != "alert":
-            return None
         context = obs.context if isinstance(getattr(obs, "context", None), dict) else {}
         age = context.get("age_months")
         known = (isinstance(age, (int, float)) and not isinstance(age, bool) and math.isfinite(age)
@@ -248,7 +246,7 @@ class PediatricCassette:
                 return ("warning", f"{POPULATION_FINDING}: this deployment requires the patient's age and none "
                                    "usable was given")
             return None
-        if s.max_age_months is not None and age > s.max_age_months:
+        if s.outside_population == "alert" and s.max_age_months is not None and age > s.max_age_months:
             return ("warning", f"{POPULATION_FINDING}: age {age:g} months is above the supported pediatric "
                                f"population (max {s.max_age_months:g}); assessed on pediatric norms, "
                                "interpret with caution")
