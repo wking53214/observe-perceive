@@ -357,3 +357,66 @@ def test_an_empty_patient_id_in_the_context_names_nobody():
     result = run(orch(), "E1", vit("P1"), ctx={"patient_id": ""})
     assert result["status"] == "APPROVED_AND_EXECUTED" and result["identity"]["subject_source"] == "vitals"
     assert result["governance_request"].context["patient_id"] == "P1"
+
+
+# ---- review round 2: readings as a dict, a request that cannot be built, values that cannot be read -------------------
+
+def test_a_reading_given_as_a_dict_is_compared_with_the_request_too():
+    ran = []
+    result = run(orch(), "D1", dict(patient_id="B", **CRIT), ctx={"patient_id": "A"}, ran=ran)
+    assert result["status"] == "REJECTED" and result["refused_by"] == "identity" and ran == []
+    assert result["identity_mismatch"]["vitals_patient"] == "B"
+
+
+def test_a_mismatched_request_that_cannot_be_built_is_still_refused_alerted_and_assessed():
+    class Weird:
+        def __repr__(self):
+            raise RuntimeError("cannot be shown")
+    seen = []
+    result = run(orch(alert_human=seen.append), "W1", vit("B", **CRIT), ctx={"patient_id": "A", "x": Weird()})
+    assert result["status"] == "REJECTED" and result["refused_by"] == "identity"
+    assert result["governance_request"] is None and result["observe_verdict"].regime.value == "critical"
+    assert [a["stage"] for a in seen] == ["identity"] and seen[0]["patient_id"] == "B"
+
+
+def test_a_request_that_cannot_be_built_and_has_no_mismatch_still_raises_as_before():
+    class Weird:
+        def __repr__(self):
+            raise RuntimeError("cannot be shown")
+    import pytest
+    with pytest.raises(RuntimeError):
+        run(orch(), "W2", vit("A"), ctx={"patient_id": "A", "x": Weird()})
+
+
+def test_a_patient_that_cannot_be_read_is_a_mismatch_not_a_crash():
+    class BadVitals:
+        @property
+        def patient_id(self):
+            raise RuntimeError("no patient")
+
+    class BadStr:
+        def __str__(self):
+            raise RuntimeError("no text")
+    ran = []
+    first = run(orch(), "R1", BadVitals(), ctx={"patient_id": "A"}, ran=ran)
+    second = run(orch(), "R2", vit("B"), ctx={"patient_id": BadStr()}, ran=ran)
+    for result in (first, second):
+        assert result["status"] == "REJECTED" and result["refused_by"] == "identity"
+    assert ran == []
+
+
+def test_per_call_state_is_restored_when_an_inner_call_raises():
+    o = orch(attempt_id_factory=iter(["outer", "inner"]).__next__)
+    seen = []
+
+    def action(_):
+        try:
+            o.orchestrate_request(ChainArtifact("IN"), "escalate", None, vitals_snapshot=vit("P1"),
+                                  context={"execution_id": "e-in"})
+        except Exception:                                                   # noqa: BLE001 - the inner call may raise
+            pass
+        seen.append(o._seen.attempt_id)
+        return {"status": "done"}
+    result = o.orchestrate_request(ChainArtifact("OUT"), "escalate", action, vitals_snapshot=vit("P1"),
+                                   context={"execution_id": "e-out"})
+    assert seen == ["outer"] and result["attempt_id"] == "outer"

@@ -41,6 +41,7 @@ Every result records `identity: {patient_id, subject_source, observation_digest,
 - **A reading that cannot be copied crashed the request with no record** (a lock in `vitals.context`; a duck-typed reading with `__slots__`). The digest now reads fields one by one, never raises, and marks a reading it cannot digest as `undigestable:<type>`.
 - **A nested call overwrote the outer record's attempt id and identity.** Saved and restored around every call.
 - **An identity refusal could not be audited** (`request.present` failed for every one). Now it carries its request.
+- **A second review of the fixes** found that a reading given as a dict skipped the patient comparison, that a mismatched request that could not be built raised with no record and no page, and that a patient that cannot be read raised out of the call. All three now refuse with a record, tell a person and still assess the reading (the request is then absent from the record, and says so).
 - Smaller: a `patient_id` of `0` selected different subjects in two places; the same id as an int and as text split a patient's limits; both fixed by committing the id as text.
 
 ## Existing tests edited (each because it contained the mismatch this step now refuses)

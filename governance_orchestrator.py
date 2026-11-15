@@ -10,6 +10,7 @@ Central orchestrator that routes requests through:
 6. Complete audit chain linking
 """
 
+from collections.abc import Mapping
 import logging
 import math
 import threading
@@ -371,11 +372,24 @@ class GovernanceOrchestrator:
                         "observation_patient": None}, {
                 "problems": [f"the context is not a mapping ({type(exc).__name__}: {exc})"], "context": {},
                 "vitals_patient": None}
-        vitals_patient = getattr(vitals_snapshot, "patient_id", None) if vitals_snapshot is not None else None
-        vitals_patient = None if vitals_patient in (None, "") else str(vitals_patient)
-        named = context.get("patient_id")
-        claimed = {} if named in (None, "") else {"patient_id": str(named)}
         problems = []
+        try:
+            if vitals_snapshot is None:
+                vitals_patient = None
+            elif isinstance(vitals_snapshot, Mapping):
+                vitals_patient = vitals_snapshot.get("patient_id")
+            else:
+                vitals_patient = getattr(vitals_snapshot, "patient_id", None)
+            vitals_patient = None if vitals_patient in (None, "") else str(vitals_patient)
+        except Exception as exc:  # noqa: BLE001 - a patient that cannot be read cannot be shown to match
+            vitals_patient = None
+            problems.append(f"the patient of the vitals could not be read ({type(exc).__name__})")
+        try:
+            named = context.get("patient_id")
+            claimed = {} if named in (None, "") else {"patient_id": str(named)}
+        except Exception as exc:  # noqa: BLE001
+            claimed = {}
+            problems.append(f"the context's patient_id could not be read ({type(exc).__name__})")
         if vitals_patient is not None and claimed and claimed["patient_id"] != vitals_patient:
             problems.append(f"context patient_id {claimed['patient_id']!r} is not the patient the vitals are for "
                             f"({vitals_patient!r})")
@@ -705,12 +719,19 @@ class GovernanceOrchestrator:
                 "integrity": getattr(gateway_admission, "integrity", None),
             }
             context["gateway_admission_integrity"] = admission_summary["integrity"]
-        governance_request = self.sentinel_adapter.sentinel_artifact_to_governance_request(
-            sentinel_artifact,
-            operation_type,
-            context,
-            source_signers=self.source_signers,
-        )
+        try:
+            governance_request = self.sentinel_adapter.sentinel_artifact_to_governance_request(
+                sentinel_artifact,
+                operation_type,
+                context,
+                source_signers=self.source_signers,
+            )
+        except Exception:
+            if mismatch is None:
+                raise
+            # The request cannot be built, and it was already known to disagree with the vitals: refuse with the mismatch,
+            # tell a person, and assess the reading, rather than losing all three to the construction error.
+            return self._identity_refusal(mismatch, None, vitals_snapshot)
         logger.info(f"[Orchestrator] Request ID: {governance_request.request_id}")
         if mismatch is not None:
             return self._identity_refusal(mismatch, governance_request, vitals_snapshot)
