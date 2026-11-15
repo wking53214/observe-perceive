@@ -448,8 +448,7 @@ class GovernanceOrchestrator:
                 "escalation_required": bool(getattr(verdict, "escalation_required", False)),
                 "unassessable": bool(getattr(verdict, "unassessable", False))}
 
-    def _identity_refusal(self, mismatch, governance_request, vitals_snapshot, observe_verdict=None,
-                          observe_exc=None) -> dict:
+    def _identity_refusal(self, mismatch, governance_request, vitals_snapshot, observe_exc=None) -> dict:
         """Refuse a request whose own statements disagree, before PERCEIVE is asked, in every profile.
 
         It is not an ordinary refusal: it means an integration is sending one patient's data with another's request, so a
@@ -470,12 +469,10 @@ class GovernanceOrchestrator:
             "governance_decision": None,
             "audit_chain": None,
         }
-        # The reading was assessed first (`_observe_first`); a crash there is told like any other OBSERVE crash.
+        # The reading was assessed first (`_observe_first`); `_stamp` puts the verdict, or the error, on the record. A crash
+        # there is told like any other OBSERVE crash.
         if observe_exc is not None:
-            result["observe_error"] = f"{type(observe_exc).__name__}: {observe_exc}"
             self._alert_stage_error("observe", observe_exc, governance_request, patient_id=vitals_patient)
-        if observe_verdict is not None:
-            result["observe_verdict"] = observe_verdict
         return self._stamp(result, governance_request)
 
     @staticmethod
@@ -782,10 +779,10 @@ class GovernanceOrchestrator:
                 raise
             # The request cannot be built, and it was already known to disagree with the vitals: refuse with the mismatch,
             # tell a person, and assess the reading, rather than losing all three to the construction error.
-            return self._identity_refusal(mismatch, None, vitals_snapshot, observe_verdict, observe_exc)
+            return self._identity_refusal(mismatch, None, vitals_snapshot, observe_exc)
         logger.info(f"[Orchestrator] Request ID: {governance_request.request_id}")
         if mismatch is not None:
-            return self._identity_refusal(mismatch, governance_request, vitals_snapshot, observe_verdict, observe_exc)
+            return self._identity_refusal(mismatch, governance_request, vitals_snapshot, observe_exc)
         # What the assessment means for this profile, now that the request exists (an alert names it). A crash: strict
         # refuses (OBSERVE is mandatory there) and a person is told, as for any stage that raises instead of reaching a
         # verdict; advisory proceeds without an assessment, tells a person, and records the failure. A reading OBSERVE
@@ -823,7 +820,6 @@ class GovernanceOrchestrator:
                     "stage_refused": True,
                     "governance_decision": None,
                     "observe_enforced": True,
-                    "observe_verdict": observe_verdict,
                     "audit_chain": None,
                 }, governance_request)
         if self.require_attested_event_time and not governance_request.event_time_attested:
