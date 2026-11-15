@@ -45,6 +45,14 @@ HARD_RULE_ENGINE = "heuristic"
 DEFAULT_HARD_RULE_CONFIRM_WINDOW = 3
 DEFAULT_HARD_RULE_CORROBORATION = True
 DEFAULT_HARD_RULE_CORROBORATION_MARGIN = 0.05
+#: Sanity limits, not clinical ones. A window past this is an unbounded per-patient history and a hard rule that, once
+#: seen, confirms every later one; a margin below this is vacuous (every hard rule counts as corroborated, which is a
+#: window of 1 and should be asked for as one).
+MAX_HARD_RULE_CONFIRM_WINDOW = 1000
+MIN_HARD_RULE_CORROBORATION_MARGIN = 0.001
+#: Heuristic scores are sums of decimals (0.2 + 0.2 + 0.15 is 0.55000000000000004), so the margin comparison is made
+#: with this slack and a score exactly at the margin counts on every platform.
+_SCORE_TOLERANCE = 1e-9
 
 #: What a faulted channel is read as so the OTHER channels can still be
 #: assessed. Each value is inside every PEDIATRIC_NORMS window and clear of
@@ -108,18 +116,30 @@ class PediatricCassette:
             )
         self.engine_gate = engine_gate
         if isinstance(hard_rule_confirm_window, bool) or not isinstance(hard_rule_confirm_window, int) \
-                or hard_rule_confirm_window < 1:
-            raise ValueError(f"hard_rule_confirm_window must be a whole number of readings, 1 or more, "
-                             f"not {hard_rule_confirm_window!r}")
+                or not 1 <= hard_rule_confirm_window <= MAX_HARD_RULE_CONFIRM_WINDOW:
+            raise ValueError(f"hard_rule_confirm_window must be a whole number of readings from 1 to "
+                             f"{MAX_HARD_RULE_CONFIRM_WINDOW}, not {hard_rule_confirm_window!r}")
         if not isinstance(hard_rule_corroboration, bool):
             raise ValueError(f"hard_rule_corroboration must be True or False, not {hard_rule_corroboration!r}")
         if isinstance(hard_rule_corroboration_margin, bool) or not isinstance(hard_rule_corroboration_margin, (int, float)) \
-                or not 0 <= hard_rule_corroboration_margin <= 1:                 # NaN and infinity fail this too
-            raise ValueError(f"hard_rule_corroboration_margin must be a number from 0 to 1, "
-                             f"not {hard_rule_corroboration_margin!r}")
+                or not MIN_HARD_RULE_CORROBORATION_MARGIN <= hard_rule_corroboration_margin <= 1:   # NaN fails too
+            raise ValueError(f"hard_rule_corroboration_margin must be a number from "
+                             f"{MIN_HARD_RULE_CORROBORATION_MARGIN} to 1 (to hold every hard rule at once, use "
+                             f"hard_rule_confirm_window=1), not {hard_rule_corroboration_margin!r}")
         self._hard_rule_confirm_window = hard_rule_confirm_window
         self._hard_rule_corroboration = hard_rule_corroboration
         self._hard_rule_corroboration_margin = float(hard_rule_corroboration_margin)
+        object.__setattr__(self, "_settled", True)
+
+    #: Settings a verdict's recorded identity speaks for. Once the cassette is built they cannot be reassigned: a
+    #: setting changed afterwards would leave the identity recording one thing and the engine doing another.
+    _SETTINGS = frozenset({"engine_gate", "hard_rule_confirm_window", "hard_rule_corroborated",
+                           "_hard_rule_confirm_window", "_hard_rule_corroboration", "_hard_rule_corroboration_margin"})
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in self._SETTINGS and self.__dict__.get("_settled"):
+            raise AttributeError(f"{name} is fixed once the cassette is built; build a new PediatricCassette")
+        object.__setattr__(self, name, value)
 
     @property
     def identity_extras(self) -> Dict[str, str]:
@@ -237,14 +257,16 @@ class PediatricCassette:
     def hard_rule_corroborated(self, outputs: List[RiskOutput]) -> bool:
         """Is the hard rule accompanied by another abnormal finding in the same assessment?
 
-        Each heuristic finding adds to its score, and the hard rule itself is worth exactly HARD_RULE_RISK, so a
-        score above it by at least the margin means something else was abnormal too. An artefact on one sensor does
-        not raise a child's respiratory rate or temperature."""
+        The heuristic's score is the sum of its findings, and a hard rule is a score of at least HARD_RULE_RISK (a
+        CRITICAL_O2 finding alone is worth exactly that), so a score above it by at least the margin means the
+        heuristic found something else abnormal as well. That is evidence from a different channel for respiratory
+        rate and temperature, which a pulse-oximeter artefact does not move, and weaker evidence for heart rate, which
+        usually shares the probe with SpO2. Raise the margin to ask for more than one extra finding."""
         if not self._hard_rule_corroboration:
             return False
         for out in outputs:
             if out.engine_name == HARD_RULE_ENGINE and not out.abstained:
-                return out.risk_score >= HARD_RULE_RISK + self._hard_rule_corroboration_margin
+                return out.risk_score + _SCORE_TOLERANCE >= HARD_RULE_RISK + self._hard_rule_corroboration_margin
         return False
 
     def labels(self) -> Mapping[str, str]:

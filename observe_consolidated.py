@@ -1330,9 +1330,9 @@ class ObserveClinicalEngine:
         # EscalationPolicy is never written on such a reading, so it cannot
         # carry this dedup. Evicted with the policy.
         self._patient_fault_paged: Dict[str, Dict[str, datetime]] = {}
-        # Whether the hard rule fired on each of a subject's last few readings (the window the cassette names).
-        # Evicted with the policy.
-        self._patient_hard_rule_recent: Dict[str, List[bool]] = {}
+        # (timestamp, whether a hard rule fired) for each of a subject's last few readings (the window the cassette
+        # names). Evicted with the policy, but never while a hard rule is still pending confirmation.
+        self._patient_hard_rule_recent: Dict[str, List[Tuple[Any, bool]]] = {}
         # FIX(red-team / concurrency): the per-patient OrderedDict + entropy dict are
         # mutated during evaluate(). Safe under a single asyncio loop (no await inside
         # evaluate), but a thread pool / multiple loops could corrupt them mid-resize.
@@ -1372,7 +1372,10 @@ class ObserveClinicalEngine:
                     (pid for pid, pol in self._patient_policies.items()
                      if pid != patient_id
                      and pol.current_regime == OperationalRegime.STABLE
-                     and not pol.escalation_locked),
+                     and not pol.escalation_locked
+                     # a lone hard rule is waiting for the next reading to confirm it: forgetting it here would
+                     # silence the one case the confirmation window exists to catch
+                     and not any(fired for _, fired in self._patient_hard_rule_recent.get(pid, ()))),
                     None,
                 )
                 if evicted_id is None:
@@ -1571,10 +1574,20 @@ class ObserveClinicalEngine:
         corroborated_by = cassette_optional_member(self._cassette, "hard_rule_corroborated")
         corroborated = bool(hard_rule_fired and corroborated_by and corroborated_by(outputs))
         with self._state_lock:
-            recent = self._patient_hard_rule_recent.get(subject, [])
-            repeated = window > 1 and any(recent[-(window - 1):])
+            # A reading seen again (same timestamp: a retransmission, a replay, a retry after a crash) replaces its
+            # earlier entry and is never its own repeat; and only a hard rule on an EARLIER reading counts as one. A
+            # timestamp that cannot be ordered against the history counts: that is the direction that escalates.
+            now = vitals.timestamp
+            recent = [e for e in self._patient_hard_rule_recent.get(subject, []) if e[0] != now]
+
+            def _earlier_firing(entry) -> bool:
+                try:
+                    return bool(entry[1]) and entry[0] < now
+                except TypeError:
+                    return bool(entry[1])
+            repeated = window > 1 and any(_earlier_firing(e) for e in recent[-(window - 1):])
             hard_rule_confirmed = hard_rule_fired and (window <= 1 or repeated or corroborated)
-            self._patient_hard_rule_recent[subject] = (recent + [hard_rule_fired])[-window:]
+            self._patient_hard_rule_recent[subject] = (recent + [(now, hard_rule_fired)])[-window:]
         hold_floor = syndrome_fired or hard_rule_confirmed
 
         if unassessable:
@@ -1615,6 +1628,8 @@ class ObserveClinicalEngine:
             bypass_label = cassette_label(self._cassette, "safety_bypass")
             all_triggered_bypass_note = [f"{bypass_label}: {reason} trigger skipped dwell confirmation"]
             if lifted:
+                if syndrome_fired and not hard_rule_confirmed:
+                    reason = "dangerous-syndrome"                     # the note names what actually held the floor
                 why = "a named syndrome" if syndrome_fired and not hard_rule_confirmed else (
                     "corroborated by another abnormal channel" if corroborated else
                     "confirmed within the window" if repeated else "window of 1")
