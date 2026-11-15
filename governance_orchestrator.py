@@ -40,7 +40,8 @@ class GovernanceOrchestrator:
                  enforce_advisory_violations: bool = False,
                  root_admission=None,
                  alert_human=None,
-                 escalations=None):
+                 escalations=None,
+                 clinical_notification=None):
         """
         Initialize orchestrator with all governance systems.
 
@@ -115,6 +116,13 @@ class GovernanceOrchestrator:
                 returned, "failed" when nobody could be reached; acknowledgement
                 lives on the ticket, never in this field. Required by profile
                 "production". See docs/race/HUMAN_ESCALATION_AND_RECEIPT_MODEL.md.
+            clinical_notification: optional `clinical_notification.ClinicalNotificationSettings`,
+                used only with `escalations`. When OBSERVE reports an escalation EVENT on a
+                request and the settings say a person must be told (default: a new
+                escalation at CRITICAL, a severity increase, an unassessable reading), a
+                ticket is opened and the record gains `clinical_notification` (reason,
+                status, ticket). Giving settings without `escalations` is refused. A
+                request refused before OBSERVE ran has no verdict and no notification.
         """
         # 1.3.0 profile. "advisory" is the historical default: every check
         # runs and records, only refusals refuse. "strict" turns every
@@ -155,6 +163,13 @@ class GovernanceOrchestrator:
             raise ValueError("give alert_human or escalations, not both: there must be no doubt which channel tells a person")
         self.alert_human = alert_human
         self.escalations = escalations
+        if clinical_notification is not None and escalations is None:
+            raise ValueError("clinical_notification settings need an escalation desk to notify through")
+        from clinical_notification import ClinicalNotificationSettings
+        self.clinical_notification = clinical_notification or ClinicalNotificationSettings()
+        settings_problems = self.clinical_notification.problems()
+        if settings_problems:
+            raise ValueError("clinical_notification settings refused: " + "; ".join(settings_problems))
         # The execution stage (Phase 5) used to call the caller's function
         # unguarded: an exception there left NO record at all, after
         # Conservation had verified and execution had been approved. Now a
@@ -399,6 +414,35 @@ class GovernanceOrchestrator:
         })
         return result
 
+    def _notify_clinical(self, result: dict, vitals_snapshot) -> None:
+        """Open a ticket when OBSERVE reported an escalation event the settings say a person must be told about.
+        Never raises and never changes the outcome: telling a person is added to the record, not a gate on it."""
+        try:
+            verdict = result.get("observe_verdict")
+            if verdict is None or not getattr(verdict, "escalation_required", False):
+                return
+            from clinical_notification import notification_reason, notify, ticket_context
+            unassessable = bool(getattr(verdict, "unassessable", False))
+            reason = notification_reason(
+                self.clinical_notification, regime=verdict.regime.value, escalation_required=True,
+                escalation_kind=getattr(verdict, "escalation_kind", ""), unassessable=unassessable)
+            if reason is None:
+                return
+            request = result.get("governance_request")
+            context = ticket_context(
+                reason=reason, patient_id=getattr(vitals_snapshot, "patient_id", None),
+                regime=verdict.regime.value, escalation_kind=getattr(verdict, "escalation_kind", ""),
+                previous_regime=getattr(verdict, "previous_regime", ""), risk_score=verdict.risk_score,
+                triggered_rules=verdict.triggered_rules, unassessable=unassessable,
+                observe_audit_hash=verdict.audit_hash)
+            ticket, status = notify(self.escalations, context=context,
+                                    request_id=getattr(request, "request_id", None),
+                                    artifact_id=getattr(request, "artifact_id", None))
+            result["clinical_notification"] = {"reason": reason, "status": status, "ticket": ticket}
+        except Exception as exc:  # noqa: BLE001 - never alter the outcome
+            logger.critical(f"[Orchestrator] CLINICAL NOTIFICATION FAILED: {type(exc).__name__}: {exc}")
+            result["clinical_notification"] = {"reason": None, "status": "failed", "ticket": None}
+
     def orchestrate_request(
         self,
         sentinel_artifact,
@@ -409,6 +453,8 @@ class GovernanceOrchestrator:
     ) -> dict:
         """Orchestrate the flow (see `_orchestrate`) and receipt the result."""
         result = self._orchestrate(sentinel_artifact, operation_type, gsa815_operation_func, vitals_snapshot, context)
+        if self.escalations is not None:
+            self._notify_clinical(result, vitals_snapshot)      # before the receipt, so the receipt records it
         if self.receipts is not None:
             try:
                 result["receipt"] = self.receipts.append(result)

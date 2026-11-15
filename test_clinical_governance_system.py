@@ -303,8 +303,14 @@ class TestGovernanceUnavailable(unittest.TestCase):
         self.assertEqual(
             d.governance_status == GovernanceStatus.APPROVED, d.governance_approved is True
         )
-        self.assertIsNone(d.human_alert)
-        self.assertEqual(alerts, [])
+        # An escalation governance BLOCKED now reaches a person (it used to vanish with nobody told); an approved one
+        # still does not alert through this legacy channel (it needs an EscalationDesk).
+        if d.governance_status == GovernanceStatus.BLOCKED:
+            self.assertEqual(d.human_alert, "delivered")
+            self.assertEqual(len(alerts), 1)
+        else:
+            self.assertIsNone(d.human_alert)
+            self.assertEqual(alerts, [])
 
     def test_a_system_without_an_alert_channel_is_refused_at_construction(self):
         with self.assertRaises(ValueError) as ctx:
