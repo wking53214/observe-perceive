@@ -13,7 +13,10 @@
   Without a desk, `ClinicalGovernanceSystem` now also calls `alert_human` for a blocked escalation. Notification
   never changes an outcome. Edited pre-existing test (it asserted the exact behaviour changed):
   `test_clinical_governance_system.py::test_status_is_named_on_every_normal_path_and_no_alert_fires` (a blocked
-  escalation now alerts; an approved one still does not). Not done: a request refused before OBSERVE ran has no
+  escalation now alerts; an approved one still does not), and `test_production_profile.py::test_something_that_is_not_a_desk_is_refused`
+  (a non-desk `escalations` is now refused at construction, as `guard_executor=False` already was, and by the profile's
+  own check). An independent review found a failing legacy pager corrupting the PERCEIVE audit chain, proactive
+  escalations paging every reading, and an event lost when strict re-raises; each is fixed and tested. Not done: a request refused before OBSERVE ran has no
   verdict and so no notification; whether CRITICAL may bypass the `micropatch` physician gate is left as a
   governance decision. Document: `docs/race/CLINICAL_ESCALATION_NOTIFICATION.md`.
 

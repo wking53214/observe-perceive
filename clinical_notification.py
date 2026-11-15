@@ -58,15 +58,27 @@ class ClinicalNotificationSettings:
     def as_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
+    @property
+    def silent(self) -> bool:
+        """True when no clinical event can notify anyone (only an unavailable governance verdict still does). A
+        clinician may choose it; a deployment should never arrive at it by accident, so constructors say so loudly."""
+        return (self.min_regime == "none" and not self.notify_on_severity_increase
+                and not self.notify_on_blocked_escalation and not self.notify_on_unassessable)
+
 
 def notification_reason(settings: ClinicalNotificationSettings, *, regime: str, escalation_required: bool,
                         escalation_kind: str = "", unassessable: bool = False,
                         governance_status: Optional[str] = None) -> Optional[str]:
-    """Why a person must be told about this reading, or None. Only an escalation EVENT is ever a reason."""
-    if not escalation_required:
-        return None
+    """Why a person must be told about this reading, or None.
+
+    Only an escalation EVENT is a reason, with one exception that keeps an old promise: an escalation for which
+    governance produced no verdict is told whether or not it was a new event, because a governance layer that is down
+    is worth hearing about on every reading it is down for. (A capacity-driven proactive escalation is not an OBSERVE
+    event and does not page; callers pass OBSERVE's own `escalation_required`.)"""
     if governance_status == "unavailable":
         return "governance_unavailable"
+    if not escalation_required:
+        return None
     if governance_status == "blocked" and settings.notify_on_blocked_escalation:
         return "blocked_escalation"
     if unassessable and settings.notify_on_unassessable:
@@ -89,15 +101,17 @@ def ticket_context(*, reason: str, patient_id: Any, regime: str, escalation_kind
                    risk_score: Optional[float] = None, triggered_rules: Optional[Sequence[Any]] = None,
                    unassessable: bool = False, observe_audit_hash: str = "", governance_status: Optional[str] = None,
                    governance_violations: Optional[Sequence[Any]] = None,
-                   perceive_audit_hash: Optional[str] = None) -> Dict[str, Any]:
+                   perceive_audit_hash: Optional[str] = None, record_status: Optional[str] = None) -> Dict[str, Any]:
     """What a person needs to act, and no raw vitals: the patient, the regime and why, what governance said, and the
     audit hashes that let the full record be found. The patient identifier is needed to act and is therefore in the
     ticket log: classify that log accordingly (docs/race/CLINICAL_ESCALATION_NOTIFICATION.md)."""
     context: Dict[str, Any] = {
-        "reason": reason, "patient_id": str(patient_id), "regime": regime, "escalation_kind": escalation_kind,
+        "reason": reason, "patient_id": None if patient_id is None else str(patient_id), "regime": regime, "escalation_kind": escalation_kind,
         "previous_regime": previous_regime, "risk_score": risk_score, "triggered_rules": _limited(triggered_rules),
         "unassessable": bool(unassessable), "observe_audit_hash": observe_audit_hash,
     }
+    if record_status is not None:
+        context["record_status"] = record_status          # e.g. the orchestrator's REJECTED or EXECUTION_FAILED
     if governance_status is not None:
         context.update({"governance_status": governance_status,
                         "governance_violations": _limited(governance_violations),

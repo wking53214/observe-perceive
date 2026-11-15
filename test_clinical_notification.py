@@ -81,8 +81,13 @@ def reason(settings=None, **kw):
 
 
 def test_a_reading_that_is_not_an_escalation_event_is_never_a_reason():
-    for status in (None, "approved", "blocked", "unavailable"):
+    for status in (None, "approved", "blocked"):
         assert reason(escalation_required=False, governance_status=status, unassessable=True) is None
+
+
+def test_an_unavailable_verdict_is_told_even_when_the_reading_is_not_a_new_event():
+    off = S(min_regime="none", notify_on_blocked_escalation=False)
+    assert reason(off, escalation_required=False, governance_status="unavailable") == "governance_unavailable"
 
 
 def test_default_regime_threshold_is_critical():
@@ -372,3 +377,136 @@ def test_a_patient_who_stays_critical_is_not_paged_on_every_request(perceive, ke
     second, _ = orchestrate(orch, "s2", vitals(pid="Stay", **CRITICAL))
     assert first["clinical_notification"]["status"] == "dispatched"
     assert "clinical_notification" not in second and len(pager.calls) == 1
+
+
+# ---- second round: review findings ---------------------------------------------------------------------------------
+
+def test_a_failing_legacy_pager_on_a_blocked_escalation_does_not_corrupt_the_audit_chain():
+    def pager_down(decision):
+        raise ConnectionError("pager down")
+    s = ClinicalGovernanceSystem(alert_human=pager_down)
+    assert s.perceive.verify_audit_integrity()
+    d = s.process_vitals(vitals(**CRITICAL))
+    assert d.action == "escalate_blocked" and d.human_alert == "failed"
+    assert any("HUMAN_ALERT_FAILED" in v for v in d.governance_violations)
+    assert s.perceive.verify_audit_integrity()                                # the ledger's own list was never touched
+    assert not any("HUMAN_ALERT_FAILED" in v for v in s.perceive.audit_ledger.entries[-1].final_verdict["violations"])
+
+
+def _proactive_system(desk, **kw):
+    from perceive_consolidated import PolicyEnforcementConfig
+    from reserve_control import ReserveModulator
+    return ClinicalGovernanceSystem(
+        escalations=desk, reserve_modulator=ReserveModulator(),
+        enforcement=PolicyEnforcementConfig(enforce_escalation_limits=True), **kw)
+
+
+def _stream(s, n=10):
+    from datetime import timedelta
+    t0, events, decisions = datetime.now(timezone.utc), 0, []
+    for i in range(n):
+        d = s.process_vitals(VitalsSnapshot("PR", t0 + timedelta(minutes=i), 100, 84.0, 20, 37.5,
+                                            context={"age_months": 6, "force_heavy": False}), utilization=0.05)
+        events += d.escalation_required
+        decisions.append(d)
+    return events, decisions
+
+
+def test_a_capacity_driven_proactive_escalation_is_not_an_event_and_does_not_page_every_reading():
+    desk, pager = make_desk()
+    events, _ = _stream(_proactive_system(desk))
+    assert events >= 1 and len(pager.calls) <= events                        # once per OBSERVE event at most, never per reading
+    desk2, pager2 = make_desk()
+    events2, _ = _stream(_proactive_system(desk2, notification_settings=S(min_regime="warning")))
+    assert len(pager2.calls) <= events2
+
+
+def test_a_deferred_escalation_event_still_reaches_a_person_per_the_settings():
+    from reserve_control import ReserveModulator
+    desk, pager = make_desk()
+    s = ClinicalGovernanceSystem(escalations=desk, notification_settings=S(min_regime="warning"),
+                                 reserve_modulator=ReserveModulator(allow_load_shedding=True, load_shed_utilization=0.9))
+    d = s.process_vitals(vitals(pid="D", **WARNING), utilization=0.99)
+    assert d.action == "escalation_deferred_capacity" and d.escalation_required
+    assert d.clinical_notification["reason"] == "regime_at_or_above_threshold" and len(pager.calls) == 1
+
+
+def test_an_escalation_event_survives_a_raise_out_of_the_strict_pipeline():
+    from conftest import make_perceive
+    from conservation_kernel import ConservationKernel
+    from root_admission import RootAdmission
+    from test_audit_p5_fixes import Attested, JUSTIFIED, SOURCE, sealed
+    desk, pager = make_desk()
+    admission = RootAdmission()
+    orch = GovernanceOrchestrator(make_perceive(), ConservationKernel(root_guard=admission), ObserveClinicalEngine(),
+                                  profile="strict", source_signers=[SOURCE], root_admission=admission, escalations=desk,
+                                  raise_on_execution_error=True)
+
+    def crash(ctx):
+        raise RuntimeError("pump driver crashed")
+    context = {"gateway_scope": "EXECUTE", "gateway_admission": sealed("r1"), "patient_id": "P1",
+               "execution_id": "exec-r1", **JUSTIFIED}
+    with pytest.raises(RuntimeError, match="pump driver"):
+        orch.orchestrate_request(Attested("r1"), "escalate", crash, vitals_snapshot=vitals(**CRITICAL), context=context)
+    clinical = [c for c in pager.calls if c["kind"] == "clinical_escalation"]
+    assert len(clinical) == 1 and clinical[0]["patient_id"] == "P1" and clinical[0]["regime"] == "critical"
+    assert clinical[0]["record_status"] == "raised"
+
+
+def test_the_orchestrator_page_says_what_became_of_the_request(perceive, kernel):
+    desk, pager = make_desk()
+    orch = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), escalations=desk)
+    result, _ = orchestrate(orch, "rs1", vitals(pid="RS", **CRITICAL))
+    assert pager.calls[0]["record_status"] == result["status"] == "APPROVED_AND_EXECUTED"
+
+
+@pytest.mark.parametrize("not_a_desk", [False, 0, "desk", object(), lambda alert: None])
+def test_only_a_real_desk_is_accepted_by_both_entry_points(not_a_desk, perceive, kernel):
+    with pytest.raises(ValueError, match="must be an EscalationDesk"):
+        ClinicalGovernanceSystem(escalations=not_a_desk)
+    with pytest.raises(ValueError, match="must be an EscalationDesk"):
+        GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), escalations=not_a_desk)
+
+
+def test_switching_every_notification_off_is_allowed_and_is_said_out_loud(caplog, perceive, kernel):
+    silent = S(min_regime="none", notify_on_severity_increase=False, notify_on_blocked_escalation=False,
+               notify_on_unassessable=False)
+    assert silent.silent and not S().silent and not S(min_regime="none").silent
+    desk, _ = make_desk()
+    with caplog.at_level("CRITICAL"):
+        ClinicalGovernanceSystem(escalations=desk, notification_settings=silent)
+        GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), escalations=desk, clinical_notification=silent)
+    assert caplog.text.count("switched off") == 2
+
+
+def test_on_the_desk_path_a_blocked_escalation_sets_human_alert_as_the_legacy_channel_does():
+    desk, _ = make_desk()
+    d = system(desk).process_vitals(vitals(**CRITICAL))
+    assert d.action == "escalate_blocked" and d.human_alert == "dispatched"
+    down, _ = make_desk(Pager(fail=True))
+    failed = system(down).process_vitals(vitals(**CRITICAL))
+    assert failed.human_alert == "failed" and any("HUMAN_ALERT_FAILED" in v for v in failed.governance_violations)
+
+
+def test_an_internal_failure_while_routing_never_loses_the_decision(monkeypatch):
+    import clinical_governance_system
+    desk, _ = make_desk()
+    baseline = system(desk).process_vitals(vitals(pid="I1", **CRITICAL))
+
+    def broken(*a, **k):
+        raise KeyError("a regime nobody knew")
+    monkeypatch.setattr(clinical_governance_system, "notification_reason", broken)
+    d = system(desk).process_vitals(vitals(pid="I2", **CRITICAL))
+    assert d.action == baseline.action and d.clinical_notification == {"reason": None, "status": "failed", "ticket": None}
+
+
+def test_a_missing_patient_is_null_in_the_page_not_the_word_none():
+    assert ticket_context(reason="r", patient_id=None, regime="critical")["patient_id"] is None
+
+
+def test_the_desk_says_how_much_latency_a_page_can_add():
+    one, _ = make_desk()
+    assert one.max_dispatch_seconds() == 5.0
+    two = EscalationDesk(NotificationPolicy((Tier("a", Pager(), ("nurse",), 60.0, 2.0), Tier("b", Pager(), ("nurse",), 60.0, 3.5))),
+                         EscalationLog(), responder_keys={"nurse": RESPONDER})
+    assert two.max_dispatch_seconds() == 5.5

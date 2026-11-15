@@ -216,7 +216,13 @@ def test_a_desk_and_a_legacy_callable_together_are_refused_before_the_profile_ru
 
 
 def test_something_that_is_not_a_desk_is_refused(tmp_path):
-    assert "not an EscalationDesk" in refused(tmp_path, escalations=lambda alert: None)
+    with pytest.raises(ValueError, match="must be an EscalationDesk"):         # refused at construction, before the profile
+        build(tmp_path, escalations=lambda alert: None)
+    problems = production_problems(                                          # and by the profile's own check
+        conservation_kernel=None, root_admission=None, observe_engine=None, receipts=None,
+        execution_ledger=None, alert_human=None, source_signers=None, guard_executor=False,
+        escalations=lambda alert: None)
+    assert any("not an EscalationDesk" in p for p in problems)
 
 
 def test_a_desk_with_a_bad_policy_an_unkeyed_responder_or_a_weak_log_is_refused(tmp_path):

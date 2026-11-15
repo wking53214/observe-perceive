@@ -380,6 +380,11 @@ class EscalationDesk:
             out.append("this platform has no single-writer lock for the escalation log")
         return out
 
+    def max_dispatch_seconds(self) -> float:
+        """The longest `raise_and_dispatch` can take: every tier's channel hanging for its full timeout. Paging runs on
+        the caller's thread, so this is the most latency a page can add to whatever raised it."""
+        return float(sum(t.dispatch_timeout_s for t in self.policy.tiers if _positive_finite(t.dispatch_timeout_s)))
+
     # -- reading --
     def state(self, ticket_id: str) -> str:
         with self._lock:
