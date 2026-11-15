@@ -79,7 +79,7 @@ def all_nan():
 # ---- control ------------------------------------------------------------------------------------------------------
 
 def test_control_strict_with_sound_vitals_observes_first_then_executes():
-    result, order = run_strict(strict(ObserveClinicalEngine()), "p5-ok", make_vitals(), "P101")
+    result, order = run_strict(strict(ObserveClinicalEngine()), "p5-ok", make_vitals(), "P001")
     assert result["status"] == "APPROVED_AND_EXECUTED", (result.get("refused_by"), result.get("reason"))
     assert order == ["observe", "executed"]
     assert result["observe_enforced"] is True and result["observe_verdict"] is not None
@@ -88,7 +88,7 @@ def test_control_strict_with_sound_vitals_observes_first_then_executes():
 # ---- OP-1: strict OBSERVE runs before the action, and an unassessable reading is a refusal -------------------------
 
 def test_op1_strict_refuses_an_unassessable_observation_before_the_action_runs():
-    result, order = run_strict(strict(ObserveClinicalEngine()), "p5-op1", all_nan(), "P111")
+    result, order = run_strict(strict(ObserveClinicalEngine()), "p5-op1", all_nan(), "P001")
     assert result["status"] == "REJECTED"
     assert result["refused_by"] == "observe" and result["stage_refused"] is True
     assert "executed" not in order and order == ["observe"]
@@ -104,7 +104,7 @@ class Exploding:
 
 def test_op2_strict_observe_crash_is_a_refusal_and_raises_the_human_alert():
     alerts = []
-    result, order = run_strict(strict(Exploding(), alerts), "p5-op2", make_vitals(), "P112")
+    result, order = run_strict(strict(Exploding(), alerts), "p5-op2", make_vitals(), "P001")
     assert result["status"] == "REJECTED"
     assert result["refused_by"] == "observe" and result["stage_refused"] is False
     assert "OBSERVE engine crashed" in result["stage_error"]
@@ -114,7 +114,7 @@ def test_op2_strict_observe_crash_is_a_refusal_and_raises_the_human_alert():
 
 
 def test_op2_strict_with_no_alert_channel_still_refuses_and_says_no_channel():
-    result, order = run_strict(strict(Exploding()), "p5-op2b", make_vitals(), "P113")
+    result, order = run_strict(strict(Exploding()), "p5-op2b", make_vitals(), "P001")
     assert result["status"] == "REJECTED" and "executed" not in order
     assert result["human_alert"] == "no_channel"
 
@@ -134,7 +134,7 @@ class AbstainingCassette(PediatricCassette):
 
 def test_op3_strict_refuses_a_no_evidence_stable_verdict_for_a_hypoxic_tachycardic_child():
     vitals = dataclasses.replace(make_vitals(), oxygen_saturation=84.0, heart_rate=190)
-    result, order = run_strict(strict(ObserveClinicalEngine(cassette=AbstainingCassette())), "p5-op3", vitals, "P114")
+    result, order = run_strict(strict(ObserveClinicalEngine(cassette=AbstainingCassette())), "p5-op3", vitals, "P001")
     assert result["status"] == "REJECTED"
     assert result["refused_by"] == "observe" and result["stage_refused"] is True
     assert "evidence" in result["reason"]

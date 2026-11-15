@@ -43,7 +43,8 @@ class GovernanceOrchestrator:
                  alert_human=None,
                  escalations=None,
                  clinical_notification=None,
-                 sweep_runner=None):
+                 sweep_runner=None,
+                 attempt_id_factory=None):
         """
         Initialize orchestrator with all governance systems.
 
@@ -118,6 +119,8 @@ class GovernanceOrchestrator:
                 returned, "failed" when nobody could be reached; acknowledgement
                 lives on the ticket, never in this field. Required by profile
                 "production". See docs/race/HUMAN_ESCALATION_AND_RECEIPT_MODEL.md.
+            attempt_id_factory: optional callable returning a fresh id per `orchestrate_request` call (default: a random
+                UUID hex). The id is on the result (`attempt_id`), the receipt envelope, and every alert and ticket.
             sweep_runner: optional `escalation_runner.SweepRunner` bound to the same `escalations` desk. It is what calls
                 `sweep()` and alarms when that stops; the orchestrator only holds it so profile "production" can refuse
                 to start without a running one. Start it before building the orchestrator.
@@ -171,6 +174,11 @@ class GovernanceOrchestrator:
             raise ValueError(f"escalations must be an EscalationDesk, not {type(escalations).__name__}")
         self.escalations = escalations
         self.sweep_runner = sweep_runner
+        # One id per call to `orchestrate_request`, whatever the artifact: `request_id` is the artifact's id, so a refused
+        # attempt and its retry share it. The attempt id tells them apart on the result, the receipt and every alert and
+        # ticket. A callable so a test can make it deterministic.
+        import uuid
+        self._new_attempt_id = attempt_id_factory or (lambda: uuid.uuid4().hex)
         # The latest OBSERVE verdict made on this thread during `_orchestrate`: if the pipeline raises (the strict
         # raise_on_* options), the escalation EVENT in that verdict is already spent and must still reach a person.
         self._seen = threading.local()
@@ -340,6 +348,44 @@ class GovernanceOrchestrator:
         return anomalies
 
     @staticmethod
+    def _bind_identity(context, vitals_snapshot):
+        """Return (context_copy, identity, mismatch).
+
+        The patient is the one the context names (`patient_id`, else `subject_id`); with none named and vitals supplied it is
+        the vitals' patient, written into the (copied) context so the request commitment covers it and PERCEIVE's per-subject
+        limits accumulate per patient. With neither, the subject stays the artifact, and `subject_source` says so. Whatever the
+        context names must agree with the vitals' patient and with itself, and a caller-supplied `observation_digest` must be the
+        digest of the vitals actually supplied; any disagreement is a mismatch. The caller's own dict is left as it was given."""
+        from governance_chain import observation_digest
+        context = dict(context)
+        vitals_patient = getattr(vitals_snapshot, "patient_id", None) if vitals_snapshot is not None else None
+        vitals_patient = None if vitals_patient in (None, "") else str(vitals_patient)
+        claimed = {k: str(context[k]) for k in ("patient_id", "subject_id") if context.get(k) not in (None, "")}
+        problems = []
+        if len(set(claimed.values())) > 1:
+            problems.append(f"the context names two different subjects {claimed}")
+        if vitals_patient is not None:
+            for key, value in claimed.items():
+                if value != vitals_patient:
+                    problems.append(f"context {key} {value!r} is not the patient the vitals are for ({vitals_patient!r})")
+        digest = observation_digest(vitals_snapshot)
+        if digest is not None:
+            given = context.get("observation_digest")
+            if given is not None and given != digest:
+                problems.append("the context's observation_digest is not the digest of the vitals supplied")
+            context["observation_digest"] = digest
+        if claimed:
+            source, patient = "context", claimed.get("patient_id") or claimed.get("subject_id")
+        elif vitals_patient is not None:
+            context["patient_id"] = vitals_patient
+            source, patient = "vitals", vitals_patient
+        else:
+            source, patient = "artifact", None
+        identity = {"patient_id": patient, "subject_source": source, "observation_digest": digest}
+        mismatch = {"problems": problems, "context": claimed, "vitals_patient": vitals_patient} if problems else None
+        return context, identity, mismatch
+
+    @staticmethod
     def _patient_context(stage: str, patient_id) -> dict:
         """The patient an alert is about, when the stage knows one. An OBSERVE crash is named as what it is for the
         patient (nobody assessed them), in the same words the clinical notification uses."""
@@ -364,6 +410,7 @@ class GovernanceOrchestrator:
                     kind="stage_error", request_id=request_id,
                     artifact_id=getattr(governance_request, "artifact_id", None),
                     context={"stage": stage, "stage_error": f"{type(error).__name__}: {error}",
+                             "attempt_id": getattr(self._seen, "attempt_id", None),
                              **self._patient_context(stage, patient_id)})
             except Exception as desk_error:  # noqa: BLE001 - never alter the rejection
                 logger.critical(
@@ -386,6 +433,7 @@ class GovernanceOrchestrator:
                 "stage_error": f"{type(error).__name__}: {error}",
                 "request_id": request_id,
                 "artifact_id": getattr(governance_request, "artifact_id", None),
+                "attempt_id": getattr(self._seen, "attempt_id", None),
                 **self._patient_context(stage, patient_id),
             })
         except Exception as alert_error:  # noqa: BLE001 - never alter the rejection
@@ -414,6 +462,9 @@ class GovernanceOrchestrator:
         it decided cannot be reconstructed from the record alone.
         """
         result.setdefault("governance_request", governance_request)
+        result.setdefault("attempt_id", getattr(self._seen, "attempt_id", None))
+        if getattr(self._seen, "identity", None) is not None:
+            result.setdefault("identity", self._seen.identity)
         result.setdefault("temporal_anomalies",
                           self._temporal_anomalies(governance_request) if governance_request is not None else [])
         result.setdefault("handoff", {
@@ -460,7 +511,8 @@ class GovernanceOrchestrator:
                 regime=verdict.regime.value, escalation_kind=getattr(verdict, "escalation_kind", ""),
                 previous_regime=getattr(verdict, "previous_regime", ""), risk_score=verdict.risk_score,
                 triggered_rules=verdict.triggered_rules, unassessable=unassessable,
-                observe_audit_hash=verdict.audit_hash, record_status=record_status)
+                observe_audit_hash=verdict.audit_hash, record_status=record_status,
+                attempt_id=getattr(self._seen, "attempt_id", None))
             ticket, status = notify(self.escalations, context=context,
                                     request_id=getattr(request, "request_id", None),
                                     artifact_id=getattr(request, "artifact_id", None))
@@ -485,6 +537,8 @@ class GovernanceOrchestrator:
     ) -> dict:
         """Orchestrate the flow (see `_orchestrate`) and receipt the result."""
         self._seen.verdict = None
+        self._seen.attempt_id = self._new_attempt_id()
+        self._seen.identity = None
         try:
             result = self._orchestrate(sentinel_artifact, operation_type, gsa815_operation_func, vitals_snapshot,
                                        context)
@@ -572,6 +626,22 @@ class GovernanceOrchestrator:
         logger.info("[Orchestrator] Phase 1: Converting Sentinel artifact to governance request")
         if context is None:
             context = {}
+        # Who the request is about, and which reading justified it, are decided here and bound into the request (so its
+        # commitment covers them). A request whose own statements disagree is refused in every profile: it would be a
+        # governance decision about one patient made with another's data. See docs/race/IDENTITY_BINDING_DESIGN.md.
+        context, identity, mismatch = self._bind_identity(context, vitals_snapshot)
+        self._seen.identity = identity
+        if mismatch is not None:
+            logger.error(f"[Orchestrator] Refusing: identity mismatch: {'; '.join(mismatch['problems'])}")
+            return self._stamp({
+                "status": "REJECTED",
+                "reason": "identity mismatch: " + "; ".join(mismatch["problems"]),
+                "refused_by": "identity",
+                "stage_refused": True,
+                "identity_mismatch": mismatch,
+                "governance_decision": None,
+                "audit_chain": None,
+            })
         # The sealed Gateway admission is checked here, not committed into
         # the request: the request's context is part of its commitment and
         # must stay plain data. What is recorded about the admission is its
