@@ -150,14 +150,19 @@ def test_a_request_with_no_vitals_has_no_assessment_binding():
     assert "observe_assessment" not in result["governance_request"].context
 
 
-def test_a_supplied_assessment_that_is_not_the_one_made_is_an_identity_mismatch():
+def test_a_supplied_assessment_is_dropped_and_the_one_committed_is_the_one_made():
     fake = {"status": "assessed", "decision_fingerprint": "0" * 64, "state_commitment": "", "regime": "stable",
             "escalation_required": False, "unassessable": False}
-    ran = []
-    result = run(orch(), "f11", vit("P1", **CRIT), ctx={"observe_assessment": fake}, ran=ran)
-    assert result["status"] == "REJECTED" and result["refused_by"] == "identity" and ran == []
-    assert any("observe_assessment" in p for p in result["identity_mismatch"]["problems"])
-    assert result["observe_verdict"].regime.value == "critical"             # the reading is still assessed and told
+    result = run(orch(), "f11", vit("P1", **CRIT), ctx={"observe_assessment": fake})
+    assert result["status"] == "APPROVED_AND_EXECUTED"
+    committed = result["governance_request"].context["observe_assessment"]
+    assert committed != fake and committed["regime"] == "critical" and committed["decision_fingerprint"]
+
+
+def test_a_supplied_assessment_with_no_vitals_is_dropped_not_committed():
+    for fake in ({"status": "unavailable", "error_type": None}, {"status": "Assessed"}, "stable"):
+        result = run(orch(), "f11b", None, ctx={"observe_assessment": fake})
+        assert "observe_assessment" not in result["governance_request"].context
 
 
 # ---- 5. the crash policy, per profile -----------------------------------------------------------------------------------
@@ -243,8 +248,10 @@ def test_a_record_whose_verdict_was_swapped_fails_verification():
 def test_the_reading_in_the_ledger_must_be_the_one_the_request_names():
     o = orch()
     result = run(o, "f23", vit("P1", **CRIT))
-    result["identity"] = {**result["identity"], "observation_digest": "0" * 64}
+    result["governance_request"].context["observation_digest"] = "0" * 64           # the digest the request COMMITS to
     check = verify_result(result, kernel=o.conservation_kernel, perceive=o.perceive, observe=o.observe_engine)
+    assert "assessment.matches_reading" in [c.name for c in check.failed]
+    result["identity"].pop("observation_digest", None)                              # an uncommitted copy decides nothing
     assert "assessment.matches_reading" in [c.name for c in check.failed]
 
 
@@ -266,11 +273,13 @@ def test_a_later_refusal_still_carries_the_observe_failure():
     assert refused.get("observe_verdict") is None
 
 
-def test_a_recorded_assessment_replayed_on_a_fresh_orchestrator_is_not_a_mismatch():
-    first = run(orch(), "f31", vit("P1", **CRIT))
-    replay = run(orch(), "f31", vit("P1", **CRIT),
+def test_a_recorded_context_replayed_on_the_same_orchestrator_is_not_refused_or_alerted():
+    seen = []
+    o = orch(alert_human=seen.append)
+    first = run(o, "f31", vit("P1", **CRIT))
+    replay = run(o, "f31b", vit("P1", **CRIT),
                  ctx={"observe_assessment": first["governance_request"].context["observe_assessment"]})
-    assert replay["status"] == "APPROVED_AND_EXECUTED"
+    assert replay["status"] == "APPROVED_AND_EXECUTED" and seen == []
 
 
 def test_the_advisory_profile_does_not_refuse_an_unassessable_reading():
@@ -292,6 +301,7 @@ def test_an_outer_call_keeps_its_observe_failure_when_an_inner_call_ran_inside_t
     result = o.orchestrate_request(ChainArtifact("f33"), "escalate", action, vitals_snapshot=vit("P1"),
                                    context={"execution_id": "e-f33"})
     assert result["status"] == "EXECUTION_FAILED" and result["observe_error"].startswith("RuntimeError")
+    assert result["observe_human_alert"] == "delivered"                           # and so does who was told
 
 
 def test_the_orchestrator_verifies_with_its_own_engine_on_the_way_out():
@@ -309,3 +319,121 @@ def test_a_verdict_with_another_state_commitment_or_regime_fails_verification():
     for change in ({"state_commitment": "0" * 64}, {"regime": OperationalRegime.STABLE}):
         result["observe_verdict"] = dataclasses.replace(original, **change)
         assert "assessment.matches_verdict" in [c.name for c in verify_result(result, observe=o.observe_engine).failed], change
+
+
+# ---- 8. review round: a forged record, a malformed binding, who was told, strict and attestation -----------------------------
+
+def _recommit(request):
+    from governance_chain import request_state
+    from governance_contracts import compute_state_commitment
+    request.state_commitment = compute_state_commitment(None, request_state(request))
+
+
+@pytest.mark.parametrize("forged", [{"regime": "warning"}, {"escalation_required": False}])
+def test_a_record_forged_in_one_field_fails_against_the_engines_own_entry(forged):
+    """Each field the ledger entry holds is compared on its own: forging either alone, in the request and the verdict
+    together and with the commitment recomputed, is caught only by the engine's own entry."""
+    import dataclasses
+    from observe_consolidated import OperationalRegime
+    o = orch()
+    result = run(o, "f40b", vit("P1", **CRIT))
+    request = result["governance_request"]
+    request.context["observe_assessment"].update(forged)
+    _recommit(request)
+    changes = {"regime": OperationalRegime.WARNING} if "regime" in forged else {"escalation_required": False}
+    result["observe_verdict"] = dataclasses.replace(result["observe_verdict"], **changes)
+    check = verify_result(result, observe=o.observe_engine)
+    assert "assessment.matches_ledger_verdict" in [c.name for c in check.failed]
+
+
+def test_a_ticket_for_an_observe_crash_is_on_every_record():
+    desk, pager = make_desk()
+    o = orch(engine=Crashes(), escalations=desk)
+    run(o, "f45", vit("P1"), exec_id="e1")
+    refused = run(o, "f45", vit("P1"), exec_id="e2")
+    assert refused["status"] == "REJECTED" and refused["observe_escalation_ticket"]
+    assert [c["stage"] for c in pager.calls if c["kind"] == "stage_error"] == ["observe", "observe"]
+
+
+def test_a_record_rewritten_to_hide_a_critical_reading_fails_against_the_engines_own_entry():
+    o = orch()
+    result = run(o, "f40", vit("P1", **CRIT))
+    import dataclasses
+    from observe_consolidated import OperationalRegime
+    request = result["governance_request"]
+    request.context["observe_assessment"].update(regime="stable", escalation_required=False)
+    _recommit(request)                                                         # the commitment is unkeyed: it recomputes
+    result["observe_verdict"] = dataclasses.replace(result["observe_verdict"], regime=OperationalRegime.STABLE)
+    check = verify_result(result, observe=o.observe_engine)
+    assert "assessment.matches_ledger_verdict" in [c.name for c in check.failed]
+
+
+@pytest.mark.parametrize("binding", [{"status": "Assessed"}, {"status": "assessed-ish"}, "stable", None, {}])
+def test_a_committed_assessment_that_is_not_one_the_orchestrator_writes_fails_verification(binding):
+    o = orch()
+    result = run(o, "f41", vit("P1"))
+    request = result["governance_request"]
+    request.context["observe_assessment"] = binding
+    _recommit(request)
+    assert "assessment.well_formed" in [c.name for c in verify_result(result, observe=o.observe_engine).failed]
+
+
+def test_a_committed_assessment_with_no_reading_beside_it_fails_verification():
+    o = orch()
+    result = run(o, "f42", None)
+    request = result["governance_request"]
+    request.context["observe_assessment"] = {"status": "unavailable", "error_type": None}
+    _recommit(request)
+    assert "assessment.well_formed" in [c.name for c in verify_result(result).failed]
+
+
+def test_whether_a_person_was_told_of_an_observe_crash_is_on_every_record_not_only_the_successful_one():
+    def broken(_):
+        raise OSError("pager down")
+    o = orch(engine=Crashes(), alert_human=broken)
+    run(o, "f43", vit("P1"), exec_id="e1")
+    refused = run(o, "f43", vit("P1"), exec_id="e2")
+    assert refused["status"] == "REJECTED" and refused["observe_human_alert"] == "failed"
+    failed = o.orchestrate_request(ChainArtifact("f43b"), "escalate", lambda c: (_ for _ in ()).throw(IOError("x")),
+                                   vitals_snapshot=vit("P1"), context={"execution_id": "e-f43b"})
+    assert failed["status"] == "EXECUTION_FAILED" and failed["observe_human_alert"] == "failed"
+
+
+def test_an_observe_crash_is_told_even_when_the_request_cannot_be_built():
+    seen = []
+    o = orch(engine=Crashes(), alert_human=seen.append)
+
+    class Unbuildable:
+        artifact_id = "f44"
+        content = b"x"
+        metadata = {}
+        @property
+        def producer(self):
+            raise RuntimeError("cannot read the artifact")
+    with pytest.raises(Exception):
+        o.orchestrate_request(Unbuildable(), "escalate", lambda c: {}, vitals_snapshot=vit("P1"), context={})
+    assert [a["stage"] for a in seen] == ["observe"] and seen[0]["patient_id"] == "P1"
+
+
+def test_in_strict_a_reading_is_assessed_even_when_the_request_is_then_refused_for_attestation(perceive):
+    """Named change: the request commits to the assessment, so the assessment is made before the request exists and so
+    before its attestation can be judged. The reading is the caller's argument, not the artifact's claim."""
+    from conftest import run_chain
+    from conservation_kernel import ConservationKernel
+    from governance_orchestrator import GovernanceOrchestrator
+    engine = Counting()
+    strict_o = GovernanceOrchestrator(perceive, ConservationKernel(root_guard=lambda artifact: True), engine,
+                                      profile="strict", source_signers=[])
+    unattested, ran = run_chain(strict_o, "st-att", vitals=True, context={"gateway_scope": "EXECUTE"})
+    assert unattested["status"] == "REJECTED" and unattested["refused_by"] == "source_attestation" and ran == []
+    assert len(engine.calls) == 1 and unattested["observe_verdict"] is not None
+
+
+def test_a_binding_that_disagrees_with_the_record_on_escalation_or_unassessable_fails_verification():
+    for field, value in (("escalation_required", False), ("unassessable", True)):
+        o = orch()
+        result = run(o, f"f46-{field}", vit("P1", **CRIT))
+        request = result["governance_request"]
+        request.context["observe_assessment"][field] = value
+        _recommit(request)
+        assert "assessment.matches_verdict" in [c.name for c in verify_result(result).failed], field

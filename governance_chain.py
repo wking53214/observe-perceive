@@ -212,15 +212,25 @@ def verify_result(result: Dict[str, Any], kernel=None, perceive=None, observe=No
     # OBSERVE runs first and the request commits to what it found (or that it found nothing). The request commitment
     # recomputes from the request fields above, so these checks tie that committed statement to the record's verdict, and,
     # when the engine is given, to OBSERVE's own ledger and to the very reading the request names.
-    binding = (request.context or {}).get("observe_assessment") if isinstance(request.context, dict) else None
+    committed = request.context if isinstance(request.context, dict) else {}
+    binding = committed.get("observe_assessment")
     verdict_on_record = result.get("observe_verdict")
+    if "observe_assessment" in committed:
+        # Only the orchestrator writes this, and only with a reading: anything else in the committed request is not a
+        # statement OBSERVE made.
+        check("assessment.well_formed",
+              isinstance(binding, dict) and binding.get("status") in ("assessed", "unavailable")
+              and "observation_digest" in committed,
+              "the committed assessment has a known status and names a reading")
     if isinstance(binding, dict):
         if binding.get("status") == "assessed":
             check("assessment.matches_verdict",
                   verdict_on_record is not None
                   and binding.get("decision_fingerprint") == getattr(verdict_on_record, "decision_fingerprint", None)
                   and binding.get("state_commitment") == getattr(verdict_on_record, "state_commitment", None)
-                  and binding.get("regime") == getattr(getattr(verdict_on_record, "regime", None), "value", None),
+                  and binding.get("regime") == getattr(getattr(verdict_on_record, "regime", None), "value", None)
+                  and bool(binding.get("escalation_required")) == bool(getattr(verdict_on_record, "escalation_required", None))
+                  and bool(binding.get("unassessable")) == bool(getattr(verdict_on_record, "unassessable", False)),
                   "the request commits to the assessment the record carries")
             ledger = getattr(observe, "audit_ledger", None)
             entries = getattr(ledger, "entries", None)
@@ -229,10 +239,16 @@ def verify_result(result: Dict[str, Any], kernel=None, perceive=None, observe=No
                               and e["data"].get("decision_fingerprint") == binding.get("decision_fingerprint")
                               and e["data"].get("state_commitment") == binding.get("state_commitment")), None)
                 check("assessment.in_observe_ledger", entry is not None, "the committed assessment is in OBSERVE's ledger")
-                recorded_digest = (result.get("identity") or {}).get("observation_digest")
-                if entry is not None and recorded_digest is not None:
+                if entry is not None:
+                    said = entry["data"].get("verdict") if isinstance(entry["data"].get("verdict"), dict) else {}
+                    check("assessment.matches_ledger_verdict",
+                          said.get("regime") == binding.get("regime")
+                          and bool(said.get("escalation_required")) == bool(binding.get("escalation_required"))
+                          and bool(said.get("unassessable", False)) == bool(binding.get("unassessable")),
+                          "OBSERVE's own entry says what the request says it found")
+                    # The digest the request COMMITS to (not a copy kept beside the record) names the reading.
                     check("assessment.matches_reading",
-                          observation_digest(entry["data"].get("vitals")) == recorded_digest,
+                          observation_digest(entry["data"].get("vitals")) == committed.get("observation_digest"),
                           "OBSERVE's ledger entry holds the very reading the request names")
                 integrity = getattr(ledger, "verify_integrity", None)
                 if callable(integrity):
