@@ -50,14 +50,16 @@ def make_desk():
                           responder_keys={"nurse": RESPONDER}), pager
 
 
-def crash_once_after_state_moves(engine):
-    """Make `evaluate` raise AFTER it has moved the patient's escalation state: the first ledger write fails."""
+def crash_once_after_state_moves(engine, subject=None, kind=None):
+    """Make `evaluate` raise AFTER it has moved the patient's escalation state: the first ledger write (of `subject` and
+    record `kind`, if named) fails."""
     real, calls = engine.audit_ledger.append, {"n": 0}
 
     def fails_once(*a, **k):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise OSError("ledger write failed")
+        if (subject is None or (a and a[0] == subject)) and (kind is None or (len(a) > 1 and a[1] == kind)):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OSError("ledger write failed")
         return real(*a, **k)
     engine.audit_ledger.append = fails_once
 
@@ -151,7 +153,7 @@ def test_the_hard_rule_history_is_not_rolled_back_because_a_retry_is_never_its_o
     crash_once_after_state_moves(engine)
     with pytest.raises(OSError):
         engine.evaluate(low)
-    assert engine._patient_hard_rule_recent["P1"]                       # the low reading is remembered
+    assert engine._patient_hard_rule_recent["P1"][-1][1] is True        # the low reading is remembered, as a hard rule
     assert not engine.evaluate(low).escalation_required                 # the retry of the same reading is not a repeat
     later = VitalsSnapshot("P1", T0 + timedelta(hours=2), 102, 85, 26, 37.5, ctx)
     assert engine.evaluate(later).escalation_required                   # a genuinely later low reading is
@@ -190,7 +192,7 @@ def test_a_tracker_that_cannot_be_copied_is_dropped_on_rollback_not_fatal():
 def test_a_successful_evaluation_is_unchanged_by_the_snapshot():
     a, b = ObserveClinicalEngine(), ObserveClinicalEngine()
     for i in range(4):
-        va, vb = a.evaluate(crit(i)), b.evaluate(crit(i))
+        va, vb = a.evaluate(crit(i)), b._evaluate(crit(i))                 # b skips the snapshot and rollback entirely
         assert (va.regime, va.escalation_required, va.decision_fingerprint) == (
             vb.regime, vb.escalation_required, vb.decision_fingerprint)
 
@@ -352,3 +354,58 @@ def test_only_the_observe_stage_names_a_patient_as_unassessed():
     assert GovernanceOrchestrator._patient_context("observe", "P1") == {"patient_id": "P1", "reason": "assessment_unavailable"}
     assert GovernanceOrchestrator._patient_context("execution", "P1") == {"patient_id": "P1"}
     assert GovernanceOrchestrator._patient_context("observe", None) == {}
+
+
+# ---- review of the rollback itself ----------------------------------------------------------------------------------
+
+def test_a_log_handler_that_raises_after_the_ledger_write_neither_fails_the_assessment_nor_forks_the_chain():
+    import logging
+    fired = []
+
+    class Raises(logging.Handler):
+        def emit(self, record):
+            if "ESCALATION" in record.getMessage():
+                fired.append(record.getMessage())
+                raise RuntimeError("log handler failed")
+    log, handler, level = logging.getLogger("OBSERVE"), Raises(), logging.getLogger("OBSERVE").level
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    try:
+        engine = ObserveClinicalEngine()
+        first = engine.evaluate(crit(0))                                 # must not raise
+        second = engine.evaluate(crit(1))
+    finally:
+        log.removeHandler(handler)
+        log.setLevel(level)
+    assert fired                                                         # the handler really did raise inside evaluate
+    heads = [e["data"]["predecessor_state_commitment"] for e in engine.audit_ledger.entries
+             if "predecessor_state_commitment" in e["data"]]
+    assert first.escalation_required and len(heads) == 2 and heads[0] == "" and heads[1] != ""   # a chain, not a fork
+    assert second.predecessor_state_commitment == first.state_commitment
+
+
+class EvictsTheSubjectMidEvaluation(PediatricCassette):
+    """While X's evaluation is in flight (after its policy exists, before it writes its commitment and entropy), other
+    evaluations evict X; X's evaluation then goes on to write state for a patient the table no longer holds."""
+    engine = None
+    armed = False
+
+    def select_engines(self, obs, recent_entropy):
+        if self.armed and obs.patient_id == "X":
+            self.armed = False
+            for pid in ("Y", "Z"):
+                self.engine.evaluate(VitalsSnapshot(pid, T0, 100, 98.0, 24, 37.0, {"age_months": 24}))
+        return super().select_engines(obs, recent_entropy)
+
+
+def test_a_patient_evicted_by_another_evaluation_while_theirs_crashed_stays_evicted():
+    cassette = EvictsTheSubjectMidEvaluation()
+    engine = ObserveClinicalEngine(max_tracked_patients=2, cassette=cassette)
+    cassette.engine = engine
+    engine.evaluate(VitalsSnapshot("X", T0, 100, 98.0, 24, 37.0, {"age_months": 24}))      # calm, so evictable
+    cassette.armed = True
+    crash_once_after_state_moves(engine, "X", "clinical_assessment")     # X's own assessment write fails, nobody else's
+    with pytest.raises(OSError):
+        engine.evaluate(VitalsSnapshot("X", T0 + timedelta(minutes=1), 100, 98.0, 24, 37.0, {"age_months": 24}))
+    assert "X" not in engine._patient_policies and len(engine._patient_policies) <= 2
+    assert all("X" not in getattr(engine, name) for name in HELD)        # none of its other state came back either

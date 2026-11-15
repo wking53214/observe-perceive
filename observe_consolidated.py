@@ -1412,17 +1412,17 @@ class ObserveClinicalEngine:
             policy = self._patient_policies.get(subject)
             paged = self._patient_fault_paged.get(subject)
             kalman = self._patient_kalman.get(subject)
-            try:
-                kalman_copy = _ABSENT if kalman is None else copy.deepcopy(kalman)
-            except Exception:  # noqa: BLE001 - a tracker that cannot be copied is dropped on rollback: it restarts
-                kalman_copy = _DROP
-            return {
+            snap = {
                 "policy": _ABSENT if policy is None else copy.copy(policy),
                 "entropy": self._patient_entropy.get(subject, _ABSENT),
                 "commitment": self._state_commitments.get(subject, _ABSENT),
                 "fault_paged": _ABSENT if paged is None else dict(paged),
-                "kalman": kalman_copy,
             }
+        try:  # the tracker is the one costly copy, so it is made outside the lock that serialises every patient
+            snap["kalman"] = _ABSENT if kalman is None else copy.deepcopy(kalman)
+        except Exception:  # noqa: BLE001 - a tracker that cannot be copied is dropped on rollback: it restarts
+            snap["kalman"] = _DROP
+        return snap
 
     def _restore_tracked_state(self, subject: str, snapshot: Dict[str, Any]) -> None:
         """Put the subject's tracked state back as `_snapshot_tracked_state` found it.
@@ -1438,6 +1438,13 @@ class ObserveClinicalEngine:
                   "commitment": self._state_commitments, "fault_paged": self._patient_fault_paged,
                   "kalman": self._patient_kalman}
         with self._state_lock:
+            if snapshot["policy"] is not _ABSENT and subject not in self._patient_policies:
+                # Another evaluation evicted this patient while this one ran (only a calm, unlocked patient is ever
+                # evicted, and the ledger says so with STATE_EVICTED). Bringing the old state back would put the store
+                # over its cap and chain the next record onto a head the ledger has already retired.
+                for store in stores.values():
+                    store.pop(subject, None)
+                return
             for name, store in stores.items():
                 saved = snapshot[name]
                 if saved is _ABSENT or saved is _DROP:
@@ -1768,11 +1775,17 @@ class ObserveClinicalEngine:
         )
         verdict.audit_hash = audit_hash
 
-        if unassessable:
-            logger.warning(f"DATA_INTEGRITY_FAULT: subject={subject} faults={faults} "
-                           f"assessed={selected} regime={final_regime.value}")
-        if escalation:
-            logger.info(f"ESCALATION: subject={subject} regime={final_regime.value} risk={fused_risk:.2f}")
+        # The ledger now holds this reading and the state-commitment head has moved with it. From here a failure must not
+        # roll the state back (that would fork the commitment chain), so a log handler that raises cannot fail the
+        # assessment: logging is the one thing after the write, and it is never allowed to be fatal.
+        try:
+            if unassessable:
+                logger.warning(f"DATA_INTEGRITY_FAULT: subject={subject} faults={faults} "
+                               f"assessed={selected} regime={final_regime.value}")
+            if escalation:
+                logger.info(f"ESCALATION: subject={subject} regime={final_regime.value} risk={fused_risk:.2f}")
+        except Exception:  # noqa: BLE001 - see above
+            pass
 
         return verdict
 
