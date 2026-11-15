@@ -27,6 +27,7 @@ from enum import Enum
 from typing import Callable, Dict, List, Optional, Any
 
 from clinical_notification import ClinicalNotificationSettings, notification_reason, notify, ticket_context
+from clinical_settings import ClinicalSettings
 from observe_consolidated import (
     ObserveClinicalEngine,
     VitalsSnapshot,
@@ -43,6 +44,7 @@ from perceive_consolidated import (
     ConsensusDecider,
     PolicyEnforcementConfig,
 )
+from pediatric_cassette import PediatricCassette
 from capacity_planning import (
     ErlangCapacityForecaster,
     CapacityForecast,
@@ -110,6 +112,10 @@ class ClinicalDecision:
     used_multi_node_consensus: bool = False
     consensus_detail: Optional[Dict[str, Any]] = None
 
+    # Digest of the full clinician settings this assessment was made under (clinical_settings). Any non-default value
+    # is also named in the OBSERVE record's cassette identity, so a verdict can be traced to what it was tuned to.
+    settings_digest: str = ""
+
     # Final action the system recommends
     action: str = "continue_monitoring"  # or "escalate_approved" / "escalate_blocked"
                                          # / "escalate_governance_unavailable"
@@ -167,6 +173,7 @@ class ClinicalGovernanceSystem:
         allow_no_alert_channel: bool = False,
         escalations: Any = None,
         notification_settings: Optional[ClinicalNotificationSettings] = None,
+        settings: Any = None,
     ):
         # Called when an escalation cannot be governed (PERCEIVE failed). It must reach a
         # person (page, dashboard, phone). If it raises, the failure is recorded on the
@@ -195,7 +202,10 @@ class ClinicalGovernanceSystem:
                 "(a governance failure is then only logged at CRITICAL and marked no_channel)"
             )
         self.alert_human = alert_human
-        self.observe = ObserveClinicalEngine()
+        # Clinician-adjustable clinical settings: None (the defaults), a ClinicalSettings, a mapping of overrides, or a
+        # path to a JSON file. Invalid or unreadable settings raise here; they never fall back to the defaults.
+        self.settings = ClinicalSettings.coerce(settings)
+        self.observe = ObserveClinicalEngine(cassette=PediatricCassette(settings=self.settings))
         # WS2a: enforcement defaults to advisory inside the kernel (baseline unchanged).
         self.perceive = PerceiveGovernanceKernel(dgk_gateway=dgk_gateway, enforcement=enforcement)
 
@@ -242,6 +252,7 @@ class ClinicalGovernanceSystem:
             observe_audit_hash=verdict.audit_hash,
             escalation_kind=verdict.escalation_kind,
             previous_regime=verdict.previous_regime,
+            settings_digest=self.settings.digest(),
         )
 
         # --- WS3: reserve modulation (opt-in; no effect unless modulator + utilization) ---
@@ -344,7 +355,8 @@ class ClinicalGovernanceSystem:
         decision = ClinicalDecision(
             patient_id=vitals.patient_id, timestamp=vitals.timestamp, risk_score=0.0,
             regime="assessment_unavailable", escalation_required=True, active_engines=[], triggered_rules=[],
-            observe_audit_hash="", governance_status=GovernanceStatus.ASSESSMENT_UNAVAILABLE,
+            observe_audit_hash="", settings_digest=self.settings.digest(),
+            governance_status=GovernanceStatus.ASSESSMENT_UNAVAILABLE,
             governance_violations=[f"ASSESSMENT_UNAVAILABLE: {type(error).__name__}: {error}"],
             action="escalate_assessment_unavailable",
         )
@@ -510,22 +522,28 @@ class ClinicalGovernanceSystem:
 def build_single_hospital_system(
     alert_human: Optional[Callable[[ClinicalDecision], None]] = None,
     allow_no_alert_channel: bool = False,
+    settings: Any = None,
+    notification_settings: Optional[ClinicalNotificationSettings] = None,
 ) -> ClinicalGovernanceSystem:
     """Single-site deployment: no multi-node consensus needed."""
-    return ClinicalGovernanceSystem(alert_human=alert_human, allow_no_alert_channel=allow_no_alert_channel)
+    return ClinicalGovernanceSystem(alert_human=alert_human, allow_no_alert_channel=allow_no_alert_channel,
+                                    settings=settings, notification_settings=notification_settings)
 
 
 def build_multi_hospital_system(
     hospital_ids: List[str],
     alert_human: Optional[Callable[[ClinicalDecision], None]] = None,
     allow_no_alert_channel: bool = False,
+    settings: Any = None,
+    notification_settings: Optional[ClinicalNotificationSettings] = None,
 ) -> ClinicalGovernanceSystem:
     """Multi-site deployment: emergency overrides require DGK quorum across sites."""
     import secrets
     nodes = {hid: GovernanceNode(hid, secrets.token_bytes(32)) for hid in hospital_ids}
     dgk = DGKGateway(nodes, ConsensusDecider(quorum_fraction=2 / 3))
     return ClinicalGovernanceSystem(
-        dgk_gateway=dgk, alert_human=alert_human, allow_no_alert_channel=allow_no_alert_channel
+        dgk_gateway=dgk, alert_human=alert_human, allow_no_alert_channel=allow_no_alert_channel,
+        settings=settings, notification_settings=notification_settings,
     )
 
 
