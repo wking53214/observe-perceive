@@ -63,7 +63,7 @@ def _stop_runners():
 def runner_for(escalations, **override):
     """A started sweep runner bound to `escalations`, with intervals long enough that it never fires during a test."""
     parts = dict(sweep_interval_s=3600, watch_interval_s=3600, max_silence_s=7200, alarm_timeout_s=5,
-                 alarm=lambda payload: None)
+                 max_tickets_per_sweep=10, alarm=lambda payload: None)
     parts.update(override)
     runner = SweepRunner(escalations, **parts).start()
     _RUNNERS.append(runner)
@@ -284,7 +284,7 @@ def test_a_runner_that_is_not_running_is_refused(tmp_path):
 def test_a_runner_whose_timings_cannot_work_is_refused_with_the_reason(tmp_path):
     escalations = desk(tmp_path)
     never_started = SweepRunner(escalations, sweep_interval_s=60, watch_interval_s=10, max_silence_s=61, alarm_timeout_s=5,
-                                alarm=lambda payload: None)                 # 61 <= 60 + the desk's 5s worst-case dispatch
+                                max_tickets_per_sweep=1, alarm=lambda payload: None)   # 61 <= 60 + the desk's 5s dispatch
     msg = refused(tmp_path, escalations=escalations, sweep_runner=never_started)
     assert "sweep runner:" in msg and "max_silence_s" in msg
 
@@ -331,3 +331,10 @@ def test_advisory_and_strict_still_start_without_the_production_checks():
     assert GovernanceOrchestrator(perceive(), ConservationKernel(allow_unguarded_roots=True)).profile == "advisory"
     with pytest.raises(ValueError):
         GovernanceOrchestrator(perceive(), profile="nonsense")
+
+
+def test_a_runner_with_no_desk_is_reported_not_raised(tmp_path):
+    broken = SweepRunner(None, sweep_interval_s=1, watch_interval_s=1, max_silence_s=100, alarm_timeout_s=1,
+                         max_tickets_per_sweep=1, alarm=lambda payload: None)
+    msg = refused(tmp_path, sweep_runner=broken)
+    assert "no escalation desk to sweep" in msg and "not running" in msg

@@ -6,8 +6,9 @@
   never moved to the next tier and nobody knew. `escalation_runner.SweepRunner` runs a sweeper thread and a watchdog thread. The
   watchdog alarms, through a channel of its own, on: no clean sweep for `max_silence_s` (including a hung sweep, and a desk that
   does not answer, since the desk's lock is held across its disk writes); a dead sweeper thread (restarted); a ticket nobody could be
-  reached for (once each); the desk's log failing; and the recovery. A lost alarm is retried and a hung alarm channel costs its
-  timeout, not the watchdog. Every interval is required (no defaults) and a silence limit a healthy sweep could exceed is refused.
+  reached for (once each); the desk's log failing; and the recovery. Alarms are coalesced (one pending per kind), delivered by one
+  thread at a time, and retried when the channel is down, so a dead channel is neither a thread leak nor a storm. Every interval is
+  required (no defaults), as is `max_tickets_per_sweep`; a silence limit a healthy busy sweep could exceed is refused.
   `GovernanceOrchestrator(sweep_runner=...)` is required by `profile="production"`: a running runner bound to the same desk. Edited
   pre-existing test (the profile now requires it): `test_production_profile.py` fixture `wiring()` builds and starts a runner.
   Not done: it cannot prove the alarm channel reaches a person, cannot watch itself, and dies with the process. Document:
