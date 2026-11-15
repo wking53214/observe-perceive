@@ -185,7 +185,7 @@ def test_weakening_direction(change, weaker):
 # ---- step 3: the cassette applies the settings, and the record names them ---------------------------------------------
 
 import pediatric_cassette  # noqa: E402
-from observe_consolidated import ObserveClinicalEngine  # noqa: E402
+from observe_consolidated import ObserveClinicalEngine, OperationalRegime  # noqa: E402
 from pediatric_cassette import PediatricCassette  # noqa: E402
 
 
@@ -280,3 +280,93 @@ def test_the_two_modules_stay_in_pyproject():
     text = (pathlib.Path(__file__).parent / "pyproject.toml").read_text()
     listed = set(re.findall(r'"([a-z_0-9]+)"', text[text.index("py-modules"):]))
     assert {"clinical_settings", "pediatric_cassette", "cassette"} <= listed
+
+
+# ---- step 4: the supported population is a floor on the report, not a fault -------------------------------------------
+# Finding measured on main before this step: every age from 36 months to 125 years was scored on the "child" row, so a
+# healthy 40 year old at heart rate 70 was reported as BRADYCARDIA (<100) and nothing said the patient was out of scope.
+
+from datetime import timedelta  # noqa: E402
+
+
+def has_finding(v):
+    return any("OUTSIDE_SUPPORTED_POPULATION" in r for r in v.triggered_rules)
+
+
+def test_a_patient_at_or_inside_the_bound_has_no_population_finding():
+    for age in (0, 24, 215, 216):
+        assert not has_finding(ObserveClinicalEngine().evaluate(snap(age=age, pid=f"in-{age}"))), age
+
+
+def test_a_patient_above_the_bound_is_flagged_and_floored_at_warning():
+    v = ObserveClinicalEngine().evaluate(snap(age=480))
+    assert v.regime == OperationalRegime.WARNING and v.escalation_required
+    assert not v.unassessable                       # nothing about the reading is untrustworthy
+    assert has_finding(v) and any("interpret with caution" in r for r in v.triggered_rules)
+    assert v.risk_score >= 0.5                       # the score follows the regime it is reported with
+
+
+def test_being_out_of_scope_never_scores_a_deteriorating_patient_lower():
+    sick = dict(hr=168, o2=80.0, rr=46, temp=39.5)
+    inside = ObserveClinicalEngine().evaluate(snap(age=200, **sick))
+    outside = ObserveClinicalEngine().evaluate(snap(age=480, **sick))
+    order = ["stable", "caution", "warning", "critical"]
+    assert order.index(outside.regime.value) >= order.index(inside.regime.value)
+    assert any("CRITICAL_O2" in r for r in outside.triggered_rules)            # still assessed on every channel
+    assert outside.active_engines                                               # not "nothing assessable"
+
+
+def test_the_population_finding_can_be_turned_off_or_the_bound_moved():
+    assert not has_finding(engine(outside_population="assess_anyway").evaluate(snap(age=480)))
+    assert not has_finding(engine(max_age_months=None).evaluate(snap(age=480)))
+    assert not has_finding(engine(max_age_months=300).evaluate(snap(age=250)))
+    assert has_finding(engine(max_age_months=300).evaluate(snap(age=301)))
+
+
+def test_an_unknown_age_is_assessed_as_before_unless_the_deployment_requires_one():
+    assert not has_finding(ObserveClinicalEngine().evaluate(snap(age=None)))
+    required = engine(require_age=True).evaluate(snap(age=None))
+    assert has_finding(required) and required.regime == OperationalRegime.WARNING
+    for unusable in (-5, "old", float("nan"), 2000):   # present but unusable counts as no age
+        assert has_finding(engine(require_age=True).evaluate(snap(age=unusable))), unusable
+
+
+def test_a_population_finding_and_a_faulted_channel_together_still_mask_the_channel():
+    v = ObserveClinicalEngine().evaluate(snap(age=480, o2=float("nan")))
+    assert v.unassessable and len(v.validation_faults) == 1 and has_finding(v)
+    assert not any("CRITICAL_O2" in r for r in v.triggered_rules)               # the NaN channel is still masked
+
+
+def test_an_over_age_patient_keeps_the_critical_hold_a_child_gets():
+    """The floor is applied after tracking and never writes it, so CRITICAL does not drop to WARNING."""
+    rows = [(90, 87, 60, 38.0), (135, 98, 12, 38.0), (160, 98, 45, 38.0)]
+    for age in (120, 240, 480):
+        e, seen = ObserveClinicalEngine(), []
+        for i, (hr, o2, rr, t) in enumerate(rows):
+            seen.append(e.evaluate(VitalsSnapshot("P", T0 + timedelta(minutes=i), hr, o2, rr, t, {"age_months": age})).regime)
+        assert seen == [OperationalRegime.CRITICAL] * 3, (age, seen)
+
+
+def test_the_floor_pages_once_per_window_and_never_suppresses_a_later_critical_page():
+    e = ObserveClinicalEngine()
+    pages = [e.evaluate(VitalsSnapshot("A", T0 + timedelta(minutes=m), 110, 98.0, 25, 37.0, {"age_months": 480})
+                        ).escalation_required for m in (0, 1, 2)]
+    assert pages == [True, False, False]                                         # one page, then held
+    crit = e.evaluate(VitalsSnapshot("A", T0 + timedelta(minutes=3), 168, 83.0, 46, 39.5, {"age_months": 480}))
+    assert crit.regime == OperationalRegime.CRITICAL and crit.escalation_required
+
+
+def test_the_floor_is_in_the_audit_entry_only_when_it_applied():
+    e = ObserveClinicalEngine()
+    inside = e.evaluate(snap(age=24, pid="in"))
+    outside = e.evaluate(snap(age=480, pid="out"))
+    entries = {en["patient_id"]: en for en in e.audit_ledger.entries}
+    assert "regime_floor" not in entries["in"]["data"] and entries["out"]["data"]["regime_floor"]
+    assert inside.regime != OperationalRegime.WARNING and outside.regime == OperationalRegime.WARNING
+
+
+def test_the_default_cassette_has_the_floor_and_a_cassette_without_the_hook_is_unchanged():
+    assert PediatricCassette().regime_floor(snap(age=480)) is not None
+    assert PediatricCassette().regime_floor(snap(age=24)) is None
+    assert PediatricCassette(settings=ClinicalSettings(outside_population="assess_anyway")).regime_floor(snap(age=480)) is None
+    assert PediatricCassette().regime_floor(object()) is None                    # a reading with no context at all

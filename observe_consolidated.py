@@ -1728,6 +1728,23 @@ class ObserveClinicalEngine:
             final_regime, escalation = policy.evaluate(candidate_regime, vitals.timestamp)
             all_triggered_bypass_note = []
 
+        # A floor the domain sets on the REPORTED regime (for example a patient outside the supported population). It
+        # follows the normal tracking above, so a tracked CRITICAL is still held; it never writes the policy, never
+        # lowers anything, and pages at most once per window (the same dedup a sensor fault uses).
+        floor_of = cassette_optional_member(self._cassette, "regime_floor")
+        floor = floor_of(recorded) if floor_of else None
+        floor_notes: List[str] = []
+        if floor:
+            floor_value, floor_note = floor
+            floor_notes.append(floor_note)
+            floor_regime = OperationalRegime(floor_value)
+            if _REGIME_SEVERITY[final_regime] < _REGIME_SEVERITY[floor_regime]:
+                tracked_below = _REGIME_SEVERITY[policy.current_regime] < _REGIME_SEVERITY[floor_regime]
+                final_regime = floor_regime
+                fused_risk = max(fused_risk, REGIME_RISK_FLOOR[final_regime.value])
+                if not escalation:
+                    escalation = self._fault_page(subject, recorded.timestamp, tracked_below, False)
+
         if escalation:
             moved_up_from_escalated = (_REGIME_SEVERITY[prior_regime] >= _REGIME_SEVERITY[OperationalRegime.WARNING]
                                        and _REGIME_SEVERITY[final_regime] > _REGIME_SEVERITY[prior_regime])
@@ -1738,7 +1755,7 @@ class ObserveClinicalEngine:
             escalation_kind = ""
 
         fault_notes = [f"DATA_INTEGRITY_FAULT: {f}" for f in faults]
-        all_triggered = fault_notes + all_triggered_bypass_note + [r for o in outputs for r in o.triggered_rules]
+        all_triggered = fault_notes + all_triggered_bypass_note + floor_notes + [r for o in outputs for r in o.triggered_rules]
         avg_confidence = sum(o.confidence for o in outputs) / len(outputs) if outputs else 0.0
         if unassessable:
             avg_confidence *= UNASSESSABLE_CONFIDENCE_PENALTY
@@ -1753,6 +1770,8 @@ class ObserveClinicalEngine:
         }
         if all_triggered_bypass_note:  # present only then, so a clean entry keeps its shape
             decision_data["safety_bypass"] = list(all_triggered_bypass_note)
+        if floor_notes:  # present only then, so an entry nothing floored keeps its shape
+            decision_data["regime_floor"] = list(floor_notes)
         if escalation_kind in ("severity_increase", "de_escalation"):  # only the kinds this change adds
             decision_data["escalation_kind"] = escalation_kind
             decision_data["previous_regime"] = prior_regime.value
