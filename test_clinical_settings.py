@@ -180,3 +180,103 @@ def test_weakenings_name_only_the_settings_that_alert_less():
 ])
 def test_weakening_direction(change, weaker):
     assert bool(ClinicalSettings.from_mapping(change).weakenings()) is weaker, change
+
+
+# ---- step 3: the cassette applies the settings, and the record names them ---------------------------------------------
+
+import pediatric_cassette  # noqa: E402
+from observe_consolidated import ObserveClinicalEngine  # noqa: E402
+from pediatric_cassette import PediatricCassette  # noqa: E402
+
+
+def engine(**overrides):
+    return ObserveClinicalEngine(cassette=PediatricCassette(settings=ClinicalSettings.from_mapping(overrides)))
+
+
+def snap(hr=110, o2=98.0, rr=25, temp=37.0, age=24, pid="P1", **ctx):
+    context = {} if age is None else {"age_months": age}
+    context.update(ctx)
+    return VitalsSnapshot(pid, T0, hr, o2, rr, temp, context)
+
+
+def test_default_settings_record_nothing_and_keep_the_shared_engine_table():
+    c = PediatricCassette()
+    assert c.settings.non_default() == {} and c.identity_extras == {}
+    assert c.engines() is pediatric_cassette._ENGINES and c.settings.weakenings() == []
+
+
+def test_default_engine_outputs_are_identical_through_the_cassette():
+    for age in (1, 6, 24, 60, 150):
+        for v in (snap(168, 83.0, 46, 39.5, age), snap(60, 95.0, 20, 34.0, age), snap(age=age)):
+            assert RiskAdapters.heuristic(v).triggered_rules == PediatricCassette().engines()["heuristic"](v).triggered_rules
+            assert RiskAdapters.bayesian(v).risk_score == PediatricCassette().engines()["bayesian"](v).risk_score
+
+
+def test_a_cassette_refuses_something_that_is_not_settings():
+    with pytest.raises(TypeError):
+        PediatricCassette(settings={"max_age_months": 200})
+
+
+def test_hard_rule_values_come_from_the_settings_or_the_arguments_never_both():
+    from_settings = PediatricCassette(settings=ClinicalSettings(hard_rule_confirm_window=5))
+    from_argument = PediatricCassette(hard_rule_confirm_window=5)
+    assert from_settings.hard_rule_confirm_window() == from_argument.hard_rule_confirm_window() == 5
+    assert from_settings.identity_extras == from_argument.identity_extras == {"hard_rule_confirm_window": "5"}
+    with pytest.raises(ValueError):
+        PediatricCassette(settings=ClinicalSettings(), hard_rule_confirm_window=5)
+    with pytest.raises(ValueError):
+        PediatricCassette(hard_rule_confirm_window=None)                     # still refused, as before
+
+
+def test_a_tuned_norm_changes_the_finding_and_is_named_in_the_identity():
+    child = dict(age=60, hr=128)
+    base = ObserveClinicalEngine().evaluate(snap(**child))
+    tuned = engine(norms={"child": {"hr_high": 125}}).evaluate(snap(**child))
+    assert not any("TACHYCARDIA" in r for r in base.triggered_rules)
+    assert any("TACHYCARDIA: 128 > 125" in r for r in tuned.triggered_rules)         # 125, not 125.0
+    c = PediatricCassette(settings=ClinicalSettings.from_mapping({"norms": {"child": {"hr_high": 125}}}))
+    assert c.identity_extras["setting.norms.child.hr_high"] == "125"
+    assert len(c.identity_extras["settings_digest"]) == 64
+    assert "settings_weaker" not in c.identity_extras                               # a lower hr_high alerts more
+    assert base.decision_fingerprint != tuned.decision_fingerprint
+
+
+def test_a_tuned_critical_o2_line_moves_the_hard_rule_and_is_marked_weaker():
+    v = snap(o2=86.0)
+    assert any("CRITICAL_O2" in r for r in ObserveClinicalEngine().evaluate(v).triggered_rules)
+    assert not any("CRITICAL_O2" in r for r in engine(critical_o2_below=85.0).evaluate(v).triggered_rules)
+    lowered = PediatricCassette(settings=ClinicalSettings.from_mapping({"critical_o2_below": 85.0}))
+    assert lowered.identity_extras["settings_weaker"] == "critical_o2_below"
+    assert any("CRITICAL_O2" in r and "<90%" in r
+               for r in engine(critical_o2_below=90.0).evaluate(snap(o2=89.0)).triggered_rules)
+
+
+def test_age_group_boundaries_are_adjustable_through_the_cassette():
+    base = RiskAdapters.heuristic(snap(hr=135, age=30)).triggered_rules
+    out = engine(age_group_upper_months=(3, 12, 24)).evaluate(snap(hr=135, age=30))
+    assert any("TACHYCARDIA: 135 > 130" in r for r in out.triggered_rules)          # now judged on the 'child' row
+    assert not any("TACHYCARDIA" in r for r in base)                                # toddler row allows up to 140
+
+
+def test_the_settings_a_cassette_holds_cannot_be_reassigned():
+    c = PediatricCassette()
+    for name, value in (("settings", ClinicalSettings(max_age_months=300)), ("_engines", {})):
+        with pytest.raises(AttributeError):
+            setattr(c, name, value)
+
+
+def test_a_loosened_setting_logs_a_warning_when_the_cassette_is_built(caplog):
+    with caplog.at_level("WARNING", logger="PEDIATRIC_CASSETTE"):
+        PediatricCassette(settings=ClinicalSettings(critical_o2_below=85.0))
+        assert "LESS likely" in caplog.text
+        caplog.clear()
+        PediatricCassette(settings=ClinicalSettings(critical_o2_below=90.0))
+        assert "LESS likely" not in caplog.text
+
+
+def test_the_two_modules_stay_in_pyproject():
+    import pathlib
+    import re
+    text = (pathlib.Path(__file__).parent / "pyproject.toml").read_text()
+    listed = set(re.findall(r'"([a-z_0-9]+)"', text[text.index("py-modules"):]))
+    assert {"clinical_settings", "pediatric_cassette", "cassette"} <= listed
