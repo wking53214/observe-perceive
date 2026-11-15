@@ -472,7 +472,8 @@ class GovernanceOrchestrator:
         # The reading was assessed first (`_observe_first`); `_stamp` puts the verdict, or the error, on the record. A crash
         # there is told like any other OBSERVE crash.
         if observe_exc is not None:
-            self._alert_stage_error("observe", observe_exc, governance_request, patient_id=vitals_patient)
+            self._seen.observe_alert = self._alert_stage_error("observe", observe_exc, governance_request,
+                                                               patient_id=vitals_patient)
         return self._stamp(result, governance_request)
 
     @staticmethod
@@ -562,6 +563,13 @@ class GovernanceOrchestrator:
             result.setdefault("observe_verdict", self._seen.verdict)
         if getattr(self._seen, "observe_error", None) is not None:
             result.setdefault("observe_error", self._seen.observe_error)
+        # Whether a person was told about that failure is on every record too, under its own key: a record's own stage
+        # alert (an execution that raised, say) must not displace it.
+        told = getattr(self._seen, "observe_alert", None)
+        if told is not None:
+            result.setdefault("observe_human_alert", told)
+            if getattr(told, "ticket_id", None):
+                result.setdefault("observe_escalation_ticket", told.ticket_id)
         result.setdefault("temporal_anomalies",
                           self._temporal_anomalies(governance_request) if governance_request is not None else [])
         result.setdefault("handoff", {
@@ -638,17 +646,18 @@ class GovernanceOrchestrator:
         an executor that calls this orchestrator again on the same thread must not change what the outer call records."""
         seen = self._seen
         saved = (getattr(seen, "verdict", None), getattr(seen, "attempt_id", None), getattr(seen, "identity", None),
-                 getattr(seen, "observe_error", None))
+                 getattr(seen, "observe_error", None), getattr(seen, "observe_alert", None))
         try:
             return self._orchestrate_one(sentinel_artifact, operation_type, gsa815_operation_func, vitals_snapshot, context)
         finally:
-            seen.verdict, seen.attempt_id, seen.identity, seen.observe_error = saved
+            seen.verdict, seen.attempt_id, seen.identity, seen.observe_error, seen.observe_alert = saved
 
     def _orchestrate_one(self, sentinel_artifact, operation_type, gsa815_operation_func, vitals_snapshot, context) -> dict:
         self._seen.verdict = None
         self._seen.attempt_id = self._new_attempt_id()
         self._seen.identity = None
         self._seen.observe_error = None
+        self._seen.observe_alert = None
         try:
             result = self._orchestrate(sentinel_artifact, operation_type, gsa815_operation_func, vitals_snapshot,
                                        context)
@@ -746,14 +755,15 @@ class GovernanceOrchestrator:
         # (see `_observe_first`). A caller who supplies an `observe_assessment` that is not the one OBSERVE made is
         # claiming an assessment nobody made: that is an identity mismatch like any other.
         observe_verdict, observe_exc = self._observe_first(vitals_snapshot)
-        if vitals_snapshot is not None:
-            binding = self._assessment_binding(observe_verdict, observe_exc)
-            supplied = context.get("observe_assessment") if isinstance(context, dict) else None
-            if supplied is not None and supplied != binding:
-                mismatch = mismatch or {"problems": [], "context": {}, "vitals_patient": identity.get("observation_patient")}
-                mismatch["problems"].append("the context's observe_assessment is not the assessment OBSERVE made")
-            if isinstance(context, dict):
-                context["observe_assessment"] = binding
+        if isinstance(context, dict):
+            # The assessment in the request is the orchestrator's alone. A caller's own `observe_assessment` (a replayed
+            # context, or a claim) is dropped, never committed: an assessment is not replayable (the engine's state has moved
+            # on), and one the caller wrote is not one OBSERVE made.
+            if context.pop("observe_assessment", None) is not None:
+                logger.warning("[Orchestrator] A caller-supplied observe_assessment was dropped; the orchestrator's own "
+                               "assessment is the only one committed")
+            if vitals_snapshot is not None:
+                context["observe_assessment"] = self._assessment_binding(observe_verdict, observe_exc)
         # The sealed Gateway admission is checked here, not committed into
         # the request: the request's context is part of its commitment and
         # must stay plain data. What is recorded about the admission is its
@@ -776,6 +786,10 @@ class GovernanceOrchestrator:
             )
         except Exception:
             if mismatch is None:
+                if observe_exc is not None:
+                    # OBSERVE crashed and now the request cannot be built either: the crash would otherwise reach nobody.
+                    self._seen.observe_alert = self._alert_stage_error(
+                        "observe", observe_exc, None, patient_id=getattr(vitals_snapshot, "patient_id", None))
                 raise
             # The request cannot be built, and it was already known to disagree with the vitals: refuse with the mismatch,
             # tell a person, and assess the reading, rather than losing all three to the construction error.
@@ -794,6 +808,7 @@ class GovernanceOrchestrator:
             logger.error(f"[Orchestrator] OBSERVE did not produce a verdict: {observe_error}")
             observe_alert = self._alert_stage_error("observe", observe_exc, governance_request,
                                                     patient_id=getattr(vitals_snapshot, "patient_id", None))
+            self._seen.observe_alert = observe_alert
             if self.profile in ("strict", "production"):
                 if self.raise_on_stage_error:
                     raise observe_exc

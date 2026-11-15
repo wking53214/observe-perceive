@@ -11,7 +11,7 @@
   record carries the verdict or the failure whatever stage refused it, so a refused request's CRITICAL reading is paged. A failed action is
   observed, so its chain is now valid and complete. `verify_result(..., observe=engine)` checks the assessment against the record, OBSERVE's
   ledger and the reading. **Visible changes:** advisory order is OBSERVE then action; OBSERVE state advances for requests later refused;
-  every request with vitals has a new commitment; strict OBSERVE refusals happen before PERCEIVE (`governance_decision` is `None`). Edited
+  every request with vitals has a new commitment; strict OBSERVE refusals happen before PERCEIVE (`governance_decision` is `None`); in strict the reading is assessed before the event-time attestation is judged (the request must exist to be attested, and it commits to the assessment); a caller-supplied `observe_assessment` is dropped, never committed. Edited
   pre-existing tests: `test_chain_closure.py::test_a_failed_execution_carries_a_committed_outcome_that_says_it_failed` and
   `test_chain_failure_paths.py::test_execution_failure_is_a_recorded_state_that_keeps_the_approval` (a failed execution's chain is now valid
   and complete, no longer "not complete"; nothing else in them changed). Document: `docs/race/OBSERVE_FIRST_10B.md`.
