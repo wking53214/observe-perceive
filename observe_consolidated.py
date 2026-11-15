@@ -1390,6 +1390,25 @@ class ObserveClinicalEngine:
                     {"reason": "lru_capacity", "cap": self._max_tracked_patients},
                 )
 
+    def reset_tracked_state(self, vitals: "VitalsSnapshot") -> None:
+        """Forget what is tracked about this reading's subject, so its next reading starts from a fresh STABLE
+        baseline.
+
+        For a caller whose evaluation of the subject crashed. `evaluate` moves the subject's escalation state before it
+        fingerprints and records, so a crash part way through can leave the state saying "already escalated, locked" for
+        a reading no ledger holds, and the subject's next critical reading would then be swallowed as a repeat. Starting
+        again can only cause a repeat page, never silence, which is the direction to be wrong in. The hard-rule history
+        is kept: it only ever makes a later hard rule confirm sooner, and a reading already recorded in it is never its
+        own repeat. Nothing is written to the audit ledger (it may be what failed); the caller records the crash.
+        """
+        subject = self._cassette.subject_id(vitals)
+        with self._state_lock:
+            self._patient_policies.pop(subject, None)
+            self._patient_entropy.pop(subject, None)
+            self._state_commitments.pop(subject, None)
+            self._patient_fault_paged.pop(subject, None)
+            self._patient_kalman.pop(subject, None)
+
     def _get_policy(self, patient_id: str) -> EscalationPolicy:
         with self._state_lock:
             if patient_id not in self._patient_policies:
