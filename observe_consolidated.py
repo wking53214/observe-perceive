@@ -186,6 +186,13 @@ REGIME_CRITICAL_FLOOR_DEFAULT = 0.01  # regime_distribution: critical never reac
 DRIFT_CRITICAL_FLOOR = 0.02           # the drift adapter's stricter floor
 ESCALATION_DWELL_THRESHOLD = 2        # consecutive confirming readings before a regime change
 ESCALATION_LOCK_SECONDS = 300         # post-escalation cooldown (also the fault-page dedup window)
+# How many of a patient's readings (the current one included) make a repeat of a hard rule, for a cassette that does not
+# say. A hard rule that fires on one reading may be a sensor artefact and is judged as the fusion judges it; the same
+# rule firing again within this window, or accompanied by another abnormal channel, is not an artefact and holds the
+# regime at WARNING whatever the fusion says. Counted in readings, not seconds, so it does not depend on how often a unit
+# samples. The domain's own value (the cassette's hard_rule_confirm_window, a clinician setting) takes precedence. Branch
+# logic, like the rest of evaluate's: attested by the source revision, not by PARAMETER_SET.
+HARD_RULE_CONFIRM_WINDOW = 3
 # Fault overlay (ported from OBSERVE, T2b): how the core reasons about a reading
 # with a faulted channel. Each floor is the bottom of the REGIME_DISTRIBUTION_BANDS
 # band its regime wins, so a floored verdict's risk and regime agree.
@@ -1323,6 +1330,9 @@ class ObserveClinicalEngine:
         # EscalationPolicy is never written on such a reading, so it cannot
         # carry this dedup. Evicted with the policy.
         self._patient_fault_paged: Dict[str, Dict[str, datetime]] = {}
+        # (timestamp, whether a hard rule fired) for each of a subject's last few readings (the window the cassette
+        # names). Evicted with the policy, but never while a hard rule is still pending confirmation.
+        self._patient_hard_rule_recent: Dict[str, List[Tuple[Any, bool]]] = {}
         # FIX(red-team / concurrency): the per-patient OrderedDict + entropy dict are
         # mutated during evaluate(). Safe under a single asyncio loop (no await inside
         # evaluate), but a thread pool / multiple loops could corrupt them mid-resize.
@@ -1362,7 +1372,10 @@ class ObserveClinicalEngine:
                     (pid for pid, pol in self._patient_policies.items()
                      if pid != patient_id
                      and pol.current_regime == OperationalRegime.STABLE
-                     and not pol.escalation_locked),
+                     and not pol.escalation_locked
+                     # a lone hard rule is waiting for the next reading to confirm it: forgetting it here would
+                     # silence the one case the confirmation window exists to catch
+                     and not any(fired for _, fired in self._patient_hard_rule_recent.get(pid, ()))),
                     None,
                 )
                 if evicted_id is None:
@@ -1371,6 +1384,7 @@ class ObserveClinicalEngine:
                 self._patient_entropy.pop(evicted_id, None)
                 self._state_commitments.pop(evicted_id, None)
                 self._patient_fault_paged.pop(evicted_id, None)
+                self._patient_hard_rule_recent.pop(evicted_id, None)
                 self.audit_ledger.append(
                     evicted_id, "STATE_EVICTED",
                     {"reason": "lru_capacity", "cap": self._max_tracked_patients},
@@ -1549,6 +1563,32 @@ class ObserveClinicalEngine:
             for o in outputs for r in o.triggered_rules
         )
         bypass = hard_rule_fired or syndrome_fired
+        # What holds the WARNING floor even when fusion rates the reading lower. A named syndrome is a conjunction of
+        # vitals, not one sensor, so it always does. A hard rule does once it is confirmed: it fired again within the
+        # window, or another channel is abnormal beside it (an artefact on one sensor does not raise a child's
+        # respiratory rate or temperature), or the window is 1 (the clinician chose to wait for nothing). A lone,
+        # uncorroborated hard-rule reading is judged exactly as before: it may be an artefact, and the next reading
+        # decides. The domain says how many readings make a repeat and what corroboration is.
+        window_of = cassette_optional_member(self._cassette, "hard_rule_confirm_window")
+        window = max(1, int(window_of())) if window_of else HARD_RULE_CONFIRM_WINDOW
+        corroborated_by = cassette_optional_member(self._cassette, "hard_rule_corroborated")
+        corroborated = bool(hard_rule_fired and corroborated_by and corroborated_by(outputs))
+        with self._state_lock:
+            # A reading seen again (same timestamp: a retransmission, a replay, a retry after a crash) replaces its
+            # earlier entry and is never its own repeat; and only a hard rule on an EARLIER reading counts as one. A
+            # timestamp that cannot be ordered against the history counts: that is the direction that escalates.
+            now = vitals.timestamp
+            recent = [e for e in self._patient_hard_rule_recent.get(subject, []) if e[0] != now]
+
+            def _earlier_firing(entry) -> bool:
+                try:
+                    return bool(entry[1]) and entry[0] < now
+                except TypeError:
+                    return bool(entry[1])
+            repeated = window > 1 and any(_earlier_firing(e) for e in recent[-(window - 1):])
+            hard_rule_confirmed = hard_rule_fired and (window <= 1 or repeated or corroborated)
+            self._patient_hard_rule_recent[subject] = (recent + [(now, hard_rule_fired)])[-window:]
+        hold_floor = syndrome_fired or hard_rule_confirmed
 
         if unassessable:
             # FROZEN POLICY: read, never written, on a faulted reading. Placeholder
@@ -1567,12 +1607,16 @@ class ObserveClinicalEngine:
             else:
                 all_triggered_bypass_note = []
             fused_risk = max(fused_risk, REGIME_RISK_FLOOR[final_regime.value])  # every call, not only a change
-        elif bypass and candidate_regime.value in ("warning", "critical"):
+        elif bypass and (hold_floor or candidate_regime.value in ("warning", "critical")):
             # A bypass raises the regime and never lowers it: a patient tracked at CRITICAL stays CRITICAL
             # when a later reading's bypass rates only WARNING. Any move UP is an escalation event, WARNING to
             # CRITICAL included (it used to be one only from STABLE or CAUTION, so a worsening patient
-            # changed regime and raised no event).
-            final_regime = _max_severity(candidate_regime, policy.current_regime)
+            # changed regime and raised no event). A confirmed hard rule or a named syndrome holds WARNING even
+            # when fusion rated the reading lower: the fusion averages axes that do not all see the danger.
+            lifted = _REGIME_SEVERITY[candidate_regime] < _REGIME_SEVERITY[OperationalRegime.WARNING]
+            final_regime = _max_severity(candidate_regime, OperationalRegime.WARNING, policy.current_regime)
+            if lifted:  # only reachable with hold_floor; the risk is floored to match so score and regime agree
+                fused_risk = max(fused_risk, REGIME_RISK_FLOOR[final_regime.value])
             escalation = _REGIME_SEVERITY[final_regime] > _REGIME_SEVERITY[policy.current_regime]
             policy.current_regime = final_regime
             policy.pending_regime = None
@@ -1583,6 +1627,14 @@ class ObserveClinicalEngine:
             reason = "hard-rule" if hard_rule_fired else "dangerous-syndrome"
             bypass_label = cassette_label(self._cassette, "safety_bypass")
             all_triggered_bypass_note = [f"{bypass_label}: {reason} trigger skipped dwell confirmation"]
+            if lifted:
+                if syndrome_fired and not hard_rule_confirmed:
+                    reason = "dangerous-syndrome"                     # the note names what actually held the floor
+                why = "a named syndrome" if syndrome_fired and not hard_rule_confirmed else (
+                    "corroborated by another abnormal channel" if corroborated else
+                    "confirmed within the window" if repeated else "window of 1")
+                all_triggered_bypass_note.append(
+                    f"{bypass_label}: {reason} trigger ({why}) held the regime at WARNING against a lower fused regime")
         else:
             final_regime, escalation = policy.evaluate(candidate_regime, vitals.timestamp)
             all_triggered_bypass_note = []
