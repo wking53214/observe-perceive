@@ -11,13 +11,25 @@ industry can supply its own answers without touching the engine.
 """
 from __future__ import annotations
 
+import logging
+import math
 from dataclasses import replace
+from functools import partial
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 
 from cassette import ChannelModel
+from clinical_settings import (
+    DEFAULT_HARD_RULE_CONFIRM_WINDOW,
+    DEFAULT_HARD_RULE_CORROBORATION,
+    DEFAULT_HARD_RULE_CORROBORATION_MARGIN,
+    MAX_HARD_RULE_CONFIRM_WINDOW,
+    MIN_HARD_RULE_CORROBORATION_MARGIN,
+    ClinicalSettings,
+)
 from kalman_trajectory import _PEDIATRIC_CHANNEL_MODEL
 
 from observe_consolidated import (
+    RiskAdapters,
     _NUMERIC_CONTEXT_LIST_BOUNDS,
     _NUMERIC_CONTEXT_SCALAR_BOUNDS,
     _has_physiological_telemetry,
@@ -38,18 +50,15 @@ HARD_RULE_RISK = 0.5
 #: The engine whose hard rules carry that weight in this domain.
 HARD_RULE_ENGINE = "heuristic"
 
-#: Defaults for how a hard rule is confirmed (see PediatricCassette). A lone hard-rule reading may be a sensor
-#: artefact, so it is judged as the fusion judges it; the same rule firing again within this many of the patient's
+#: How a hard rule is confirmed (see PediatricCassette): the defaults and the sanity limits live with the other settings
+#: in clinical_settings and are imported above, so there is one definition. A lone hard-rule reading may be a sensor
+#: artefact, so it is judged as the fusion judges it; the same rule firing again within the window of the patient's
 #: readings, or any other abnormal finding beside it, is not an artefact and holds the regime at WARNING. All three are
 #: the clinician's to change; the defaults are a starting point, not a clinical finding.
-DEFAULT_HARD_RULE_CONFIRM_WINDOW = 3
-DEFAULT_HARD_RULE_CORROBORATION = True
-DEFAULT_HARD_RULE_CORROBORATION_MARGIN = 0.05
-#: Sanity limits, not clinical ones. A window past this is an unbounded per-patient history and a hard rule that, once
-#: seen, confirms every later one; a margin below this is vacuous (every hard rule counts as corroborated, which is a
-#: window of 1 and should be asked for as one).
-MAX_HARD_RULE_CONFIRM_WINDOW = 1000
-MIN_HARD_RULE_CORROBORATION_MARGIN = 0.001
+logger = logging.getLogger("PEDIATRIC_CASSETTE")
+#: The name of the finding a reading outside the supported population carries.
+POPULATION_FINDING = "OUTSIDE_SUPPORTED_POPULATION"
+_UNSET = object()
 #: Heuristic scores are sums of decimals (0.2 + 0.2 + 0.15 is 0.55000000000000004), so the margin comparison is made
 #: with this slack and a score exactly at the margin counts on every platform.
 _SCORE_TOLERANCE = 1e-9
@@ -107,14 +116,33 @@ class PediatricCassette:
     version = "1.1.0"
 
     def __init__(self, engine_gate: str = DEFAULT_ENGINE_GATE, *,
-                 hard_rule_confirm_window: int = DEFAULT_HARD_RULE_CONFIRM_WINDOW,
-                 hard_rule_corroboration: bool = DEFAULT_HARD_RULE_CORROBORATION,
-                 hard_rule_corroboration_margin: float = DEFAULT_HARD_RULE_CORROBORATION_MARGIN) -> None:
+                 settings: Optional[ClinicalSettings] = None,
+                 hard_rule_confirm_window: Any = _UNSET,
+                 hard_rule_corroboration: Any = _UNSET,
+                 hard_rule_corroboration_margin: Any = _UNSET) -> None:
         if engine_gate not in ENGINE_GATES:
             raise ValueError(
                 f"unknown engine_gate {engine_gate!r}; expected one of {sorted(ENGINE_GATES)}"
             )
+        if settings is not None and not isinstance(settings, ClinicalSettings):
+            raise TypeError("settings must be a ClinicalSettings (ClinicalSettings.from_mapping builds one)")
+        given = {name: value for name, value in (("hard_rule_confirm_window", hard_rule_confirm_window),
+                                                 ("hard_rule_corroboration", hard_rule_corroboration),
+                                                 ("hard_rule_corroboration_margin", hard_rule_corroboration_margin))
+                 if value is not _UNSET}
+        if settings is not None and given:
+            raise ValueError(f"{sorted(given)} were passed beside `settings`; the hard-rule values are settings, "
+                             "so give them there or as arguments, not both")
         self.engine_gate = engine_gate
+        if hard_rule_confirm_window is _UNSET:
+            hard_rule_confirm_window = DEFAULT_HARD_RULE_CONFIRM_WINDOW if settings is None \
+                else settings.hard_rule_confirm_window
+        if hard_rule_corroboration is _UNSET:
+            hard_rule_corroboration = DEFAULT_HARD_RULE_CORROBORATION if settings is None \
+                else settings.hard_rule_corroboration
+        if hard_rule_corroboration_margin is _UNSET:
+            hard_rule_corroboration_margin = DEFAULT_HARD_RULE_CORROBORATION_MARGIN if settings is None \
+                else settings.hard_rule_corroboration_margin
         if isinstance(hard_rule_confirm_window, bool) or not isinstance(hard_rule_confirm_window, int) \
                 or not 1 <= hard_rule_confirm_window <= MAX_HARD_RULE_CONFIRM_WINDOW:
             raise ValueError(f"hard_rule_confirm_window must be a whole number of readings from 1 to "
@@ -129,11 +157,34 @@ class PediatricCassette:
         self._hard_rule_confirm_window = hard_rule_confirm_window
         self._hard_rule_corroboration = hard_rule_corroboration
         self._hard_rule_corroboration_margin = float(hard_rule_corroboration_margin)
+        # One object holds every value in force: the settings the caller gave, or the defaults with the hard-rule
+        # arguments applied. The record, the engines and the cassette all read this, so they cannot disagree.
+        if settings is None:
+            settings = ClinicalSettings(hard_rule_confirm_window=self._hard_rule_confirm_window,
+                                        hard_rule_corroboration=self._hard_rule_corroboration,
+                                        hard_rule_corroboration_margin=self._hard_rule_corroboration_margin)
+        self.settings = settings
+        if settings.engine_params_are_default():
+            self._engines = _ENGINES
+        else:
+            self._engines = {
+                **_ENGINES,
+                "heuristic": partial(RiskAdapters.heuristic, norms=settings.norms,
+                                     age_bounds=settings.age_group_upper_months,
+                                     critical_o2_below=settings.critical_o2_below,
+                                     hypothermia_below=settings.hypothermia_below),
+                "bayesian": partial(RiskAdapters.bayesian, norms=settings.norms,
+                                    age_bounds=settings.age_group_upper_months),
+            }
+        weaker = settings.weakenings()
+        if weaker:
+            logger.warning(f"clinical settings make an alert LESS likely than the defaults: {weaker} "
+                           f"(settings digest {settings.digest()[:12]})")
         object.__setattr__(self, "_settled", True)
 
     #: Settings a verdict's recorded identity speaks for. Once the cassette is built they cannot be reassigned: a
     #: setting changed afterwards would leave the identity recording one thing and the engine doing another.
-    _SETTINGS = frozenset({"engine_gate", "hard_rule_confirm_window", "hard_rule_corroborated",
+    _SETTINGS = frozenset({"engine_gate", "settings", "_engines", "hard_rule_confirm_window", "hard_rule_corroborated",
                            "_hard_rule_confirm_window", "_hard_rule_corroboration", "_hard_rule_corroboration_margin"})
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -156,6 +207,17 @@ class PediatricCassette:
             extras["hard_rule_corroboration"] = str(self._hard_rule_corroboration).lower()
         if self._hard_rule_corroboration_margin != DEFAULT_HARD_RULE_CORROBORATION_MARGIN:
             extras["hard_rule_corroboration_margin"] = repr(self._hard_rule_corroboration_margin)
+        # Any other setting that is not at its default: by name, with the digest of the whole set and the names of the
+        # ones that make an alert less likely, so a verdict is traceable to the values that produced it. The hard-rule
+        # values keep the names above, so a cassette tuned only there records exactly what it always did.
+        others = {k: v for k, v in self.settings.non_default().items() if not k.startswith("hard_rule_")}
+        if others:
+            extras["settings_digest"] = self.settings.digest()
+            for key, value in others.items():
+                extras[f"setting.{key}"] = value
+            weaker = self.settings.weakenings()
+            if weaker:
+                extras["settings_weaker"] = ",".join(weaker)
         return extras
 
     # -- identity -----------------------------------------------------
@@ -165,6 +227,30 @@ class PediatricCassette:
     # -- trust boundary -----------------------------------------------
     def validate(self, obs: Any) -> List[str]:
         return validate_vitals(obs)
+
+    def regime_floor(self, obs: Any) -> Optional[Tuple[str, str]]:
+        """A floor on the reported regime, with its reason, or None.
+
+        Pediatric is the supported population; adult norms are a future cassette. A reading above `max_age_months` is
+        assessed on every channel exactly as before (and tracked as before, so a CRITICAL is still held), but is
+        reported no lower than WARNING with a named finding, so a person looks: a deteriorating adult must not be
+        scored less severely for being out of scope, and a healthy one must not be reassured by child norms. It is a
+        floor on the report, not a data fault: nothing about the reading is untrustworthy."""
+        s = self.settings
+        context = obs.context if isinstance(getattr(obs, "context", None), dict) else {}
+        age = context.get("age_months")
+        known = (isinstance(age, (int, float)) and not isinstance(age, bool) and math.isfinite(age)
+                 and 0 <= age <= 1500)
+        if not known:
+            if s.require_age:
+                return ("warning", f"{POPULATION_FINDING}: this deployment requires the patient's age and none "
+                                   "usable was given")
+            return None
+        if s.outside_population == "alert" and s.max_age_months is not None and age > s.max_age_months:
+            return ("warning", f"{POPULATION_FINDING}: age {age:g} months is above the supported pediatric "
+                               f"population (max {s.max_age_months:g}); assessed on pediatric norms, "
+                               "interpret with caution")
+        return None
 
     def mask_faults(self, obs: Any, faults: List[str]) -> Optional[Any]:
         """The reading to assess in place of a faulted one, or None.
@@ -233,7 +319,7 @@ class PediatricCassette:
         return ordered
 
     def engines(self) -> Mapping[str, Callable[[Any], RiskOutput]]:
-        return _ENGINES
+        return self._engines
 
     # -- what is never noise -------------------------------------------
     def hard_rule_fired(self, outputs: List[RiskOutput]) -> bool:

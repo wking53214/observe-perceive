@@ -390,15 +390,21 @@ def decision_fingerprint(data: Dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def get_age_group(age_months: Optional[int]) -> str:
-    """Map age in months to clinical age group. Returns 'generic' if age unknown."""
+#: Upper bounds, in months, of the neonatal, infant and toddler groups; at or beyond the last is "child".
+AGE_GROUP_UPPER_MONTHS = (3, 12, 36)
+
+
+def get_age_group(age_months: Optional[int], bounds: Tuple[float, float, float] = AGE_GROUP_UPPER_MONTHS) -> str:
+    """Map age in months to clinical age group. Returns 'generic' if age unknown.
+
+    `bounds` is the clinician-adjustable setting (see clinical_settings); the default is the original table."""
     if age_months is None:
         return "generic"
-    if age_months < 3:
+    if age_months < bounds[0]:
         return "neonatal"
-    if age_months < 12:
+    if age_months < bounds[1]:
         return "infant"
-    if age_months < 36:
+    if age_months < bounds[2]:
         return "toddler"
     return "child"
 
@@ -433,8 +439,13 @@ class RiskAdapters:
     """All 6 risk assessment engines, consolidated with fixes from code review."""
 
     @staticmethod
-    def heuristic(vitals: VitalsSnapshot) -> RiskOutput:
-        """FIX: confidence = data-completeness, not history_quality formula. Age-adjusted norms."""
+    def heuristic(vitals: VitalsSnapshot, norms: Optional[Mapping[str, Mapping[str, float]]] = None,
+                  age_bounds: Tuple[float, float, float] = AGE_GROUP_UPPER_MONTHS,
+                  critical_o2_below: float = 88.0, hypothermia_below: float = 35.0) -> RiskOutput:
+        """FIX: confidence = data-completeness, not history_quality formula. Age-adjusted norms.
+
+        The keyword arguments are the clinician-adjustable settings (clinical_settings.ClinicalSettings); every
+        default is the value this function always used."""
         triggered = []
         score = 0.0
 
@@ -444,11 +455,11 @@ class RiskAdapters:
         if age_months is None:
             logger.warning(f"HEURISTIC: age_months missing for {vitals.patient_id}; using generic norms")
 
-        age_group = get_age_group(age_months)
-        thresh = PEDIATRIC_NORMS[age_group]
+        age_group = get_age_group(age_months, age_bounds)
+        thresh = (PEDIATRIC_NORMS if norms is None else norms)[age_group]
 
-        if vitals.oxygen_saturation < 88.0:
-            triggered.append(f"CRITICAL_O2: {vitals.oxygen_saturation}% (<88%)")
+        if vitals.oxygen_saturation < critical_o2_below:
+            triggered.append(f"CRITICAL_O2: {vitals.oxygen_saturation}% (<{critical_o2_below:g}%)")
             score += 0.5
         elif vitals.oxygen_saturation < thresh["o2_low"]:
             triggered.append(f"WARNING_O2: {vitals.oxygen_saturation}% (<{thresh['o2_low']}%)")
@@ -468,8 +479,9 @@ class RiskAdapters:
         if vitals.temperature > thresh["temp_high"]:
             triggered.append(f"FEVER: {vitals.temperature}°C > {thresh['temp_high']}°C")
             score += 0.1
-        elif vitals.temperature < 35.0:
-            triggered.append(f"HYPOTHERMIA: {vitals.temperature}°C < 35.0°C")
+        elif vitals.temperature < hypothermia_below:
+            line = f"{hypothermia_below:.1f}" if round(hypothermia_below, 1) == hypothermia_below else f"{hypothermia_below:g}"
+            triggered.append(f"HYPOTHERMIA: {vitals.temperature}°C < {line}°C")
             score += 0.4
 
         score = min(score, 1.0)
@@ -484,14 +496,17 @@ class RiskAdapters:
         return RiskOutput("heuristic", score, confidence, regime_distribution(score), triggered, datetime.now(timezone.utc))
 
     @staticmethod
-    def bayesian(vitals: VitalsSnapshot) -> RiskOutput:
-        """FIX: age-group lookup (no hardcoded toddler norms), continuous sigmoid likelihood."""
+    def bayesian(vitals: VitalsSnapshot, norms: Optional[Mapping[str, Mapping[str, float]]] = None,
+                 age_bounds: Tuple[float, float, float] = AGE_GROUP_UPPER_MONTHS) -> RiskOutput:
+        """FIX: age-group lookup (no hardcoded toddler norms), continuous sigmoid likelihood.
+
+        `norms` and `age_bounds` are the clinician-adjustable settings; the defaults are the original tables."""
         triggered = []
         debug_info = {}
 
         age_months = vitals.context.get("age_months")
-        age_group = get_age_group(age_months)
-        thresh = PEDIATRIC_NORMS[age_group]
+        age_group = get_age_group(age_months, age_bounds)
+        thresh = (PEDIATRIC_NORMS if norms is None else norms)[age_group]
 
         o2_mean, o2_std = (thresh["o2_low"] + 100) / 2.0, 3.0
         hr_mean, hr_std = (thresh["hr_high"] + thresh["hr_low"]) / 2.0, (thresh["hr_high"] - thresh["hr_low"]) / 4.0
@@ -1714,6 +1729,35 @@ class ObserveClinicalEngine:
             final_regime, escalation = policy.evaluate(candidate_regime, vitals.timestamp)
             all_triggered_bypass_note = []
 
+        # A floor the domain sets on the REPORTED regime (for example a patient outside the supported population). It
+        # follows the normal tracking above, so a tracked CRITICAL is still held; it never writes the policy, never
+        # lowers anything, and pages at most once per window (the same dedup a sensor fault uses).
+        floor_of = cassette_optional_member(self._cassette, "regime_floor")
+        floor = floor_of(recorded) if floor_of else None
+        floor_notes: List[str] = []
+        # The floor is a standing condition (a patient who stays out of the supported population stays so), so it pages
+        # ONCE, when it first applies, and again only after a reading that is back in scope. It does not page on a
+        # timer: a timed dedup would re-page an adult every window for as long as they are monitored.
+        with self._state_lock:
+            if floor:
+                stamps = self._patient_fault_paged.setdefault(subject, {})
+                first_time = "population" not in stamps
+                stamps.setdefault("population", recorded.timestamp)
+            else:
+                first_time = False
+                stamps = self._patient_fault_paged.get(subject)
+                if stamps:
+                    stamps.pop("population", None)
+        if floor:
+            floor_value, floor_note = floor
+            floor_notes.append(floor_note)
+            floor_regime = OperationalRegime(floor_value)
+            if _REGIME_SEVERITY[final_regime] < _REGIME_SEVERITY[floor_regime]:
+                final_regime = floor_regime
+                fused_risk = max(fused_risk, REGIME_RISK_FLOOR[final_regime.value])
+                if first_time and not escalation:
+                    escalation = True
+
         if escalation:
             moved_up_from_escalated = (_REGIME_SEVERITY[prior_regime] >= _REGIME_SEVERITY[OperationalRegime.WARNING]
                                        and _REGIME_SEVERITY[final_regime] > _REGIME_SEVERITY[prior_regime])
@@ -1724,7 +1768,7 @@ class ObserveClinicalEngine:
             escalation_kind = ""
 
         fault_notes = [f"DATA_INTEGRITY_FAULT: {f}" for f in faults]
-        all_triggered = fault_notes + all_triggered_bypass_note + [r for o in outputs for r in o.triggered_rules]
+        all_triggered = fault_notes + all_triggered_bypass_note + floor_notes + [r for o in outputs for r in o.triggered_rules]
         avg_confidence = sum(o.confidence for o in outputs) / len(outputs) if outputs else 0.0
         if unassessable:
             avg_confidence *= UNASSESSABLE_CONFIDENCE_PENALTY
@@ -1739,6 +1783,8 @@ class ObserveClinicalEngine:
         }
         if all_triggered_bypass_note:  # present only then, so a clean entry keeps its shape
             decision_data["safety_bypass"] = list(all_triggered_bypass_note)
+        if floor_notes:  # present only then, so an entry nothing floored keeps its shape
+            decision_data["regime_floor"] = list(floor_notes)
         if escalation_kind in ("severity_increase", "de_escalation"):  # only the kinds this change adds
             decision_data["escalation_kind"] = escalation_kind
             decision_data["previous_regime"] = prior_regime.value
