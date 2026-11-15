@@ -370,3 +370,57 @@ def test_the_default_cassette_has_the_floor_and_a_cassette_without_the_hook_is_u
     assert PediatricCassette().regime_floor(snap(age=24)) is None
     assert PediatricCassette(settings=ClinicalSettings(outside_population="assess_anyway")).regime_floor(snap(age=480)) is None
     assert PediatricCassette().regime_floor(object()) is None                    # a reading with no context at all
+
+
+# ---- step 5: the settings reach the clinician's system, and every decision names them ----------------------------------
+
+from clinical_governance_system import build_multi_hospital_system, build_single_hospital_system  # noqa: E402
+
+
+def test_a_decision_names_the_settings_it_was_made_under():
+    system = build_single_hospital_system(allow_no_alert_channel=True)
+    assert system.process_vitals(snap(age=24)).settings_digest == ClinicalSettings().digest()
+    tuned = build_single_hospital_system(allow_no_alert_channel=True, settings={"critical_o2_below": 90})
+    decision = tuned.process_vitals(snap(age=24, o2=89.0))
+    assert decision.settings_digest == ClinicalSettings(critical_o2_below=90).digest() != ClinicalSettings().digest()
+    assert any("CRITICAL_O2" in r for r in decision.triggered_rules)
+
+
+def test_the_system_takes_settings_as_an_object_a_mapping_or_a_file(tmp_path):
+    path = tmp_path / "unit.json"
+    path.write_text('{"max_age_months": 300}')
+    digests = {build_single_hospital_system(allow_no_alert_channel=True, settings=value).settings.digest()
+               for value in (ClinicalSettings(max_age_months=300), {"max_age_months": 300}, path)}
+    assert len(digests) == 1
+
+
+def test_bad_or_missing_settings_stop_the_system_rather_than_run_on_the_defaults(tmp_path):
+    for bad in ({"max_age_mnths": 1}, tmp_path / "missing.json", 42):
+        with pytest.raises(SettingsError):
+            build_single_hospital_system(allow_no_alert_channel=True, settings=bad)
+    with pytest.raises(SettingsError):
+        build_multi_hospital_system(["h1", "h2", "h3"], allow_no_alert_channel=True, settings={"nope": 1})
+
+
+def test_an_assessment_that_failed_still_names_its_settings():
+    system = build_single_hospital_system(allow_no_alert_channel=True, settings={"max_age_months": 300})
+
+    def boom(_):
+        raise RuntimeError("engine down")
+    system.observe.evaluate = boom
+    decision = system.process_vitals(snap(age=24))
+    assert decision.regime == "assessment_unavailable" and decision.settings_digest == system.settings.digest()
+
+
+def test_an_adult_is_reported_at_warning_with_the_finding_in_the_decision():
+    system = build_single_hospital_system(allow_no_alert_channel=True)
+    decision = system.process_vitals(snap(age=480, hr=70, pid="adult-1"))
+    assert decision.regime == "warning" and any("OUTSIDE_SUPPORTED_POPULATION" in r for r in decision.triggered_rules)
+    assert decision.escalation_required
+
+
+def test_the_notification_settings_pass_through_the_builders():
+    from clinical_notification import ClinicalNotificationSettings
+    system = build_single_hospital_system(allow_no_alert_channel=True,
+                                          notification_settings=ClinicalNotificationSettings(min_regime="warning"))
+    assert system.notification_settings.min_regime == "warning"
