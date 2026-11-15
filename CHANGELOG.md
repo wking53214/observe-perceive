@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Something now calls `sweep()`, and something notices when it stops.** `EscalationDesk` has no timer, so an unanswered page
+  never moved to the next tier and nobody knew. `escalation_runner.SweepRunner` runs a sweeper thread and a watchdog thread. The
+  watchdog alarms, through a channel of its own, on: no clean sweep for `max_silence_s` (including a hung sweep, and a desk that
+  does not answer, since the desk's lock is held across its disk writes); a dead sweeper thread (restarted); a ticket nobody could be
+  reached for (once each); the desk's log failing; and the recovery. A lost alarm is retried and a hung alarm channel costs its
+  timeout, not the watchdog. Every interval is required (no defaults) and a silence limit a healthy sweep could exceed is refused.
+  `GovernanceOrchestrator(sweep_runner=...)` is required by `profile="production"`: a running runner bound to the same desk. Edited
+  pre-existing test (the profile now requires it): `test_production_profile.py` fixture `wiring()` builds and starts a runner.
+  Not done: it cannot prove the alarm channel reaches a person, cannot watch itself, and dies with the process. Document:
+  `docs/race/ESCALATION_SWEEP_RUNNER.md`.
+
 - **A hard rule that fusion would dilute is held at WARNING once confirmed.** A hard rule (the pediatric `CRITICAL_O2`,
   SpO2 below 88%) skipped the dwell only when the fused regime was already WARNING or CRITICAL, so any `previous_*` history,
   which adds the trajectory engine and pulls the average down, could fuse it away. Measured: a child with SpO2 86%, fever

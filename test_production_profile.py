@@ -17,6 +17,7 @@ from conservation_kernel import ConservationKernel, HmacSigner  # noqa: E402
 from execution_guard import ExecutionLedger  # noqa: E402
 from governance_orchestrator import GovernanceOrchestrator  # noqa: E402
 from governance_record import ReceiptLog  # noqa: E402
+from escalation_runner import SweepRunner  # noqa: E402
 from human_escalation import EscalationDesk, EscalationLog, NotificationPolicy, Tier  # noqa: E402
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot  # noqa: E402
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest  # noqa: E402
@@ -49,15 +50,37 @@ def desk(tmp_path, **override):
     return EscalationDesk(**parts)
 
 
+_RUNNERS = []
+
+
+@pytest.fixture(autouse=True)
+def _stop_runners():
+    yield
+    while _RUNNERS:
+        _RUNNERS.pop().stop(timeout=2)
+
+
+def runner_for(escalations, **override):
+    """A started sweep runner bound to `escalations`, with intervals long enough that it never fires during a test."""
+    parts = dict(sweep_interval_s=3600, watch_interval_s=3600, max_silence_s=7200, alarm_timeout_s=5,
+                 alarm=lambda payload: None)
+    parts.update(override)
+    runner = SweepRunner(escalations, **parts).start()
+    _RUNNERS.append(runner)
+    return runner
+
+
 def wiring(tmp_path, **override):
     """A correct production wiring; `override` replaces one part."""
     admission = RootAdmission()
+    escalations = override.get("escalations", desk(tmp_path))
     parts = dict(
         perceive=perceive(), conservation_kernel=ConservationKernel(root_guard=admission),
         observe_engine=ObserveClinicalEngine(), root_admission=admission, profile="production",
         receipts=ReceiptLog(tmp_path / "receipts.jsonl", signer=DEPLOYER),
         execution_ledger=ExecutionLedger(tmp_path / "ledger.jsonl", signer=DEPLOYER),
-        escalations=desk(tmp_path), source_signers=[SOURCE])
+        escalations=escalations, source_signers=[SOURCE],
+        sweep_runner=runner_for(escalations) if hasattr(escalations, "max_dispatch_seconds") else None)
     parts.update(override)
     return parts
 
@@ -231,6 +254,39 @@ def test_a_desk_with_a_bad_policy_an_unkeyed_responder_or_a_weak_log_is_refused(
     assert "no registered key" in refused(tmp_path, escalations=desk(tmp_path, responder_keys={}))
     assert "in memory" in refused(tmp_path, escalations=desk(tmp_path, log=EscalationLog(None, signer=DEPLOYER)))
     assert "unsigned" in refused(tmp_path, escalations=desk(tmp_path, log=EscalationLog(tmp_path / "u.jsonl")))
+
+
+def test_a_correct_wiring_has_a_running_sweep_runner_bound_to_its_own_desk(tmp_path):
+    parts = wiring(tmp_path)
+    assert parts["sweep_runner"].running and parts["sweep_runner"].desk is parts["escalations"]
+
+
+def test_no_sweep_runner_is_refused_because_nothing_would_follow_up_an_unanswered_page(tmp_path):
+    assert "no sweep runner" in refused(tmp_path, sweep_runner=None)
+
+
+def test_something_that_is_not_a_sweep_runner_is_refused(tmp_path):
+    assert "not a SweepRunner" in refused(tmp_path, sweep_runner=object())
+
+
+def test_a_runner_for_a_different_desk_is_refused(tmp_path):
+    other = desk(tmp_path)
+    assert "different desk" in refused(tmp_path, sweep_runner=runner_for(other))
+
+
+def test_a_runner_that_is_not_running_is_refused(tmp_path):
+    escalations = desk(tmp_path)
+    stopped = runner_for(escalations)
+    stopped.stop(timeout=2)
+    assert "not running" in refused(tmp_path, escalations=escalations, sweep_runner=stopped)
+
+
+def test_a_runner_whose_timings_cannot_work_is_refused_with_the_reason(tmp_path):
+    escalations = desk(tmp_path)
+    never_started = SweepRunner(escalations, sweep_interval_s=60, watch_interval_s=10, max_silence_s=61, alarm_timeout_s=5,
+                                alarm=lambda payload: None)                 # 61 <= 60 + the desk's 5s worst-case dispatch
+    msg = refused(tmp_path, escalations=escalations, sweep_runner=never_started)
+    assert "sweep runner:" in msg and "max_silence_s" in msg
 
 
 def test_an_unguarded_executor_is_refused_by_strict_and_by_the_profile_itself(tmp_path):
