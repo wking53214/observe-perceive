@@ -9,7 +9,8 @@
   `attempt_id` (on the result, the receipt envelope, every alert and ticket); a request whose context patient disagrees with the vitals'
   patient (or names two subjects, or carries a wrong `observation_digest`) is refused in every profile before anything runs; the vitals'
   patient is bound into the request when none is named, so limits accumulate per patient; and an `observation_digest` of the reading is in
-  the request, so the commitment covers which reading. Results record `identity` with a `subject_source`. `orchestrate_request` no longer
+  the request, so the commitment covers which reading. Only `patient_id` is compared with the vitals (five adapters legitimately put a
+  non-patient entity in `subject_id`); a mismatch also tells a person and still assesses and pages the reading for the vitals' patient. Results record `identity` with a `subject_source`. `orchestrate_request` no longer
   mutates the caller's context dict. Edited pre-existing tests (they contained the mismatch): five calls in `test_audit_p5_fixes.py` and
   one in `test_observe_crash.py` now pass patient `P001`, the vitals' patient; no assertion changed. Not done (10b): OBSERVE first in every
   profile and binding the assessment. Document: `docs/race/IDENTITY_BINDING_10A.md`.
