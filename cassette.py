@@ -52,6 +52,15 @@ without a line of domain code in it.
                                for a second confirming reading is itself
                                the harm? The core cannot know. Only the
                                domain can say what is never noise.
+  hard_rule_confirm_window()   OPTIONAL. How many of a subject's readings, the
+                               current one included, make a repeat of the hard
+                               rule. A hard rule that repeats within it holds
+                               the regime at WARNING whatever the fusion says.
+                               1 means every hard rule holds the floor at once.
+  hard_rule_corroborated(outputs)
+                               OPTIONAL. Is the hard rule accompanied by another
+                               abnormal finding in the same assessment? Only the
+                               domain knows what counts as corroboration.
   channels(obs)                named numeric series for trajectory
                                tracking, as {name: value}. A cassette
                                declares its own; the tracker is generic
@@ -193,7 +202,7 @@ _CALLABLE = REQUIRED[2:]
 #: assess a reading partially"), not a conformance failure. Presence without
 #: callability is a failure: a capability declared wrongly is rejected at
 #: load rather than quietly skipped on some later evaluation.
-OPTIONAL = ("mask_faults",)
+OPTIONAL = ("mask_faults", "hard_rule_confirm_window", "hard_rule_corroborated")
 
 
 #: Used when a cassette omits a label key. Neutral on purpose: a domain

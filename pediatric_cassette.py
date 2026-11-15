@@ -38,6 +38,14 @@ HARD_RULE_RISK = 0.5
 #: The engine whose hard rules carry that weight in this domain.
 HARD_RULE_ENGINE = "heuristic"
 
+#: Defaults for how a hard rule is confirmed (see PediatricCassette). A lone hard-rule reading may be a sensor
+#: artefact, so it is judged as the fusion judges it; the same rule firing again within this many of the patient's
+#: readings, or any other abnormal finding beside it, is not an artefact and holds the regime at WARNING. All three are
+#: the clinician's to change; the defaults are a starting point, not a clinical finding.
+DEFAULT_HARD_RULE_CONFIRM_WINDOW = 3
+DEFAULT_HARD_RULE_CORROBORATION = True
+DEFAULT_HARD_RULE_CORROBORATION_MARGIN = 0.05
+
 #: What a faulted channel is read as so the OTHER channels can still be
 #: assessed. Each value is inside every PEDIATRIC_NORMS window and clear of
 #: every heuristic, bayesian, behavioral and select_engines trigger, so a
@@ -85,23 +93,50 @@ class PediatricCassette:
     """Pediatric deterioration: the original domain, behind the seam."""
 
     name = "pediatric_deterioration"
-    version = "1.1.0"  # 1.1.0: supplies mask_faults
+    # 1.1.0: supplies mask_faults. The hard-rule confirmation below is branch logic attested by the source revision, as
+    # evaluate's other branches are; a setting that is not at its default is recorded in `identity_extras`, and any lift
+    # it causes in the decision's `safety_bypass` note. The version stays, so recorded fingerprints keep their meaning.
+    version = "1.1.0"
 
-    def __init__(self, engine_gate: str = DEFAULT_ENGINE_GATE) -> None:
+    def __init__(self, engine_gate: str = DEFAULT_ENGINE_GATE, *,
+                 hard_rule_confirm_window: int = DEFAULT_HARD_RULE_CONFIRM_WINDOW,
+                 hard_rule_corroboration: bool = DEFAULT_HARD_RULE_CORROBORATION,
+                 hard_rule_corroboration_margin: float = DEFAULT_HARD_RULE_CORROBORATION_MARGIN) -> None:
         if engine_gate not in ENGINE_GATES:
             raise ValueError(
                 f"unknown engine_gate {engine_gate!r}; expected one of {sorted(ENGINE_GATES)}"
             )
         self.engine_gate = engine_gate
+        if isinstance(hard_rule_confirm_window, bool) or not isinstance(hard_rule_confirm_window, int) \
+                or hard_rule_confirm_window < 1:
+            raise ValueError(f"hard_rule_confirm_window must be a whole number of readings, 1 or more, "
+                             f"not {hard_rule_confirm_window!r}")
+        if not isinstance(hard_rule_corroboration, bool):
+            raise ValueError(f"hard_rule_corroboration must be True or False, not {hard_rule_corroboration!r}")
+        if isinstance(hard_rule_corroboration_margin, bool) or not isinstance(hard_rule_corroboration_margin, (int, float)) \
+                or not 0 <= hard_rule_corroboration_margin <= 1:                 # NaN and infinity fail this too
+            raise ValueError(f"hard_rule_corroboration_margin must be a number from 0 to 1, "
+                             f"not {hard_rule_corroboration_margin!r}")
+        self._hard_rule_confirm_window = hard_rule_confirm_window
+        self._hard_rule_corroboration = hard_rule_corroboration
+        self._hard_rule_corroboration_margin = float(hard_rule_corroboration_margin)
 
     @property
     def identity_extras(self) -> Dict[str, str]:
         """What the core records under this cassette's identity beyond name and
         version. Empty for the default gate, so default entries and fingerprints
-        are exactly what they were; the gate's name for any other."""
-        if self.engine_gate == DEFAULT_ENGINE_GATE:
-            return {}
-        return {"engine_gate": self.engine_gate}
+        are exactly what they were; the gate's name for any other. Likewise each hard-rule setting that is not at its
+        default, recorded by name, so a verdict made under a longer window or without corroboration says so."""
+        extras: Dict[str, str] = {}
+        if self.engine_gate != DEFAULT_ENGINE_GATE:
+            extras["engine_gate"] = self.engine_gate
+        if self._hard_rule_confirm_window != DEFAULT_HARD_RULE_CONFIRM_WINDOW:
+            extras["hard_rule_confirm_window"] = str(self._hard_rule_confirm_window)
+        if self._hard_rule_corroboration != DEFAULT_HARD_RULE_CORROBORATION:
+            extras["hard_rule_corroboration"] = str(self._hard_rule_corroboration).lower()
+        if self._hard_rule_corroboration_margin != DEFAULT_HARD_RULE_CORROBORATION_MARGIN:
+            extras["hard_rule_corroboration_margin"] = repr(self._hard_rule_corroboration_margin)
+        return extras
 
     # -- identity -----------------------------------------------------
     def subject_id(self, obs: Any) -> str:
@@ -191,6 +226,25 @@ class PediatricCassette:
         for out in outputs:
             if out.engine_name == HARD_RULE_ENGINE:
                 return out.risk_score >= HARD_RULE_RISK
+        return False
+
+    # -- how a hard rule is confirmed (clinician settings) -------------
+    def hard_rule_confirm_window(self) -> int:
+        """How many of a patient's readings, the current one included, make a repeat of the hard rule. 1 means
+        every hard rule holds the floor at once, with no wait to see whether it was an artefact."""
+        return self._hard_rule_confirm_window
+
+    def hard_rule_corroborated(self, outputs: List[RiskOutput]) -> bool:
+        """Is the hard rule accompanied by another abnormal finding in the same assessment?
+
+        Each heuristic finding adds to its score, and the hard rule itself is worth exactly HARD_RULE_RISK, so a
+        score above it by at least the margin means something else was abnormal too. An artefact on one sensor does
+        not raise a child's respiratory rate or temperature."""
+        if not self._hard_rule_corroboration:
+            return False
+        for out in outputs:
+            if out.engine_name == HARD_RULE_ENGINE and not out.abstained:
+                return out.risk_score >= HARD_RULE_RISK + self._hard_rule_corroboration_margin
         return False
 
     def labels(self) -> Mapping[str, str]:
