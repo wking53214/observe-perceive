@@ -81,6 +81,16 @@ def _canon(value: Any) -> Any:
     return int(value) if float(value).is_integer() else float(value)
 
 
+def _canon_norm(group: str, key: str, value: Any) -> Any:
+    """A norm in the form the default table uses for that key (a float where the default is a float, a whole number
+    otherwise), so the text the engines print for a row nobody touched is exactly what it was, and 125 and 125.0 are one
+    value in the digest."""
+    base = PEDIATRIC_NORMS.get(group, {}).get(key)
+    if isinstance(base, float) and isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return _canon(value)
+
+
 def _plain_norms(value: Any) -> Dict[str, Dict[str, Any]]:
     if not isinstance(value, Mapping) or any(not isinstance(row, Mapping) for row in value.values()):
         raise SettingsError("norms must be a mapping of age group to a mapping of reference values")
@@ -104,6 +114,9 @@ class ClinicalSettings:
     hard_rule_corroboration: bool = DEFAULT_HARD_RULE_CORROBORATION
     hard_rule_corroboration_margin: float = DEFAULT_HARD_RULE_CORROBORATION_MARGIN
 
+    def __hash__(self) -> int:
+        return hash(self.digest())
+
     def __post_init__(self) -> None:
         # Anything malformed is a SettingsError with a reason, never a TypeError from deep inside.
         try:
@@ -117,7 +130,7 @@ class ClinicalSettings:
         # Validated: put numbers in canonical form and freeze the norms table, so the cassette and the record
         # can never disagree about the values in force and nothing can change them after construction.
         object.__setattr__(self, "norms", MappingProxyType({
-            g: MappingProxyType({k: _canon(v) for k, v in row.items()}) for g, row in self.norms.items()}))
+            g: MappingProxyType({k: _canon_norm(g, k, v) for k, v in row.items()}) for g, row in self.norms.items()}))
         object.__setattr__(self, "age_group_upper_months", tuple(_canon(x) for x in self.age_group_upper_months))
         for name in ("max_age_months", "critical_o2_below", "hypothermia_below", "hard_rule_corroboration_margin"):
             object.__setattr__(self, name, _canon(getattr(self, name)))
@@ -274,8 +287,11 @@ class ClinicalSettings:
               base["hard_rule_corroboration_margin"], True)           # harder to count as corroborated
         for key in ("critical_o2_below", "hypothermia_below"):
             check(key, mine[key], base[key], False)
-        # A shorter window lets fewer repeats count (1 turns repeat confirmation off), so it is the weaker way.
-        check("hard_rule_confirm_window", mine["hard_rule_confirm_window"], base["hard_rule_confirm_window"], False)
+        # A window of 1 confirms every hard rule at once, which alerts MORE; from 2 up, a longer window lets more repeats
+        # count, so a window of 2 (fewer than the default) is the only weaker way. Checked against the engine's rule
+        # (`window <= 1 or repeated or corroborated`).
+        if 1 < mine["hard_rule_confirm_window"] < base["hard_rule_confirm_window"]:
+            weak.append("hard_rule_confirm_window")
         # A higher bound (or none) means fewer patients get the out-of-population finding.
         inf = float("inf")
         check("max_age_months", inf if mine["max_age_months"] is None else mine["max_age_months"],

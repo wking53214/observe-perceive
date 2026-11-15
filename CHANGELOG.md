@@ -11,7 +11,7 @@
   mapping or an object); a bad or missing file stops the system rather than running on the defaults. Every `ClinicalDecision` has
   `settings_digest`; every non-default value is named in the OBSERVE record's cassette identity, and the ones that alert less are
   listed and logged. **New default behaviour:** a reading above 216 months is assessed exactly as before but reported at WARNING at
-  least with the finding `OUTSIDE_SUPPORTED_POPULATION`, paged once per window, never lowering a tracked regime
+  least with the finding `OUTSIDE_SUPPORTED_POPULATION`, paged once (again only after a reading in scope), never lowering a tracked regime
   (`outside_population=assess_anyway` or `max_age_months` turns it off). Engines gained keyword arguments with the old values as
   defaults; the hard-rule cassette arguments still work and still record under the same names (given beside `settings` they raise).
   No pre-existing test edited. Not done: school-age and adolescent norm rows (clinical content, needs sign-off), the remaining

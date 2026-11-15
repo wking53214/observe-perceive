@@ -480,7 +480,8 @@ class RiskAdapters:
             triggered.append(f"FEVER: {vitals.temperature}°C > {thresh['temp_high']}°C")
             score += 0.1
         elif vitals.temperature < hypothermia_below:
-            triggered.append(f"HYPOTHERMIA: {vitals.temperature}°C < {hypothermia_below:.1f}°C")
+            line = f"{hypothermia_below:.1f}" if round(hypothermia_below, 1) == hypothermia_below else f"{hypothermia_below:g}"
+            triggered.append(f"HYPOTHERMIA: {vitals.temperature}°C < {line}°C")
             score += 0.4
 
         score = min(score, 1.0)
@@ -1734,17 +1735,28 @@ class ObserveClinicalEngine:
         floor_of = cassette_optional_member(self._cassette, "regime_floor")
         floor = floor_of(recorded) if floor_of else None
         floor_notes: List[str] = []
+        # The floor is a standing condition (a patient who stays out of the supported population stays so), so it pages
+        # ONCE, when it first applies, and again only after a reading that is back in scope. It does not page on a
+        # timer: a timed dedup would re-page an adult every window for as long as they are monitored.
+        with self._state_lock:
+            if floor:
+                stamps = self._patient_fault_paged.setdefault(subject, {})
+                first_time = "population" not in stamps
+                stamps.setdefault("population", recorded.timestamp)
+            else:
+                first_time = False
+                stamps = self._patient_fault_paged.get(subject)
+                if stamps:
+                    stamps.pop("population", None)
         if floor:
             floor_value, floor_note = floor
             floor_notes.append(floor_note)
             floor_regime = OperationalRegime(floor_value)
             if _REGIME_SEVERITY[final_regime] < _REGIME_SEVERITY[floor_regime]:
-                # Reached only when the tracked regime is also below the floor (tracking just produced final_regime), so
-                # this is the "sensor" page kind: a patient lifted from below the floor to the reported floor.
                 final_regime = floor_regime
                 fused_risk = max(fused_risk, REGIME_RISK_FLOOR[final_regime.value])
-                if not escalation:
-                    escalation = self._fault_page(subject, recorded.timestamp, True, False)
+                if first_time and not escalation:
+                    escalation = True
 
         if escalation:
             moved_up_from_escalated = (_REGIME_SEVERITY[prior_regime] >= _REGIME_SEVERITY[OperationalRegime.WARNING]

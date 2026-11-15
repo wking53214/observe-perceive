@@ -43,12 +43,12 @@ system = build_single_hospital_system(alert_human=page_charge_nurse, settings="u
 |---|---|---|---|
 | `max_age_months` | 216 (18 y) | Upper bound of the supported pediatric population. `null` removes it. **New default.** | higher, or `null` |
 | `outside_population` | `alert` | `alert`: an older patient is still assessed on every channel, never scored lower, but reported at WARNING at least with a named finding. `assess_anyway`: no finding. **New default behaviour.** | `assess_anyway` |
-| `require_age` | false | true: a reading with no usable age is a finding instead of "generic norms" | n/a |
+| `require_age` | false | true: a reading with no usable age is a finding instead of "generic norms". Independent of `outside_population` | n/a |
 | `age_group_upper_months` | 3, 12, 36 | Ends of the neonatal, infant and toddler groups | any change is listed: which way it goes depends on the child |
 | `norms.<group>.hr_high / hr_low / rr_high / o2_low / temp_high` | pediatric table | Per-age-group reference values; name only the ones you change. Groups: neonatal, infant, toddler, child, generic | hr_high, rr_high, temp_high higher; hr_low, o2_low lower |
 | `critical_o2_below` | 88 | SpO2 below this is the hard rule | lower |
 | `hypothermia_below` | 35.0 | Temperature below this is hypothermia | lower |
-| `hard_rule_confirm_window` | 3 | A hard rule that fires again within this many of the patient's readings holds WARNING; 1 means repeats do not count | lower |
+| `hard_rule_confirm_window` | 3 | A hard rule that fires again within this many of the patient's readings holds WARNING. 1 holds WARNING on a lone hard-rule reading at once (alerts MORE); 2 lets fewer repeats count than 3 | 2 only (1 and anything above 3 alert more) |
 | `hard_rule_corroboration` | true | A hard rule beside another abnormal finding holds WARNING at once | false |
 | `hard_rule_corroboration_margin` | 0.05 | How far above the hard rule's own score the heuristic must be to count as corroborated | higher |
 
@@ -62,7 +62,9 @@ the settings, never both (the cassette raises).
 - **assessed exactly as before**, on every channel, and tracked exactly as before, so a CRITICAL is still held and a
   deteriorating adult is never scored less severely for being out of scope;
 - **reported at WARNING at least**, with the finding `OUTSIDE_SUPPORTED_POPULATION` first in the rules, so a person looks;
-- **paged once per window** (the same de-duplication a sensor fault uses), and a later CRITICAL still pages;
+- **paged once**, when the finding first applies to the patient, and again only after a reading that is back in scope (not
+  on a timer: a timed window would re-page a standing adult every five minutes, which a probe showed before this was
+  fixed). An improving adult is reported at the floor and is not paged again; a later CRITICAL still pages;
 - recorded in the audit entry under `regime_floor` (present only when it applied, so other entries keep their shape).
 
 It is a floor on the report, not a data fault: nothing about the reading is untrustworthy, so no channel is masked. It
@@ -76,8 +78,9 @@ person at WARNING with the finding, rather than reassured or falsely alarmed by 
 - Healthy 40 year old, heart rate 70: before, `stable` with `BRADYCARDIA: 70 < 100` and no note; now `warning`, paged once,
   `OUTSIDE_SUPPORTED_POPULATION` first.
 - Adult at heart rate 135: before `stable` (score 0.2, no note); now `warning`, paged, finding first.
-- 86 tests in `test_clinical_settings.py`, and a mutation check of 50 changes to the new code with none surviving (six first
-  survived; they were closed by tests, and one by removing code that could never differ).
+- 92 tests in `test_clinical_settings.py`, and a mutation check of 50 changes to the new code with none surviving (six first
+  survived; they were closed by tests, and one by removing code that could never differ). After the review the check was
+  rerun on 57 changes, none surviving.
 
 ## Limitations and unknowns
 
@@ -90,6 +93,9 @@ person at WARNING with the finding, rather than reassured or falsely alarmed by 
   risk-to-regime bands, dwell count and lock seconds, the physical-plausibility bounds on vitals, and the heuristic's own
   point values. The engine-selection gate still uses its own heart rate and SpO2 cutoffs. They follow the same pattern when
   they are moved.
+- `settings_weaker` is recorded when any setting outside the three hard-rule ones is also non-default. A cassette tuned only
+  through the hard-rule values records them under their own names, as it always did (a non-default value is visible by name),
+  without the `settings_weaker` list. Making it uniform would change recorded identities that already exist, so it is not done.
 - The production profile does not yet require that a deployment's settings be supplied or recorded; `ClinicalGovernanceSystem`
   takes them. `GovernanceOrchestrator` is given an engine by its caller, so it uses whatever cassette that engine has.
 - Whether 18 years is the right default bound, and WARNING the right floor, are the clinician's to decide.

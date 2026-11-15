@@ -165,8 +165,8 @@ def test_weakenings_name_only_the_settings_that_alert_less():
 
 
 @pytest.mark.parametrize("change,weaker", [
-    ({"hard_rule_confirm_window": 1}, True),          # 1 turns repeat confirmation off
-    ({"hard_rule_confirm_window": 2}, True),
+    ({"hard_rule_confirm_window": 1}, False),         # 1 confirms every hard rule at once: it alerts MORE
+    ({"hard_rule_confirm_window": 2}, True),          # fewer repeats count than at the default of 3
     ({"hard_rule_confirm_window": 10}, False),        # a longer window lets MORE repeats count
     ({"max_age_months": 300}, True),                  # fewer patients get the finding
     ({"max_age_months": None}, True),
@@ -205,11 +205,34 @@ def test_default_settings_record_nothing_and_keep_the_shared_engine_table():
     assert c.engines() is pediatric_cassette._ENGINES and c.settings.weakenings() == []
 
 
-def test_default_engine_outputs_are_identical_through_the_cassette():
-    for age in (1, 6, 24, 60, 150):
-        for v in (snap(168, 83.0, 46, 39.5, age), snap(60, 95.0, 20, 34.0, age), snap(age=age)):
-            assert RiskAdapters.heuristic(v).triggered_rules == PediatricCassette().engines()["heuristic"](v).triggered_rules
-            assert RiskAdapters.bayesian(v).risk_score == PediatricCassette().engines()["bayesian"](v).risk_score
+def test_default_engine_outputs_are_identical_through_the_tuned_path_at_default_values():
+    """At defaults the cassette shares the module table, so that alone proves nothing. Run the path a tuned cassette
+    uses, with every value at its default, and compare text and score: a setting must change only what it names."""
+    from functools import partial
+    d = ClinicalSettings()
+    tuned_h = partial(RiskAdapters.heuristic, norms=d.norms, age_bounds=d.age_group_upper_months,
+                      critical_o2_below=d.critical_o2_below, hypothermia_below=d.hypothermia_below)
+    tuned_b = partial(RiskAdapters.bayesian, norms=d.norms, age_bounds=d.age_group_upper_months)
+    for age in (None, 1, 6, 24, 60, 150, 480):
+        for v in (snap(168, 83.0, 46, 39.5, age), snap(60, 95.0, 20, 34.0, age), snap(age=age), snap(100, 98, 24, 39.2, age)):
+            assert RiskAdapters.heuristic(v).triggered_rules == tuned_h(v).triggered_rules
+            assert RiskAdapters.heuristic(v).risk_score == tuned_h(v).risk_score
+            assert RiskAdapters.bayesian(v).risk_score == tuned_b(v).risk_score
+
+
+def test_tuning_one_value_does_not_rewrite_the_text_of_rows_nobody_touched():
+    fever = snap(100, 98, 24, 39.2, 60)
+    base = RiskAdapters.heuristic(fever).triggered_rules
+    out = engine(critical_o2_below=89.0).evaluate(fever).triggered_rules
+    assert [r for r in out if r.startswith("FEVER")] == [r for r in base if r.startswith("FEVER")]
+    assert any(r == "HYPOTHERMIA: 34.0°C < 35.0°C" for r in engine(critical_o2_below=89.0).evaluate(snap(temp=34.0, pid="h")).triggered_rules)
+    odd = engine(hypothermia_below=34.96).evaluate(snap(temp=34.0, pid="odd")).triggered_rules
+    assert any(r == "HYPOTHERMIA: 34.0°C < 34.96°C" for r in odd)               # the line in force, not a rounded one
+
+
+def test_settings_are_hashable():
+    assert hash(ClinicalSettings()) == hash(ClinicalSettings.from_mapping({"critical_o2_below": 88.0}))
+    assert hash(ClinicalSettings()) != hash(ClinicalSettings(max_age_months=300))
 
 
 def test_a_cassette_refuses_something_that_is_not_settings():
@@ -365,13 +388,57 @@ def test_an_over_age_patient_keeps_the_critical_hold_a_child_gets():
         assert seen == [OperationalRegime.CRITICAL] * 3, (age, seen)
 
 
-def test_the_floor_pages_once_per_window_and_never_suppresses_a_later_critical_page():
+def test_the_floor_pages_once_however_long_the_patient_stays_out_of_scope():
+    """Measured before this fix: the floor reused the fault dedup window, so a standing adult was re-paged every 5 minutes."""
     e = ObserveClinicalEngine()
     pages = [e.evaluate(VitalsSnapshot("A", T0 + timedelta(minutes=m), 110, 98.0, 25, 37.0, {"age_months": 480})
-                        ).escalation_required for m in (0, 1, 2)]
-    assert pages == [True, False, False]                                         # one page, then held
+                        ).escalation_required for m in (0, 1, 2, 7, 14, 60, 600)]
+    assert pages == [True] + [False] * 6                                         # one page, then held, indefinitely
     crit = e.evaluate(VitalsSnapshot("A", T0 + timedelta(minutes=3), 168, 83.0, 46, 39.5, {"age_months": 480}))
     assert crit.regime == OperationalRegime.CRITICAL and crit.escalation_required
+
+
+def test_an_improving_adult_is_not_paged_again_as_a_new_escalation():
+    """Review finding: tracking fell CRITICAL to STABLE, the floor lifted the report, and it paged as new_escalation."""
+    def run(age):
+        e, out = ObserveClinicalEngine(), []
+        for i, row in enumerate([(168, 83.0, 46, 39.5)] + [(110, 98.0, 25, 37.0)] * 12):
+            out.append(e.evaluate(VitalsSnapshot("P", T0 + timedelta(minutes=6 * i), *row, {"age_months": age})))
+        return out
+    adult, child = run(480), run(100)
+    assert adult[0].regime == OperationalRegime.CRITICAL and adult[0].escalation_required
+    assert all(v.regime.value in ("critical", "warning") for v in adult)            # never reported below the floor
+    assert not any(v.escalation_required for v in adult[1:])                          # nobody is paged for improving
+    assert not any(v.escalation_kind == "new_escalation" for v in adult[1:])
+    assert [v.escalation_kind for v in adult] == [v.escalation_kind for v in child]  # same kinds as a child
+
+
+def test_the_floor_pages_again_only_after_the_patient_was_back_in_scope():
+    e = ObserveClinicalEngine()
+
+    def go(minute, age):
+        return e.evaluate(VitalsSnapshot("A", T0 + timedelta(minutes=minute), 110, 98.0, 25, 37.0, {"age_months": age}))
+    assert go(0, 480).escalation_required and not go(1, 480).escalation_required
+    assert go(2, 100).regime == OperationalRegime.STABLE                           # back in scope: no floor, no page
+    again = go(3, 480)
+    assert again.regime == OperationalRegime.WARNING and again.escalation_required  # out of scope again: told again
+
+
+def test_the_floor_state_is_put_back_when_an_evaluation_fails(monkeypatch):
+    e = ObserveClinicalEngine()
+    e.evaluate(snap(age=100, pid="A"))
+    before = {k: dict(v) for k, v in e._patient_fault_paged.items()}
+    monkeypatch.setattr(e, "_commit_state", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("ledger down")))
+    with pytest.raises(RuntimeError):
+        e.evaluate(snap(age=480, pid="A"))
+    assert {k: dict(v) for k, v in e._patient_fault_paged.items()} == before        # the page is not spent by a crash
+
+
+def test_require_age_does_not_depend_on_the_population_action():
+    s = ClinicalSettings(require_age=True, outside_population="assess_anyway")
+    floor = PediatricCassette(settings=s).regime_floor(snap(age=None))
+    assert floor is not None and "requires the patient's age" in floor[1]
+    assert PediatricCassette(settings=s).regime_floor(snap(age=480)) is None         # the bound is still off
 
 
 def test_the_floor_never_writes_the_tracked_regime():
