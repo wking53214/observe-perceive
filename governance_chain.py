@@ -88,6 +88,19 @@ def request_state(request) -> Dict[str, Any]:
     }
 
 
+def observation_digest(vitals) -> Optional[str]:
+    """A digest of the observation a request carries, so the request commitment covers WHICH reading justified the action.
+
+    None when there is no observation. It covers every field of the snapshot (patient, time, the four readings and the
+    reading's own context), in the canonical form the other commitments use, so two requests that differ only in their
+    vitals no longer share a commitment (measured before this: calm and CRITICAL vitals gave the identical commitment)."""
+    if vitals is None:
+        return None
+    import dataclasses
+    state = dataclasses.asdict(vitals) if dataclasses.is_dataclass(vitals) else dict(vars(vitals))
+    return hashlib.sha256(canonical_repr(state).encode("utf-8")).hexdigest()
+
+
 def approval_state(approval, artifact_id: str, artifact_hash: str, producer: str, lineage: list) -> Dict[str, Any]:
     """The state an ExecutionApproval commitment covers (see approve_execution)."""
     return {
