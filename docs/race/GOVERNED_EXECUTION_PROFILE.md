@@ -36,7 +36,7 @@ Failure behavior: fail closed at construction (`ProductionProfileError`, a `Valu
 
 ## Requirement the profile cannot prove (stated, not hidden)
 
-The profile checks that a notification policy exists and is well formed. It cannot check that a scheduler calls `EscalationDesk.sweep()`, that a real person holds each responder key, or that the numbers in the policy are clinically sensible. Those are operator duties and a hospital decision. See `docs/race/HUMAN_ESCALATION_AND_RECEIPT_MODEL.md`.
+The profile checks that a notification policy exists and is well formed, and that a running `SweepRunner` is bound to the desk that pages. It cannot check that the runner's alarm channel reaches a person, that the process stays up, that a real person holds each responder key, or that the numbers in the policy are clinically sensible. Those are operator duties and a hospital decision. See `docs/race/HUMAN_ESCALATION_AND_RECEIPT_MODEL.md`.
 
 ## The two pipeline paths
 
