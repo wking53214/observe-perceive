@@ -88,6 +88,39 @@ def request_state(request) -> Dict[str, Any]:
     }
 
 
+_VITALS_FIELDS = ("patient_id", "timestamp", "heart_rate", "oxygen_saturation", "respiratory_rate", "temperature", "context")
+
+
+def observation_digest(vitals) -> Optional[str]:
+    """A digest of the observation a request carries, so the request commitment covers WHICH reading justified the action.
+
+    None when there is no observation. It covers every field of the snapshot (patient, time, the four readings and the
+    reading's own context), in the canonical form the other commitments use, so two requests that differ only in their vitals
+    no longer share a commitment (measured before this: calm and CRITICAL vitals gave the identical commitment).
+
+    It never raises and never copies a value that cannot be copied (a reading whose context holds a lock used to make the
+    whole request crash): fields are read one by one, and a reading that cannot be digested at all is marked so, not hidden.
+    Not covered: dictionary keys are compared as text, so ``{1: x}`` and ``{"1": x}`` share a digest."""
+    if vitals is None:
+        return None
+    import dataclasses
+    from collections.abc import Mapping
+    try:
+        if dataclasses.is_dataclass(vitals) and not isinstance(vitals, type):
+            state = {f.name: getattr(vitals, f.name) for f in dataclasses.fields(vitals)}
+        elif isinstance(vitals, Mapping):
+            state = dict(vitals)
+        elif hasattr(vitals, "__dict__"):
+            state = dict(vars(vitals))
+        else:
+            state = {name: getattr(vitals, name, None) for name in _VITALS_FIELDS}
+            if all(value is None for value in state.values()):
+                raise ValueError("nothing in it looks like a reading")      # else every such object would share one digest
+        return hashlib.sha256(canonical_repr(state).encode("utf-8")).hexdigest()
+    except Exception:  # noqa: BLE001 - a digest must never take the request down with it
+        return "undigestable:" + type(vitals).__name__
+
+
 def approval_state(approval, artifact_id: str, artifact_hash: str, producer: str, lineage: list) -> Dict[str, Any]:
     """The state an ExecutionApproval commitment covers (see approve_execution)."""
     return {
