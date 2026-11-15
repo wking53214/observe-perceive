@@ -94,8 +94,9 @@ log has a signer and a path that can be written. A bare `alert_human` beside a d
 
 ## Residual risks and open decisions
 
-- **Nothing calls `sweep()` for you.** If the scheduler dies, deadlines pass unnoticed. Alarm on
-  `desk.seconds_since_sweep()`. Decision needed: who owns the scheduler and the watchdog.
+- **The desk does not call `sweep()` itself.** `escalation_runner.SweepRunner` does, and its watchdog alarms when that stops;
+  `profile="production"` requires a running one (see `ESCALATION_SWEEP_RUNNER.md`). What it cannot cover: an alarm channel that does
+  not reach a person, the process itself dying, and the watchdog thread dying unobserved.
 - **The deadline uses the wall clock.** A clock step can delay or bring forward an escalation. A monotonic clock is a
   later hardening.
 - **Duplicate pages are possible** after a log failure, a timeout that actually delivered late, or a restart.

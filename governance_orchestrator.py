@@ -42,7 +42,8 @@ class GovernanceOrchestrator:
                  root_admission=None,
                  alert_human=None,
                  escalations=None,
-                 clinical_notification=None):
+                 clinical_notification=None,
+                 sweep_runner=None):
         """
         Initialize orchestrator with all governance systems.
 
@@ -117,6 +118,9 @@ class GovernanceOrchestrator:
                 returned, "failed" when nobody could be reached; acknowledgement
                 lives on the ticket, never in this field. Required by profile
                 "production". See docs/race/HUMAN_ESCALATION_AND_RECEIPT_MODEL.md.
+            sweep_runner: optional `escalation_runner.SweepRunner` bound to the same `escalations` desk. It is what calls
+                `sweep()` and alarms when that stops; the orchestrator only holds it so profile "production" can refuse
+                to start without a running one. Start it before building the orchestrator.
             clinical_notification: optional `clinical_notification.ClinicalNotificationSettings`,
                 used only with `escalations`. When OBSERVE reports an escalation EVENT on a
                 request and the settings say a person must be told (default: a new
@@ -166,6 +170,7 @@ class GovernanceOrchestrator:
         if escalations is not None and not callable(getattr(escalations, "raise_and_dispatch", None)):
             raise ValueError(f"escalations must be an EscalationDesk, not {type(escalations).__name__}")
         self.escalations = escalations
+        self.sweep_runner = sweep_runner
         # The latest OBSERVE verdict made on this thread during `_orchestrate`: if the pipeline raises (the strict
         # raise_on_* options), the escalation EVENT in that verdict is already spent and must still reach a person.
         self._seen = threading.local()
@@ -208,7 +213,7 @@ class GovernanceOrchestrator:
                 conservation_kernel=conservation_kernel, root_admission=root_admission,
                 observe_engine=observe_engine, receipts=receipts, execution_ledger=self.execution_ledger,
                 alert_human=alert_human, escalations=escalations, source_signers=source_signers,
-                guard_executor=guard_executor)
+                guard_executor=guard_executor, sweep_runner=sweep_runner)
             if problems:
                 raise ProductionProfileError(problems)
 

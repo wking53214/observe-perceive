@@ -14,8 +14,9 @@ checking IDENTITY and BEHAVIOUR, not shape:
   * OBSERVE is configured. Event-time source keys are registered.
   * The executor is guarded.
   * Someone can be told AND followed up: an EscalationDesk with a valid policy, a key for every responder, and a
-    durable signed log (human_escalation.py). It cannot prove that a scheduler calls `sweep()`; that stays an
-    operator duty, stated in docs/race/HUMAN_ESCALATION_AND_RECEIPT_MODEL.md.
+    durable signed log (human_escalation.py), swept by a running SweepRunner bound to that same desk whose watchdog
+    alarms through a channel of its own (escalation_runner.py). It cannot prove the alarm channel reaches a person, or that
+    the process stays up; see docs/race/ESCALATION_SWEEP_RUNNER.md.
 
 Every problem is reported together, so an operator fixes the wiring once. Nothing here is a clinical rule, a
 privacy rule or an authorization: it is a check that the controls the deployment claims to have are the
@@ -98,7 +99,7 @@ def _canary_problem(kernel: Any, root_admission: Any) -> Optional[str]:
 
 def production_problems(*, conservation_kernel: Any, root_admission: Any, observe_engine: Any, receipts: Any,
                         execution_ledger: Any, alert_human: Any, source_signers: Any,
-                        guard_executor: bool, escalations: Any = None) -> List[str]:
+                        guard_executor: bool, escalations: Any = None, sweep_runner: Any = None) -> List[str]:
     """Every reason this wiring is not a production wiring; empty if it is."""
     problems: List[str] = []
 
@@ -153,6 +154,20 @@ def production_problems(*, conservation_kernel: Any, root_admission: Any, observ
             problems.extend(f"escalation desk: {p}" for p in escalations.problems())
     if alert_human is not None:
         problems.append("alert_human is given beside the production escalation desk: use the desk alone")
+    if sweep_runner is None:
+        problems.append("no sweep runner: nothing calls EscalationDesk.sweep(), so a page nobody answers would never "
+                        "move to the next tier and nobody would be told that it had stopped")
+    else:
+        from escalation_runner import SweepRunner
+        if not isinstance(sweep_runner, SweepRunner):
+            problems.append(f"sweep_runner is a {type(sweep_runner).__name__}, not a SweepRunner")
+        else:
+            problems.extend(f"sweep runner: {p}" for p in sweep_runner.problems())
+            if escalations is not None and sweep_runner.desk is not escalations:
+                problems.append("the sweep runner is bound to a different desk from the orchestrator's: the desk that "
+                                "pages would never be swept")
+            if not sweep_runner.running:
+                problems.append("the sweep runner is not running: start it before building the orchestrator")
     if observe_engine is None:
         problems.append("no OBSERVE engine is configured")
     if not source_signers:
