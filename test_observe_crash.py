@@ -367,7 +367,11 @@ def test_a_log_handler_that_raises_after_the_ledger_write_neither_fails_the_asse
             if "ESCALATION" in record.getMessage():
                 fired.append(record.getMessage())
                 raise RuntimeError("log handler failed")
-    log, handler, level = logging.getLogger("OBSERVE"), Raises(), logging.getLogger("OBSERVE").level
+    log, handler = logging.getLogger("OBSERVE"), Raises()
+    # other test modules may have silenced logging for the whole process; this test needs the record to be emitted
+    saved = (log.level, log.disabled, logging.root.manager.disable)
+    logging.disable(logging.NOTSET)
+    log.disabled = False
     log.addHandler(handler)
     log.setLevel(logging.INFO)
     try:
@@ -376,7 +380,9 @@ def test_a_log_handler_that_raises_after_the_ledger_write_neither_fails_the_asse
         second = engine.evaluate(crit(1))
     finally:
         log.removeHandler(handler)
-        log.setLevel(level)
+        log.setLevel(saved[0])
+        log.disabled = saved[1]
+        logging.disable(saved[2])
     assert fired                                                         # the handler really did raise inside evaluate
     heads = [e["data"]["predecessor_state_commitment"] for e in engine.audit_ledger.entries
              if "predecessor_state_commitment" in e["data"]]
