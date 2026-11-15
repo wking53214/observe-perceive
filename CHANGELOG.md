@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **OBSERVE now runs first, in every profile, and the request commits to what it found.** Measured on `main`: advisory assessed the patient
+  after the action; a request refused at any earlier stage had no assessment and no page (a CRITICAL reading on a request the kernel refused
+  paged nobody); an action that raised was never followed by an assessment; and the request commitment said nothing about the assessment.
+  Now the reading is assessed once, before PERCEIVE, and `context["observe_assessment"]` (fingerprint, state commitment, regime, escalation,
+  unassessable; or `unavailable` with the error type) is part of the request, so the PERCEIVE ruling and the approvals chained to it cover it.
+  Crash policy: strict refuses before PERCEIVE and tells a person; advisory proceeds, tells a person and commits that there is none. Every
+  record carries the verdict or the failure whatever stage refused it, so a refused request's CRITICAL reading is paged. A failed action is
+  observed, so its chain is now valid and complete. `verify_result(..., observe=engine)` checks the assessment against the record, OBSERVE's
+  ledger and the reading. **Visible changes:** advisory order is OBSERVE then action; OBSERVE state advances for requests later refused;
+  every request with vitals has a new commitment; strict OBSERVE refusals happen before PERCEIVE (`governance_decision` is `None`). Edited
+  pre-existing tests: `test_chain_closure.py::test_a_failed_execution_carries_a_committed_outcome_that_says_it_failed` and
+  `test_chain_failure_paths.py::test_execution_failure_is_a_recorded_state_that_keeps_the_approval` (a failed execution's chain is now valid
+  and complete, no longer "not complete"; nothing else in them changed). Document: `docs/race/OBSERVE_FIRST_10B.md`.
+
 - **Clinicians can now adjust the clinical lines, and a patient above the supported population is no longer scored silently as a
   child.** Measured on `main`: every age from 36 months to 125 years used the "child" norms, so a healthy 40 year old at heart rate 70
   was reported with `BRADYCARDIA: 70 < 100` and nothing said the patient was out of scope. New `clinical_settings.ClinicalSettings`

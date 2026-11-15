@@ -254,3 +254,58 @@ def test_a_request_that_commits_to_no_assessment_cannot_carry_one():
     assert verify_result(result, kernel=o.conservation_kernel, perceive=o.perceive).valid
     result["observe_verdict"] = ObserveClinicalEngine().evaluate(vit("P1"))
     assert "assessment.none_recorded" in [c.name for c in verify_result(result).failed]
+
+
+# ---- 7. gaps a mutation check found --------------------------------------------------------------------------------------
+
+def test_a_later_refusal_still_carries_the_observe_failure():
+    o = orch(engine=Crashes(), alert_human=lambda a: None)
+    run(o, "f30", vit("P1"), exec_id="e1")
+    refused = run(o, "f30", vit("P1"), exec_id="e2")                          # refused by the kernel: duplicate artifact
+    assert refused["status"] == "REJECTED" and refused["observe_error"].startswith("RuntimeError")
+    assert refused.get("observe_verdict") is None
+
+
+def test_a_recorded_assessment_replayed_on_a_fresh_orchestrator_is_not_a_mismatch():
+    first = run(orch(), "f31", vit("P1", **CRIT))
+    replay = run(orch(), "f31", vit("P1", **CRIT),
+                 ctx={"observe_assessment": first["governance_request"].context["observe_assessment"]})
+    assert replay["status"] == "APPROVED_AND_EXECUTED"
+
+
+def test_the_advisory_profile_does_not_refuse_an_unassessable_reading():
+    import dataclasses
+    ran = []
+    bad = dataclasses.replace(vit("P1"), heart_rate=float("nan"), oxygen_saturation=float("nan"),
+                              respiratory_rate=float("nan"), temperature=float("nan"))
+    result = run(orch(), "f32", bad, ran=ran)
+    assert result["status"] == "APPROVED_AND_EXECUTED" and ran == ["ACTION"] and result["observe_verdict"].unassessable
+
+
+def test_an_outer_call_keeps_its_observe_failure_when_an_inner_call_ran_inside_the_action():
+    o = orch(engine=Crashes(), alert_human=lambda a: None)
+
+    def action(ctx):
+        o.orchestrate_request(ChainArtifact("f33-inner"), "escalate", lambda c: {"status": "done"},
+                              vitals_snapshot=None, context={"execution_id": "e-inner"})
+        raise IOError("downstream unavailable")
+    result = o.orchestrate_request(ChainArtifact("f33"), "escalate", action, vitals_snapshot=vit("P1"),
+                                   context={"execution_id": "e-f33"})
+    assert result["status"] == "EXECUTION_FAILED" and result["observe_error"].startswith("RuntimeError")
+
+
+def test_the_orchestrator_verifies_with_its_own_engine_on_the_way_out():
+    result = run(orch(), "f34", vit("P1", **CRIT))
+    names = [c["name"] for c in result["chain_verification"]["checks"]]
+    assert "assessment.in_observe_ledger" in names and "assessment.matches_reading" in names
+
+
+def test_a_verdict_with_another_state_commitment_or_regime_fails_verification():
+    import dataclasses
+    from observe_consolidated import OperationalRegime
+    o = orch()
+    result = run(o, "f35", vit("P1", **CRIT))
+    original = result["observe_verdict"]
+    for change in ({"state_commitment": "0" * 64}, {"regime": OperationalRegime.STABLE}):
+        result["observe_verdict"] = dataclasses.replace(original, **change)
+        assert "assessment.matches_verdict" in [c.name for c in verify_result(result, observe=o.observe_engine).failed], change
