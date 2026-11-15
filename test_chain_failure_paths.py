@@ -96,10 +96,12 @@ def test_execution_failure_is_a_recorded_state_that_keeps_the_approval(orchestra
     assert result["execution_status"] == "failed" and "IOError" in result["execution_error"] or "OSError" in result["execution_error"]
     assert result["execution_approval"] is not None and result["conservation_decision"] is not None
     assert result["executed_at"]["started"] and result["executed_at"]["finished"]
-    assert result["audit_chain_valid"] is False
+    # OBSERVE runs first now, so the failed attempt was observed: the chain is valid and complete. (It used to be neither,
+    # only because OBSERVE ran after the action and never ran when the action raised.) Status says it failed.
+    assert result["audit_chain_valid"] is True
     # The links that exist still verify: the failure did not corrupt the record.
     assert result["chain_verification"]["valid"], result["chain_verification"]["failed"]
-    assert result["chain_verification"]["complete"] is False
+    assert result["chain_verification"]["complete"] is True
 
 
 def test_execution_failure_can_raise_on_request(perceive, kernel):
