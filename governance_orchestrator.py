@@ -12,6 +12,7 @@ Central orchestrator that routes requests through:
 
 import logging
 import math
+import threading
 from datetime import datetime, timezone
 
 from governance_contracts import CONTRACT_VERSION
@@ -40,7 +41,8 @@ class GovernanceOrchestrator:
                  enforce_advisory_violations: bool = False,
                  root_admission=None,
                  alert_human=None,
-                 escalations=None):
+                 escalations=None,
+                 clinical_notification=None):
         """
         Initialize orchestrator with all governance systems.
 
@@ -115,6 +117,13 @@ class GovernanceOrchestrator:
                 returned, "failed" when nobody could be reached; acknowledgement
                 lives on the ticket, never in this field. Required by profile
                 "production". See docs/race/HUMAN_ESCALATION_AND_RECEIPT_MODEL.md.
+            clinical_notification: optional `clinical_notification.ClinicalNotificationSettings`,
+                used only with `escalations`. When OBSERVE reports an escalation EVENT on a
+                request and the settings say a person must be told (default: a new
+                escalation at CRITICAL, a severity increase, an unassessable reading), a
+                ticket is opened and the record gains `clinical_notification` (reason,
+                status, ticket). Giving settings without `escalations` is refused. A
+                request refused before OBSERVE ran has no verdict and no notification.
         """
         # 1.3.0 profile. "advisory" is the historical default: every check
         # runs and records, only refusals refuse. "strict" turns every
@@ -154,7 +163,22 @@ class GovernanceOrchestrator:
         if alert_human is not None and escalations is not None:
             raise ValueError("give alert_human or escalations, not both: there must be no doubt which channel tells a person")
         self.alert_human = alert_human
+        if escalations is not None and not callable(getattr(escalations, "raise_and_dispatch", None)):
+            raise ValueError(f"escalations must be an EscalationDesk, not {type(escalations).__name__}")
         self.escalations = escalations
+        # The latest OBSERVE verdict made on this thread during `_orchestrate`: if the pipeline raises (the strict
+        # raise_on_* options), the escalation EVENT in that verdict is already spent and must still reach a person.
+        self._seen = threading.local()
+        if clinical_notification is not None and escalations is None:
+            raise ValueError("clinical_notification settings need an escalation desk to notify through")
+        from clinical_notification import ClinicalNotificationSettings
+        self.clinical_notification = clinical_notification or ClinicalNotificationSettings()
+        settings_problems = self.clinical_notification.problems()
+        if settings_problems:
+            raise ValueError("clinical_notification settings refused: " + "; ".join(settings_problems))
+        if escalations is not None and self.clinical_notification.silent:
+            logger.critical("[Orchestrator] every clinical notification is switched off: no escalation event will "
+                            "reach a person")
         # The execution stage (Phase 5) used to call the caller's function
         # unguarded: an exception there left NO record at all, after
         # Conservation had verified and execution had been approved. Now a
@@ -399,6 +423,40 @@ class GovernanceOrchestrator:
         })
         return result
 
+    def _clinical_notice(self, verdict, vitals_snapshot, request, record_status):
+        """Open a ticket when OBSERVE reported an escalation event the settings say a person must be told about.
+        Returns {reason, status, ticket} or None. Never raises and never changes the outcome: telling a person is
+        added to the record, not a gate on it."""
+        try:
+            if verdict is None or not getattr(verdict, "escalation_required", False):
+                return None
+            from clinical_notification import notification_reason, notify, ticket_context
+            unassessable = bool(getattr(verdict, "unassessable", False))
+            reason = notification_reason(
+                self.clinical_notification, regime=verdict.regime.value, escalation_required=True,
+                escalation_kind=getattr(verdict, "escalation_kind", ""), unassessable=unassessable)
+            if reason is None:
+                return None
+            context = ticket_context(
+                reason=reason, patient_id=getattr(vitals_snapshot, "patient_id", None),
+                regime=verdict.regime.value, escalation_kind=getattr(verdict, "escalation_kind", ""),
+                previous_regime=getattr(verdict, "previous_regime", ""), risk_score=verdict.risk_score,
+                triggered_rules=verdict.triggered_rules, unassessable=unassessable,
+                observe_audit_hash=verdict.audit_hash, record_status=record_status)
+            ticket, status = notify(self.escalations, context=context,
+                                    request_id=getattr(request, "request_id", None),
+                                    artifact_id=getattr(request, "artifact_id", None))
+            return {"reason": reason, "status": status, "ticket": ticket}
+        except Exception as exc:  # noqa: BLE001 - never alter the outcome
+            logger.critical(f"[Orchestrator] CLINICAL NOTIFICATION FAILED: {type(exc).__name__}: {exc}")
+            return {"reason": None, "status": "failed", "ticket": None}
+
+    def _notify_clinical(self, result: dict, vitals_snapshot) -> None:
+        verdict = result.get("observe_verdict") or getattr(self._seen, "verdict", None)
+        note = self._clinical_notice(verdict, vitals_snapshot, result.get("governance_request"), result.get("status"))
+        if note is not None:
+            result["clinical_notification"] = note
+
     def orchestrate_request(
         self,
         sentinel_artifact,
@@ -408,7 +466,18 @@ class GovernanceOrchestrator:
         context: dict = None
     ) -> dict:
         """Orchestrate the flow (see `_orchestrate`) and receipt the result."""
-        result = self._orchestrate(sentinel_artifact, operation_type, gsa815_operation_func, vitals_snapshot, context)
+        self._seen.verdict = None
+        try:
+            result = self._orchestrate(sentinel_artifact, operation_type, gsa815_operation_func, vitals_snapshot,
+                                       context)
+        except BaseException:
+            # raise_on_stage_error / raise_on_execution_error re-raise out of the pipeline. An escalation event OBSERVE
+            # already reported is spent (the next reading of this patient is not an event), so tell a person first.
+            if self.escalations is not None:
+                self._clinical_notice(getattr(self._seen, "verdict", None), vitals_snapshot, None, "raised")
+            raise
+        if self.escalations is not None:
+            self._notify_clinical(result, vitals_snapshot)      # before the receipt, so the receipt records it
         if self.receipts is not None:
             try:
                 result["receipt"] = self.receipts.append(result)
@@ -881,6 +950,7 @@ class GovernanceOrchestrator:
                 if self.observe_engine is None:
                     raise RuntimeError("no OBSERVE engine configured")
                 observe_verdict = self.observe_engine.evaluate(vitals_snapshot)
+                self._seen.verdict = observe_verdict
             except Exception as e:
                 # OP-2: in strict, OBSERVE is mandatory, so a crash is a refusal and a person is told, as for any
                 # other stage that raises instead of reaching a verdict.
@@ -1006,6 +1076,7 @@ class GovernanceOrchestrator:
                 if self.observe_engine is None:
                     raise RuntimeError("no OBSERVE engine configured")
                 observe_verdict = self.observe_engine.evaluate(vitals_snapshot)
+                self._seen.verdict = observe_verdict
                 logger.info(f"[Orchestrator] OBSERVE verdict: regime={observe_verdict.regime.value}")
             except Exception as e:
                 observe_error = f"{type(e).__name__}: {e}"

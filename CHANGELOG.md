@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **An escalation event now reaches a person, per settings the clinician controls.** Until now an approved CRITICAL
+  returned `escalate_approved` and told nobody, and a CRITICAL that governance BLOCKED (the default for a first
+  CRITICAL without `physician_approved`) returned `escalate_blocked` and told nobody either; only "governance crashed"
+  alerted. `clinical_notification.py` adds `ClinicalNotificationSettings` (`min_regime` default critical, and switches
+  for severity increase, blocked escalation, and unassessable reading, all defaulting on) and one decision rule used
+  by both `ClinicalGovernanceSystem` and `GovernanceOrchestrator`. With an `EscalationDesk` the event opens a ticket and
+  the decision or record gains `clinical_notification` (`reason`, `status`, `ticket`); the orchestrator sets it before
+  the receipt so the receipt records it. Only events notify, so a patient who stays critical is not paged again.
+  Without a desk, `ClinicalGovernanceSystem` now also calls `alert_human` for a blocked escalation. Notification
+  never changes an outcome. Edited pre-existing test (it asserted the exact behaviour changed):
+  `test_clinical_governance_system.py::test_status_is_named_on_every_normal_path_and_no_alert_fires` (a blocked
+  escalation now alerts; an approved one still does not), and `test_production_profile.py::test_something_that_is_not_a_desk_is_refused`
+  (a non-desk `escalations` is now refused at construction, as `guard_executor=False` already was, and by the profile's
+  own check). An independent review found a failing legacy pager corrupting the PERCEIVE audit chain, proactive
+  escalations paging every reading, and an event lost when strict re-raises; each is fixed and tested. Not done: a request refused before OBSERVE ran has no
+  verdict and so no notification; whether CRITICAL may bypass the `micropatch` physician gate is left as a
+  governance decision. Document: `docs/race/CLINICAL_ESCALATION_NOTIFICATION.md`.
+
 - **AUGUR's simulation screen is removed from the chain.** The optional veto-only screen
   (`simulation_screen`, `simulation_seed`, the PHASE 1b stage, the `simulation_screen` record key) is gone, and so
   are `augur_screen_adapter.py`, its test file and the demo stand-in `fixture_augur.py`; they are buried verbatim in
