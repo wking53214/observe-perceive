@@ -522,7 +522,31 @@ def test_the_notification_settings_pass_through_the_builders():
 
 # ---- decisions D4 and D6 -------------------------------------------------------------------------------------------------
 
-def test_a_critical_is_never_rate_limited_even_when_it_arrives_as_an_ordinary_escalation():
+def test_a_critical_the_engine_found_is_never_rate_limited_or_counted_even_as_an_ordinary_escalation():
+    from perceive_consolidated import PolicyEnforcementConfig, PolicyManifest, PerceiveGovernanceKernel, PolicyRequest
+    kernel = PerceiveGovernanceKernel(enforcement=PolicyEnforcementConfig(enforce_escalation_limits=True))
+    kernel.register_manifest(PolicyManifest(manifest_id="m", version="1", created_at=T0,
+                                            policies={"escalation_policy": {"max_daily": 1}}))
+    found = {"status": "assessed", "regime": "critical"}                    # what the orchestrator writes from OBSERVE's verdict
+
+    def ask(i, minutes=None, **ctx):
+        return kernel.evaluate_request(PolicyRequest(
+            request_id=f"R{i}", request_type="escalate_patient", subject_id="P", actor_id="t",
+            context={"justification": "x", **ctx}, timestamp=T0 + timedelta(minutes=i if minutes is None else minutes)))
+    assert ask(0, severity="warning").approved                              # the first escalation of the day
+    assert not ask(1, severity="warning").approved                          # a minute later: the 15-minute cooldown binds
+    exempt = ask(2, observe_assessment=found)
+    assert exempt.approved                                                  # a CRITICAL the engine found is exempt
+    assert not any("cooldown" in str(v).lower() for v in exempt.violations)
+    assert exempt.advisory_violations == []                                 # and the exemption is not an "advisory violation"
+    note = kernel.audit_ledger.entries[-1].policy_outputs[-1]               # but it is on the record
+    assert note["gate_name"] == "escalation_rate_policy" and "never rate-limited" in note["violations"][0]
+    for i in range(3, 16):                                                  # thirteen more CRITICALs (the day limit is 10): none is counted
+        assert ask(i, observe_assessment=found).approved
+    assert ask(600, minutes=600, severity="warning").approved               # so a WARNING hours later is not refused for them
+
+
+def test_a_caller_cannot_claim_the_exemption_and_a_warning_assessment_does_not_get_it():
     from perceive_consolidated import PolicyEnforcementConfig, PolicyManifest, PerceiveGovernanceKernel, PolicyRequest
     kernel = PerceiveGovernanceKernel(enforcement=PolicyEnforcementConfig(enforce_escalation_limits=True))
     kernel.register_manifest(PolicyManifest(manifest_id="m", version="1", created_at=T0,
@@ -532,20 +556,12 @@ def test_a_critical_is_never_rate_limited_even_when_it_arrives_as_an_ordinary_es
         return kernel.evaluate_request(PolicyRequest(
             request_id=f"R{i}", request_type="escalate_patient", subject_id="P", actor_id="t",
             context={"justification": "x", **ctx}, timestamp=T0 + timedelta(minutes=i)))
-    assert ask(0, severity="warning").approved                              # the first escalation of the day
-    again = ask(1, severity="warning")                                      # a minute later: the 15-minute cooldown binds
-    assert not again.approved
-    critical = ask(2, severity="critical")
-    assert critical.approved                                                # but not a CRITICAL
-    assert not any("cooldown" in str(v).lower() for v in critical.violations)
-    note = kernel.audit_ledger.entries[-1].policy_outputs[-1]               # the exemption is on the record
-    assert note["gate_name"] == "escalation_rate_policy" and "never rate-limited" in note["violations"][0]
-    claimed = ask(4, severity="critical", observe_assessment={"status": "assessed", "regime": "warning"})
-    assert not claimed.approved                                             # the engine's own assessment outranks a claim
-    hidden = ask(5, severity="warning", observe_assessment={"status": "assessed", "regime": "critical"})
-    assert hidden.approved                                                  # and a real CRITICAL is exempt whatever is claimed
-    by_regime = ask(3, regime="critical")                                   # the OBSERVE-style key counts too
-    assert by_regime.approved and "never rate-limited" in kernel.audit_ledger.entries[-1].policy_outputs[-1]["violations"][0]
+    assert ask(0, severity="warning").approved
+    for claim in ({"severity": "critical"}, {"regime": "critical"}, {"severity": "CRITICAL", "regime": "critical"},
+                  {"severity": "warning", "observe_assessment": {"status": "assessed", "regime": "warning"}},
+                  {"observe_assessment": {"status": "unavailable", "regime": "critical"}},
+                  {"observe_assessment": "critical"}, {"observe_assessment": ["critical"]}):
+        assert not ask(1, **claim).approved, claim                          # a claim or a non-critical assessment: still counted
 
 
 def test_a_failed_eviction_record_does_not_fail_another_patients_assessment_and_is_reported():
@@ -666,3 +682,38 @@ def test_a_cassette_without_the_hook_gets_no_note():
     from cassette import conformance_failures
     assert conformance_failures(PediatricCassette()) == []
     assert "advisory_notes" in __import__("cassette").OPTIONAL
+
+
+def test_the_hook_runs_after_the_assessment_so_a_slow_or_re_entrant_hook_cannot_fail_it():
+    seen = []
+    eng = ObserveClinicalEngine(max_tracked_patients=1)
+
+    def hook(event):
+        seen.append(event["kind"])
+        eng.evaluate(snap(age=24, pid="C"))                                 # re-enters the engine from the hook
+    eng._on_degraded = hook
+    eng.evaluate(snap(age=24, pid="A"))
+    real = eng.audit_ledger.append
+    eng.audit_ledger.append = lambda pid, action, data: (_ for _ in ()).throw(OSError("full")) if action == "STATE_EVICTED" else real(pid, action, data)
+    verdict = eng.evaluate(snap(age=24, pid="B"))
+    assert verdict.regime == OperationalRegime.STABLE and seen and seen[0] == "state_evicted_write_failed"
+
+
+def test_a_patient_evicted_by_another_evaluation_mid_assessment_gets_a_fresh_policy_not_a_crash():
+    eng = ObserveClinicalEngine(max_tracked_patients=10)
+    eng._get_policy("B")
+    real_touch = eng._touch_patient
+
+    def evicting_touch(pid):
+        real_touch(pid)
+        with eng._state_lock:
+            eng._patient_policies.pop(pid, None)                            # another thread evicts it right here
+    eng._touch_patient = evicting_touch
+    assert eng._get_policy("B").current_regime == OperationalRegime.STABLE
+
+
+def test_events_pushed_out_of_the_last_hundred_are_counted_not_lost_silently():
+    eng = ObserveClinicalEngine()
+    for i in range(105):
+        eng._degraded({"kind": "state_evicted_write_failed", "error": f"e{i}", "patient_id": f"p{i}"})
+    assert len(eng.degraded_events) == 100 and eng.degraded_dropped == 5
