@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Two integrity gaps closed (decisions D9 and D10).** (D10) PERCEIVE's audit hash covered `audit_id`, `timestamp`, `evaluated_gates` and
+  `final_verdict` only, so the patient id and request context in `request_snapshot`, the gate outputs and the manifest version and hash
+  could be rewritten with the chain still valid. Entries now carry `hash_version`: 1 is the old hash (every entry written before, which
+  loads unchanged), 2 also covers those fields (new entries). `verify_chain_integrity` now uses the one versioned `_hash`. (D9) Two
+  builds with different clinical behaviour could write the same `parameter_set_version` (the SpO2 line 88 and the hypothermia line 35 were
+  not in it). New `logic_stamp.logic_digest` hashes what scoring code does (syntax tree: node kinds, names, constants; not comments,
+  formatting, docstrings or logging; stable across Python 3.11 to 3.13, which `ast.dump` is not), and every decision records
+  `logic_version` (core plus cassette) in its provenance, inside the fingerprinted payload. **This changes every recorded decision
+  fingerprint once, on purpose,** and from now on whenever the scoring logic changes. The cassette version stays 1.1.0.
+  **Edited pre-existing tests:** `test_engine_gate_profile.py` (the 14 pinned fingerprints, regenerated for Python 3.12 and for 3.11, and
+  `logic_version` added to the expected entry keys), `test_fault_overlay.py` (`logic_version` added to the expected entry keys). Nothing
+  about any reading's verdict changed. Documents: `CHANGE_CONTROL_AND_VALIDATION.md`, `ADVERSARIAL_REGISTER.md`, `DATA_PRIVACY_AND_RESEARCH.md`.
+
 - **Four policy defaults changed, on the clinician's instruction.** (D1) The hard-rule confirmation window now defaults to 1: a lone SpO2
   below 88 holds WARNING at once (was 3: wait for a repeat). A cassette that supplies no window keeps the core's 3. Any window above 1 is
   now listed as weaker than the default. Cost, measured: `single_o2_spike_down` (a lone artefact) is now an accepted false alarm in the

@@ -463,7 +463,7 @@ class TestProvenanceOnTheOverlayPath(unittest.TestCase):
         verdict = engine.evaluate(make_vitals())
         data = engine.audit_ledger.entries[-1]["data"]
         self.assertEqual(set(data), {"vitals", "selected_engines", "outputs", "verdict", "parameter_set_version",
-                                     "cassette", *_PROVENANCE_KEYS})
+                                     "logic_version", "cassette", *_PROVENANCE_KEYS})   # logic_version: decision D9
         self.assertEqual(set(data["verdict"]), {"risk_score", "regime", "escalation_required", "entropy"})
         self.assertEqual((verdict.validation_faults, verdict.unassessable), ([], False))
 

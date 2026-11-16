@@ -27,6 +27,7 @@ from clinical_settings import (
     ClinicalSettings,
 )
 from kalman_trajectory import _PEDIATRIC_CHANNEL_MODEL
+from logic_stamp import logic_digest
 
 from observe_consolidated import (
     RiskAdapters,
@@ -59,6 +60,7 @@ logger = logging.getLogger("PEDIATRIC_CASSETTE")
 #: The name of the finding a reading outside the supported population carries.
 POPULATION_FINDING = "OUTSIDE_SUPPORTED_POPULATION"
 _UNSET = object()
+_LOGIC_DIGEST: Optional[str] = None
 #: Heuristic scores are sums of decimals (0.2 + 0.2 + 0.15 is 0.55000000000000004), so the margin comparison is made
 #: with this slack and a score exactly at the margin counts on every platform.
 _SCORE_TOLERANCE = 1e-9
@@ -261,6 +263,23 @@ class PediatricCassette:
                                f"population (max {s.max_age_months:g}); assessed on pediatric norms, "
                                "interpret with caution")
         return None
+
+    def logic_digest(self) -> str:
+        """What this domain's rules DO, as a digest (logic_stamp): the cassette class, its settings class, the engine-selection
+        gate and the constants those read, and the settings DEFAULTS (a changed default is a changed behaviour). Recorded, with
+        the core's, in every decision's provenance, so a record says which behaviour made it. Decision D9."""
+        global _LOGIC_DIGEST
+        if _LOGIC_DIGEST is not None:                       # the source cannot change within a process: compute it once
+            return _LOGIC_DIGEST
+        from clinical_settings import ClinicalSettings as _Settings
+        _LOGIC_DIGEST = logic_digest(
+            PediatricCassette, _Settings,
+            constants={"HARD_RULE_RISK": HARD_RULE_RISK, "HARD_RULE_ENGINE": HARD_RULE_ENGINE,
+                       "neutral": _VITALS_NEUTRAL, "channel_context_keys": _CHANNEL_CONTEXT_KEYS,
+                       "default_engine_gate": DEFAULT_ENGINE_GATE, "engine_gates": list(ENGINE_GATES),
+                       "heart_rate_findings": sorted(_HEART_RATE_FINDINGS), "spo2_findings": sorted(_SPO2_FINDINGS),
+                       "score_tolerance": _SCORE_TOLERANCE, "settings_defaults": _Settings().as_dict()})
+        return _LOGIC_DIGEST
 
     def advisory_notes(self, obs: Any) -> List[str]:
         """Notes that sit beside the verdict and change no regime.

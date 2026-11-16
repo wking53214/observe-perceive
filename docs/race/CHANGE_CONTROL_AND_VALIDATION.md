@@ -18,7 +18,9 @@ Every OBSERVE ledger entry carries, inside the fingerprinted payload (`observe_c
 
 So a verdict can be traced to **the numbers it was made with**, provided those numbers are in one of those places.
 
-## 2. What the version stamp does NOT cover (EXECUTED and INSPECTED)
+## 2. What the version stamp does NOT cover (EXECUTED and INSPECTED), and what now closes it (D9)
+
+**Status: closed by `logic_version` (below), on `main` after PR 17.** The rest of this section is the finding as measured.
 
 `PARAMETER_SET` has exactly these keys (EXECUTED): `drift_critical_floor`, `drift_sigma_threshold`, `escalation_dwell_threshold`,
 `escalation_lock_seconds`, `pediatric_norms`, `regime_critical_floor_default`, `regime_distribution_bands`, `regime_risk_floor`,
@@ -36,9 +38,20 @@ So a verdict can be traced to **the numbers it was made with**, provided those n
 Two consequences: (a) **two builds with different clinical behaviour can write the same `parameter_set_version`**; (b) the only thing that
 distinguishes them in a record is the source revision, and the cassette `version` ("1.1.0") was deliberately not bumped for the hard-rule
 and floor changes (the comments say so), so recorded fingerprints keep their meaning. That was the right call for fingerprint
-continuity and the wrong basis for change control. **PROPOSED fix (small, not done):** put every constant above into `PARAMETER_SET`
-(it is a dictionary; adding keys changes the hash once, deliberately, and every later change is then visible), and record the source
-revision in each decision.
+continuity and the wrong basis for change control.
+
+**The fix (done, decision D9): `logic_version`.** Listing every constant in `PARAMETER_SET` would have meant copying literals out
+of functions and trusting the copy; instead `logic_stamp.logic_digest` hashes what the code DOES. It walks each function's or
+class's syntax tree and records node kinds, names and constants in order, ignoring comments, formatting, docstrings and logging
+calls, and never `ast.dump` (whose fields differ between Python versions, which would change every recorded fingerprint when an
+installation upgrades; the digest is pinned and was checked identical on 3.11, 3.12 and 3.13). The core digest covers the validation,
+the age groups, the regime bands, every engine, the fusion, the escalation policy, the evaluation path (bypass, floor, hold rules)
+and the Kalman tracker and its tuning (`ENGINE_LOGIC_COVERS` names them, and a test pins that list). The cassette digest covers its
+rules, `ClinicalSettings` and the settings defaults. Every decision records `logic_version` (the two together) in its provenance, inside
+the fingerprinted payload. A changed point value, syndrome threshold, gate cutoff, rule text or default now changes it (EXECUTED:
+`test_logic_stamp.py`). It changed every recorded fingerprint ONCE, deliberately; the pinned fingerprints in
+`test_engine_gate_profile.py` were regenerated for 3.11 and 3.12 and will move again whenever the scoring logic does, which is the
+tripwire's job. It does not say whether a change was approved: that is the change request in section 3.
 
 ## 3. A change-control procedure (PROPOSED)
 
