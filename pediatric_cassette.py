@@ -63,6 +63,11 @@ _UNSET = object()
 #: with this slack and a score exactly at the margin counts on every platform.
 _SCORE_TOLERANCE = 1e-9
 
+#: The heuristic's finding names (the text before the colon in its rules), grouped by channel, so corroboration can tell
+#: heart rate from the others. A rule not named here counts as another channel, the direction that escalates.
+_HEART_RATE_FINDINGS = frozenset({"TACHYCARDIA", "BRADYCARDIA"})
+_SPO2_FINDINGS = frozenset({"CRITICAL_O2", "WARNING_O2"})
+
 #: What a faulted channel is read as so the OTHER channels can still be
 #: assessed. Each value is inside every PEDIATRIC_NORMS window and clear of
 #: every heuristic, bayesian, behavioral and select_engines trigger, so a
@@ -347,12 +352,23 @@ class PediatricCassette:
         CRITICAL_O2 finding alone is worth exactly that), so a score above it by at least the margin means the
         heuristic found something else abnormal as well. That is evidence from a different channel for respiratory
         rate and temperature, which a pulse-oximeter artefact does not move, and weaker evidence for heart rate, which
-        usually shares the probe with SpO2. Raise the margin to ask for more than one extra finding."""
+        usually shares the probe with SpO2. Raise the margin to ask for more than one extra finding.
+
+        By default a heart-rate finding alone does not corroborate (`ClinicalSettings.heart_rate_corroborates`): if the only
+        other findings are heart rate (and SpO2 itself) the hard rule is not corroborated. A heuristic output whose rule names
+        cannot be told apart (no recognised findings) is judged on its score alone, the direction that escalates."""
         if not self._hard_rule_corroboration:
             return False
         for out in outputs:
             if out.engine_name == HARD_RULE_ENGINE and not out.abstained:
-                return out.risk_score + _SCORE_TOLERANCE >= HARD_RULE_RISK + self._hard_rule_corroboration_margin
+                if out.risk_score + _SCORE_TOLERANCE < HARD_RULE_RISK + self._hard_rule_corroboration_margin:
+                    return False
+                if self.settings.heart_rate_corroborates:
+                    return True
+                names = {str(r).split(":", 1)[0].strip() for r in (out.triggered_rules or [])}
+                other_channel = names - _HEART_RATE_FINDINGS - _SPO2_FINDINGS - {"BASE_RISK"}
+                heart_rate_only = bool(names & _HEART_RATE_FINDINGS) and not other_channel
+                return not heart_rate_only
         return False
 
     def labels(self) -> Mapping[str, str]:

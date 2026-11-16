@@ -48,7 +48,8 @@ system = build_single_hospital_system(alert_human=page_charge_nurse, settings="u
 | `norms.<group>.hr_high / hr_low / rr_high / o2_low / temp_high` | pediatric table | Per-age-group reference values; name only the ones you change. Groups: neonatal, infant, toddler, child, generic | hr_high, rr_high, temp_high higher; hr_low, o2_low lower |
 | `critical_o2_below` | 88 | SpO2 below this is the hard rule | lower |
 | `hypothermia_below` | 35.0 | Temperature below this is hypothermia | lower |
-| `hard_rule_confirm_window` | 3 | A hard rule that fires again within this many of the patient's readings holds WARNING. 1 holds WARNING on a lone hard-rule reading at once (alerts MORE); 2 lets fewer repeats count than 3 | 2 only (1 and anything above 3 alert more) |
+| `hard_rule_confirm_window` | **1** (was 3; decision D1) | A hard rule that fires again within this many of the patient's readings holds WARNING. 1 holds WARNING on a lone hard-rule reading at once, the strongest setting | any value above 1 |
+| `heart_rate_corroborates` | false (decision D2) | Whether a heart-rate finding alone corroborates a low SpO2. By default respiratory rate or temperature is needed, because heart rate usually shares the probe with SpO2. Only matters when the window is above 1 | not weaker when true |
 | `hard_rule_corroboration` | true | A hard rule beside another abnormal finding holds WARNING at once | false |
 | `hard_rule_corroboration_margin` | 0.05 | How far above the hard rule's own score the heuristic must be to count as corroborated | higher |
 

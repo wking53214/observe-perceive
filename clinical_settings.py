@@ -48,7 +48,7 @@ OUTSIDE_POPULATION_ACTIONS = ("alert", "assess_anyway")
 #: sanity limits, not clinical ones: a window past the maximum is an unbounded per-patient history and a hard rule that, once
 #: seen, confirms every later one; a margin below the minimum is vacuous (every hard rule counts as corroborated, which is a
 #: window of 1 and should be asked for as one).
-DEFAULT_HARD_RULE_CONFIRM_WINDOW = 3
+DEFAULT_HARD_RULE_CONFIRM_WINDOW = 1
 DEFAULT_HARD_RULE_CORROBORATION = True
 DEFAULT_HARD_RULE_CORROBORATION_MARGIN = 0.05
 MAX_HARD_RULE_CONFIRM_WINDOW = 1000
@@ -113,6 +113,9 @@ class ClinicalSettings:
     hard_rule_confirm_window: int = DEFAULT_HARD_RULE_CONFIRM_WINDOW
     hard_rule_corroboration: bool = DEFAULT_HARD_RULE_CORROBORATION
     hard_rule_corroboration_margin: float = DEFAULT_HARD_RULE_CORROBORATION_MARGIN
+    # Heart rate usually shares the probe with SpO2, so by itself it is weak evidence that a low SpO2 is real: by default a
+    # hard rule is corroborated by respiratory rate or temperature, not by heart rate alone (decision D2). True lets it count.
+    heart_rate_corroborates: bool = False
 
     def __hash__(self) -> int:
         return hash(self.digest())
@@ -176,6 +179,8 @@ class ClinicalSettings:
                                 f"{MAX_HARD_RULE_CONFIRM_WINDOW}")
         if not isinstance(self.hard_rule_corroboration, bool):
             raise SettingsError("hard_rule_corroboration must be true or false")
+        if not isinstance(self.heart_rate_corroborates, bool):
+            raise SettingsError("heart_rate_corroborates must be true or false")
         if not MIN_HARD_RULE_CORROBORATION_MARGIN <= _num(
                 self.hard_rule_corroboration_margin, "hard_rule_corroboration_margin") <= 1:
             raise SettingsError(f"hard_rule_corroboration_margin must be in [{MIN_HARD_RULE_CORROBORATION_MARGIN}, 1] "
@@ -287,10 +292,12 @@ class ClinicalSettings:
               base["hard_rule_corroboration_margin"], True)           # harder to count as corroborated
         for key in ("critical_o2_below", "hypothermia_below"):
             check(key, mine[key], base[key], False)
-        # A window of 1 confirms every hard rule at once, which alerts MORE; from 2 up, a longer window lets more repeats
-        # count, so a window of 2 (fewer than the default) is the only weaker way. Checked against the engine's rule
-        # (`window <= 1 or repeated or corroborated`).
-        if 1 < mine["hard_rule_confirm_window"] < base["hard_rule_confirm_window"]:
+        # A window of 1 confirms every hard rule at once, which alerts MORE than any other; from 2 up, a longer window lets
+        # more repeats count. So the strength of a window is infinite at 1 and the window itself above it. Checked against
+        # the engine's rule (`window <= 1 or repeated or corroborated`). With the default at 1, every other window is weaker.
+        def strength(window: int) -> float:
+            return float("inf") if window <= 1 else float(window)
+        if strength(mine["hard_rule_confirm_window"]) < strength(base["hard_rule_confirm_window"]):
             weak.append("hard_rule_confirm_window")
         # A higher bound (or none) means fewer patients get the out-of-population finding.
         inf = float("inf")

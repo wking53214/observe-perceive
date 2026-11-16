@@ -4,7 +4,7 @@ Built up in steps; each group says which finding or promise it holds.
 """
 import copy
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -69,7 +69,7 @@ def test_defaults_are_what_the_system_already_used():
     assert s.non_default() == {} and s.weakenings() == []
     assert dict(s.norms) == PEDIATRIC_NORMS and s.age_group_upper_months == AGE_GROUP_UPPER_MONTHS
     assert (s.critical_o2_below, s.hypothermia_below) == (88, 35)
-    assert (s.hard_rule_confirm_window, s.hard_rule_corroboration, s.hard_rule_corroboration_margin) == (3, True, 0.05)
+    assert (s.hard_rule_confirm_window, s.hard_rule_corroboration, s.hard_rule_corroboration_margin) == (1, True, 0.05)   # window 1: decision D1
 
 
 @pytest.mark.parametrize("bad", [
@@ -165,9 +165,10 @@ def test_weakenings_name_only_the_settings_that_alert_less():
 
 
 @pytest.mark.parametrize("change,weaker", [
-    ({"hard_rule_confirm_window": 1}, False),         # 1 confirms every hard rule at once: it alerts MORE
-    ({"hard_rule_confirm_window": 2}, True),          # fewer repeats count than at the default of 3
-    ({"hard_rule_confirm_window": 10}, False),        # a longer window lets MORE repeats count
+    ({"hard_rule_confirm_window": 1}, False),         # the default: every hard rule holds WARNING at once
+    ({"hard_rule_confirm_window": 2}, True),          # a lone hard rule now waits for a repeat: weaker than the default
+    ({"hard_rule_confirm_window": 3}, True),          # the former default is weaker than 1
+    ({"hard_rule_confirm_window": 10}, True),         # a longer window counts more repeats but still waits for one
     ({"max_age_months": 300}, True),                  # fewer patients get the finding
     ({"max_age_months": None}, True),
     ({"max_age_months": 100}, False),
@@ -324,7 +325,6 @@ def test_the_two_modules_stay_in_pyproject():
 # Finding measured on main before this step: every age from 36 months to 125 years was scored on the "child" row, so a
 # healthy 40 year old at heart rate 70 was reported as BRADYCARDIA (<100) and nothing said the patient was out of scope.
 
-from datetime import timedelta  # noqa: E402
 
 
 def has_finding(v):
@@ -517,3 +517,92 @@ def test_the_notification_settings_pass_through_the_builders():
     system = build_single_hospital_system(allow_no_alert_channel=True,
                                           notification_settings=ClinicalNotificationSettings(min_regime="warning"))
     assert system.notification_settings.min_regime == "warning"
+
+
+# ---- decisions D4 and D6 -------------------------------------------------------------------------------------------------
+
+def test_a_critical_is_never_rate_limited_even_when_it_arrives_as_an_ordinary_escalation():
+    from perceive_consolidated import PolicyEnforcementConfig, PolicyManifest, PerceiveGovernanceKernel, PolicyRequest
+    kernel = PerceiveGovernanceKernel(enforcement=PolicyEnforcementConfig(enforce_escalation_limits=True))
+    kernel.register_manifest(PolicyManifest(manifest_id="m", version="1", created_at=T0,
+                                            policies={"escalation_policy": {"max_daily": 1}}))
+
+    def ask(i, **ctx):
+        return kernel.evaluate_request(PolicyRequest(
+            request_id=f"R{i}", request_type="escalate_patient", subject_id="P", actor_id="t",
+            context={"justification": "x", **ctx}, timestamp=T0 + timedelta(minutes=i)))
+    assert ask(0, severity="warning").approved                              # the first escalation of the day
+    again = ask(1, severity="warning")                                      # a minute later: the 15-minute cooldown binds
+    assert not again.approved
+    critical = ask(2, severity="critical")
+    assert critical.approved                                                # but not a CRITICAL
+    assert not any("cooldown" in str(v).lower() for v in critical.violations)
+    note = kernel.audit_ledger.entries[-1].policy_outputs[-1]               # the exemption is on the record
+    assert note["gate_name"] == "escalation_rate_policy" and "never rate-limited" in note["violations"][0]
+    claimed = ask(4, severity="critical", observe_assessment={"status": "assessed", "regime": "warning"})
+    assert not claimed.approved                                             # the engine's own assessment outranks a claim
+    hidden = ask(5, severity="warning", observe_assessment={"status": "assessed", "regime": "critical"})
+    assert hidden.approved                                                  # and a real CRITICAL is exempt whatever is claimed
+    by_regime = ask(3, regime="critical")                                   # the OBSERVE-style key counts too
+    assert by_regime.approved and "never rate-limited" in kernel.audit_ledger.entries[-1].policy_outputs[-1]["violations"][0]
+
+
+def test_a_failed_eviction_record_does_not_fail_another_patients_assessment_and_is_reported():
+    told = []
+    eng = ObserveClinicalEngine(max_tracked_patients=1, on_degraded=told.append)
+    eng.evaluate(snap(age=24, pid="A"))
+    real = eng.audit_ledger.append
+
+    def failing(patient_id, action, data):
+        if action == "STATE_EVICTED":
+            raise OSError("ledger full")
+        return real(patient_id, action, data)
+    eng.audit_ledger.append = failing
+    verdict = eng.evaluate(snap(age=24, pid="B"))                          # evicts A; the eviction record fails
+    assert verdict.regime == OperationalRegime.STABLE and "B" in eng._patient_policies
+    assert told and told[0]["kind"] == "state_evicted_write_failed" and told[0]["patient_id"] == "A"
+    assert list(eng.degraded_events)[0]["error"].startswith("OSError")
+
+
+def test_a_hook_that_raises_does_not_fail_the_assessment_either():
+    eng = ObserveClinicalEngine(max_tracked_patients=1, on_degraded=lambda e: 1 / 0)
+    eng.evaluate(snap(age=24, pid="A"))
+    eng.audit_ledger.append = lambda *a, **k: (_ for _ in ()).throw(OSError("full")) if a[1] == "STATE_EVICTED" else "h"
+    assert eng.evaluate(snap(age=24, pid="B")).regime == OperationalRegime.STABLE
+
+
+def test_the_governance_system_tells_a_person_about_failed_housekeeping_through_the_desk():
+    from human_escalation import EscalationDesk, EscalationLog, NotificationPolicy, Tier
+    from conservation_kernel import HmacSigner
+    calls = []
+    desk = EscalationDesk(NotificationPolicy((Tier("charge", calls.append, ("nurse",), 60.0, 5.0),)), EscalationLog(),
+                          responder_keys={"nurse": HmacSigner(b"settings-test-responder-key-0123456789", key_id="nurse")})
+    from clinical_governance_system import ClinicalGovernanceSystem
+    system = ClinicalGovernanceSystem(escalations=desk)
+    system.observe._on_degraded({"kind": "state_evicted_write_failed", "error": "OSError: full", "patient_id": "A"})
+    assert calls and calls[0]["stage"] == "observe_housekeeping" and "patient_id" not in calls[0]
+
+
+def test_a_slow_heart_alone_does_not_corroborate_either():
+    from clinical_settings import ClinicalSettings
+    from observe_consolidated import RiskOutput
+    out = RiskOutput("heuristic", 0.8, 0.9, {}, ["CRITICAL_O2: 86.0% (<88%)", "BRADYCARDIA: 60 < 95"], T0)
+    assert not PediatricCassette().hard_rule_corroborated([out])
+    assert PediatricCassette(settings=ClinicalSettings(heart_rate_corroborates=True)).hard_rule_corroborated([out])
+
+
+def test_the_governance_system_never_raises_about_housekeeping_with_no_desk_or_a_broken_one(caplog):
+    from clinical_governance_system import ClinicalGovernanceSystem
+    event = {"kind": "state_evicted_write_failed", "error": "OSError: full"}
+    quiet = ClinicalGovernanceSystem(allow_no_alert_channel=True)
+    with caplog.at_level("CRITICAL"):
+        quiet._engine_degraded(event)
+    assert "could not tell a person" not in caplog.text                          # no desk: nothing to try
+
+    class Broken:
+        def raise_and_dispatch(self, **kw):
+            raise RuntimeError("desk down")
+    broken = ClinicalGovernanceSystem(escalations=Broken())
+    with caplog.at_level("CRITICAL"):
+        broken._engine_degraded(event)                                           # must not raise
+    assert "could not tell a person" in caplog.text

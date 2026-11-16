@@ -999,6 +999,24 @@ class PerceiveGovernanceKernel:
         )
 
     def _escalation_rate_gate(self, request: PolicyRequest, ref: datetime) -> PolicyOutput:
+        # A CRITICAL is never rate-limited (life-safety): the emergency_override path has no rate gate by design, and a CRITICAL
+        # that reaches here as an ordinary escalation (`severity` or `regime` says critical) is exempt in the same way. The
+        # exemption is recorded on the output; nothing is counted or refused. Decision D4.
+        context = request.context or {}
+        assessed = context.get("observe_assessment")
+        if isinstance(assessed, dict) and assessed.get("status") in ("assessed", "unavailable"):
+            # OBSERVE's own assessment, bound into the request by the orchestrator, is authoritative: a caller cannot claim
+            # CRITICAL to dodge the count, and cannot hide one the engine found.
+            is_critical = assessed.get("regime") == "critical"
+        else:
+            is_critical = "critical" in (str(context.get("severity", "")).lower(), str(context.get("regime", "")).lower())
+        if is_critical:
+            return PolicyOutput(
+                gate_name="escalation_rate_policy", approved=True, confidence=1.0,
+                violation_details=["CRITICAL is never rate-limited (life-safety); the count was not applied"],
+                timestamp=datetime.now(timezone.utc),
+                provenance=Provenance("system", "escalation_rate_policy", "critical_exempt"),
+            )
         day, hour, mins = self.gov_state.escalation_window_counts(request.subject_id, ref)
         ok, violations = EscalationPolicy.can_escalate(
             current_risk_tier=request.context.get("severity", "warning"),
