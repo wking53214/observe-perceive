@@ -23,6 +23,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import threading
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field, asdict, replace
@@ -1081,42 +1082,115 @@ class EscalationPolicy:
 # ============================================================================
 
 class ImmutableAuditLedger:
-    def __init__(self):
+    """OBSERVE's hash-chained audit ledger.
+
+    By default it is in memory and grows with every reading, forever. `max_entries` bounds it: once the ledger holds more than
+    `max_entries` plus a tenth, the OLDEST entries are appended to `archive_path` (owner-only, fsynced) and dropped from memory,
+    and the chain continues across the boundary (`anchor_hash` is the hash just before the first retained entry). Nothing is ever
+    dropped unwritten: a bounded ledger must be given an archive, and if the archive cannot be written the entries stay in memory,
+    the failure is reported through `on_error`, and the ledger is unbounded until the archive works again (memory over a silent
+    loss of the audit record). `verify_integrity()` checks the retained part from the anchor; `verify_integrity(full=True)` streams
+    the archive from the start and checks everything. `iter_all()` yields archived then retained entries."""
+
+    def __init__(self, max_entries: Optional[int] = None, archive_path: Any = None, on_error: Optional[Callable[[Dict[str, Any]], None]] = None):
+        if max_entries is not None:
+            if isinstance(max_entries, bool) or not isinstance(max_entries, int) or max_entries < 1:
+                raise ValueError(f"max_entries must be a whole number of entries from 1, or None, not {max_entries!r}")
+            if archive_path is None:
+                raise ValueError("a bounded ledger needs an archive_path: entries that leave memory are written there, "
+                                 "never dropped")
         self.entries: List[Dict[str, Any]] = []
         self.chain_head = "0" * 64
+        self.anchor_hash = "0" * 64              # the chain hash just before the first retained entry
+        self.archived_count = 0
+        self.max_entries = max_entries
+        self.archive_path = None if archive_path is None else os.fspath(archive_path)
+        self._on_error = on_error
+        self._lock = threading.RLock()
 
     def append(self, patient_id: str, action: str, data: Dict[str, Any]) -> str:
-        entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "patient_id": patient_id,
-            "action": action,
-            "data": copy.deepcopy(data),
-            "previous_hash": self.chain_head,
-        }
-        block_hash = hashlib.sha256(json.dumps(entry, sort_keys=True, default=str).encode()).hexdigest()
-        entry["immutable_hash"] = block_hash
-        self.entries.append(entry)
-        self.chain_head = block_hash
-        return block_hash
+        with self._lock:
+            entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "patient_id": patient_id,
+                "action": action,
+                "data": copy.deepcopy(data),
+                "previous_hash": self.chain_head,
+            }
+            block_hash = hashlib.sha256(json.dumps(entry, sort_keys=True, default=str).encode()).hexdigest()
+            entry["immutable_hash"] = block_hash
+            self.entries.append(entry)
+            self.chain_head = block_hash
+            self._rotate()
+            return block_hash
 
-    def verify_integrity(self) -> bool:
-        expected_prev = "0" * 64
-        for entry in self.entries:
-            if entry["previous_hash"] != expected_prev:
-                return False
-            target = copy.deepcopy(entry)
-            stored_hash = target.pop("immutable_hash")
-            recalced = hashlib.sha256(json.dumps(target, sort_keys=True, default=str).encode()).hexdigest()
-            if stored_hash != recalced:
-                return False
-            expected_prev = stored_hash
-        return True
+    def _rotate(self) -> None:
+        if self.max_entries is None or len(self.entries) <= self.max_entries + max(1, self.max_entries // 10):
+            return
+        batch = self.entries[:len(self.entries) - self.max_entries]
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(self.archive_path)), exist_ok=True)
+            flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+            with os.fdopen(os.open(self.archive_path, flags, 0o600), "a", encoding="utf-8") as fh:
+                for entry in batch:
+                    fh.write(json.dumps(entry, sort_keys=True, default=str) + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+        except Exception as exc:  # noqa: BLE001 - keep the entries in memory rather than lose them
+            if self._on_error is not None:
+                try:
+                    self._on_error({"kind": "ledger_archive_failed", "error": f"{type(exc).__name__}: {exc}",
+                                    "retained": len(self.entries)})
+                except Exception:  # noqa: BLE001
+                    pass
+            return
+        self.anchor_hash = batch[-1]["immutable_hash"]
+        self.archived_count += len(batch)
+        del self.entries[:len(batch)]
 
-    def query_patient(self, patient_id: str) -> List[Dict[str, Any]]:
-        return [e for e in self.entries if e["patient_id"] == patient_id]
+    def iter_all(self):
+        """Archived entries (oldest first, from the archive file) then the retained ones."""
+        with self._lock:
+            retained = list(self.entries)
+            archive = self.archive_path if self.archived_count else None
+        if archive is not None and os.path.exists(archive):
+            with open(archive, encoding="utf-8") as fh:
+                for line in fh:
+                    if line.strip():
+                        yield json.loads(line)
+        yield from retained
 
-    def export_json(self) -> str:
-        return json.dumps(self.entries, indent=2, default=str)
+    @staticmethod
+    def _entry_ok(entry: Dict[str, Any], expected_prev: str) -> bool:
+        if entry.get("previous_hash") != expected_prev:
+            return False
+        target = copy.deepcopy(entry)
+        stored_hash = target.pop("immutable_hash", None)
+        return stored_hash == hashlib.sha256(json.dumps(target, sort_keys=True, default=str).encode()).hexdigest()
+
+    def verify_integrity(self, full: bool = False) -> bool:
+        """Is the chain intact? The retained entries from the anchor by default; `full=True` also streams the archive from the
+        first entry ever written, which can be slow on a long-running deployment."""
+        try:
+            if full:
+                expected_prev, entries = "0" * 64, self.iter_all()
+            else:
+                with self._lock:
+                    expected_prev, entries = self.anchor_hash, list(self.entries)
+            for entry in entries:
+                if not self._entry_ok(entry, expected_prev):
+                    return False
+                expected_prev = entry["immutable_hash"]
+            return True
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    def query_patient(self, patient_id: str, include_archive: bool = False) -> List[Dict[str, Any]]:
+        source = self.iter_all() if include_archive else list(self.entries)
+        return [e for e in source if e["patient_id"] == patient_id]
+
+    def export_json(self, include_archive: bool = False) -> str:
+        return json.dumps(list(self.iter_all()) if include_archive else list(self.entries), indent=2, default=str)
 
 
 # ============================================================================
@@ -1325,7 +1399,7 @@ class ObserveClinicalEngine:
     }
 
     def __init__(self, max_tracked_patients: int = 10000, enable_kalman: bool = False,
-                 cassette=None, on_degraded=None):
+                 cassette=None, on_degraded=None, ledger_max_entries: Optional[int] = None, ledger_archive_path: Any = None):
         # Deferred import: the cassette imports this module for the engine
         # table it wraps, so binding it at module scope would be circular.
         # Defaulting here keeps every existing caller working unchanged while
@@ -1334,7 +1408,9 @@ class ObserveClinicalEngine:
             from pediatric_cassette import PediatricCassette
             cassette = PediatricCassette()
         self._cassette = cassette
-        self.audit_ledger = ImmutableAuditLedger()
+        # Unbounded and in memory unless a bound and an archive are given (decision D11: the production profile requires them).
+        self.audit_ledger = ImmutableAuditLedger(max_entries=ledger_max_entries, archive_path=ledger_archive_path,
+                                                 on_error=self._ledger_error)
         self.scheduler = AsyncJobScheduler(num_workers=2)
         self.provisional_store = ProvisionalStore()
         # PER-PATIENT STATE: escalation policy + entropy are keyed by patient_id.
@@ -1358,7 +1434,7 @@ class ObserveClinicalEngine:
         # state lock and a hook that raises is logged, never raised.
         self.degraded_events: "deque" = deque(maxlen=100)
         self.degraded_dropped = 0                       # events pushed out of the last 100 (the count is never lost)
-        self._degraded_pending: List[Dict[str, Any]] = []
+        self._degraded_pending: "deque" = deque()      # a deque: appended from inside the ledger and the state lock, so no lock
         self._on_degraded = on_degraded
         self._patient_policies: "OrderedDict[str, EscalationPolicy]" = OrderedDict()
         self._patient_entropy: Dict[str, float] = {}
@@ -1446,14 +1522,21 @@ class ObserveClinicalEngine:
         self.degraded_events.append(event)
         logger.critical("OBSERVE housekeeping failed (%s: %s); the assessment that triggered it continues",
                         event.get("kind"), event.get("error"))
-        with self._state_lock:
-            self._degraded_pending.append(event)
+        self._degraded_pending.append(event)
+
+    def _ledger_error(self, event: Dict[str, Any]) -> None:
+        """The ledger could not write its archive; the entries stayed in memory (see ImmutableAuditLedger)."""
+        self._degraded(dict(event))
 
     def _flush_degraded(self) -> None:
         """Give queued housekeeping failures to the hook, after the assessment that found them has finished and with no lock
         held. A hook that raises is logged, never raised; a hook may call back into this engine."""
-        with self._state_lock:
-            pending, self._degraded_pending = self._degraded_pending, []
+        pending = []
+        while True:
+            try:
+                pending.append(self._degraded_pending.popleft())
+            except IndexError:
+                break
         if self._on_degraded is None:
             return
         for event in pending:
