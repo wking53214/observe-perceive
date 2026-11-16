@@ -727,9 +727,10 @@ def test_through_the_orchestrator_a_critical_reading_is_exempt_and_a_calm_one_is
     o = orch()
     o.perceive.enforcement = PolicyEnforcementConfig(enforce_escalation_limits=True)
 
-    def gate_note(artifact, **reading):
-        run(o, artifact, vit("P1", **reading))
+    def gate_note(artifact, patient, **reading):
+        run(o, artifact, vit(patient, **reading))
         outputs = o.perceive.audit_ledger.entries[-1].policy_outputs
         return [x for x in outputs if x["gate_name"] == "escalation_rate_policy"][0]["violations"]
-    assert any("never rate-limited" in v for v in gate_note("int-crit", **CRIT))
-    assert not any("never rate-limited" in v for v in gate_note("int-calm"))
+    assert any("never rate-limited" in v for v in gate_note("int-crit", "P1", **CRIT))
+    # another patient for the calm case: P1 is still tracked CRITICAL
+    assert not any("never rate-limited" in v for v in gate_note("int-calm", "P2"))
