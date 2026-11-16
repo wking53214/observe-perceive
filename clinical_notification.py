@@ -26,6 +26,8 @@ import logging
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from log_redaction import patient_tag
+
 __all__ = ["ClinicalNotificationSettings", "notification_reason", "notify", "ticket_context"]
 
 logger = logging.getLogger(__name__)
@@ -135,6 +137,6 @@ def notify(desk: Any, *, context: Mapping[str, Any], request_id: Optional[str] =
                                                    artifact_id=artifact_id, context=dict(context))
     except Exception as exc:  # noqa: BLE001
         logger.critical("[ClinicalNotification] the desk failed for patient %s: %s: %s",
-                        context.get("patient_id"), type(exc).__name__, exc)
+                        patient_tag(context.get("patient_id")), type(exc).__name__, exc)
         return None, "failed"
     return ticket_id, {"exhausted": "failed", "delivered": "delivered"}.get(state, "dispatched")

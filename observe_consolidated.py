@@ -23,6 +23,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import threading
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field, asdict, replace
@@ -36,6 +37,7 @@ from cassette import label as cassette_label, optional_member as cassette_option
 from governance_contracts import compute_state_commitment
 from kalman_trajectory import PatientKalmanTracker
 from logic_stamp import logic_digest, module_logic_digest
+from log_redaction import patient_tag
 import cassette as _cassette_module
 import kalman_trajectory as _kalman_module
 import logic_stamp as _logic_stamp_module
@@ -459,7 +461,7 @@ class RiskAdapters:
         has_history = "previous_o2" in vitals.context and "previous_hr" in vitals.context
 
         if age_months is None:
-            logger.warning(f"HEURISTIC: age_months missing for {vitals.patient_id}; using generic norms")
+            logger.warning(f"HEURISTIC: age_months missing for {patient_tag(vitals.patient_id)}; using generic norms")
 
         age_group = get_age_group(age_months, age_bounds)
         thresh = (PEDIATRIC_NORMS if norms is None else norms)[age_group]
@@ -1079,43 +1081,261 @@ class EscalationPolicy:
 # AUDIT LEDGER (SHA256 cryptographic chain)
 # ============================================================================
 
+class LedgerArchiveError(ValueError):
+    """The archive a bounded ledger was asked to continue is damaged, so it will not be continued silently."""
+
+
 class ImmutableAuditLedger:
-    def __init__(self):
+    """OBSERVE's hash-chained audit ledger.
+
+    By default it is in memory and grows with every reading, forever. `max_entries` bounds it: once the ledger holds more than
+    `max_entries` plus a tenth, the OLDEST entries are appended to `archive_path` (owner-only, fsynced) and dropped from memory,
+    and the chain continues across the boundary (`anchor_hash` is the hash just before the first retained entry). Nothing is ever
+    dropped unwritten: a bounded ledger must be given an archive, and if the archive cannot be written the entries stay in memory,
+    the failure is reported through `on_error`, and the ledger is unbounded until the archive works again (memory over a silent
+    loss of the audit record). `verify_integrity()` checks the retained part from the anchor; `verify_integrity(full=True)` streams
+    the archive from the start and checks everything. `iter_all()` yields archived then retained entries.
+
+    Restarts: built over an archive that already holds entries, the ledger checks that archive from the first entry and CONTINUES its
+    chain (a damaged archive is refused with `LedgerArchiveError`; a half-written last line, which only a crash mid-write leaves, is
+    moved to `<archive>.torn` and reported in `recovered`). The entries that were still in memory when a process died are not in the
+    archive: call `flush_to_archive()` on a clean shutdown to write them. One process owns an archive; two ledgers on one file are
+    not supported."""
+
+    def __init__(self, max_entries: Optional[int] = None, archive_path: Any = None, on_error: Optional[Callable[[Dict[str, Any]], None]] = None):
+        if max_entries is not None:
+            if isinstance(max_entries, bool) or not isinstance(max_entries, int) or max_entries < 1:
+                raise ValueError(f"max_entries must be a whole number of entries from 1, or None, not {max_entries!r}")
+            if archive_path is None:
+                raise ValueError("a bounded ledger needs an archive_path: entries that leave memory are written there, "
+                                 "never dropped")
         self.entries: List[Dict[str, Any]] = []
         self.chain_head = "0" * 64
+        self.anchor_hash = "0" * 64              # the chain hash just before the first retained entry
+        self.archived_count = 0
+        self.max_entries = max_entries
+        self.archive_path = None if archive_path is None else os.fspath(archive_path)
+        self._on_error = on_error
+        self._lock = threading.RLock()
+        self._archive_size = 0                   # bytes of the archive that are committed (written AND fsynced)
+        self._written_through = 0                # leading retained entries already in the file past the committed size (an fsync failed)
+        self.recovered: Optional[Dict[str, Any]] = None
+        if self.max_entries is not None and os.path.lexists(self.archive_path):
+            self._resume()
+
+    @staticmethod
+    def _digest(entry: Dict[str, Any]) -> str:
+        """The chain hash of an entry. Hashed through a JSON round trip, so an entry hashes the same in memory and after it has been
+        written to the archive and read back (a dict with integer keys, a tuple or a non-JSON value would not otherwise)."""
+        return hashlib.sha256(ImmutableAuditLedger._line(entry).encode()).hexdigest()
+
+    @staticmethod
+    def _line(entry: Dict[str, Any]) -> str:
+        """An entry as canonical JSON text (what is hashed and what is archived). The round trip first makes every key text, so
+        data with mixed integer and text keys can be sorted and written instead of failing the archive forever."""
+        return json.dumps(json.loads(json.dumps(entry, default=str)), sort_keys=True)
 
     def append(self, patient_id: str, action: str, data: Dict[str, Any]) -> str:
-        entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "patient_id": patient_id,
-            "action": action,
-            "data": copy.deepcopy(data),
-            "previous_hash": self.chain_head,
-        }
-        block_hash = hashlib.sha256(json.dumps(entry, sort_keys=True, default=str).encode()).hexdigest()
-        entry["immutable_hash"] = block_hash
-        self.entries.append(entry)
-        self.chain_head = block_hash
-        return block_hash
+        with self._lock:
+            entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "patient_id": patient_id,
+                "action": action,
+                "data": copy.deepcopy(data),
+                "previous_hash": self.chain_head,
+            }
+            block_hash = self._digest(entry)
+            entry["immutable_hash"] = block_hash
+            self.entries.append(entry)
+            self.chain_head = block_hash
+            self._rotate()
+            return block_hash
 
-    def verify_integrity(self) -> bool:
-        expected_prev = "0" * 64
-        for entry in self.entries:
-            if entry["previous_hash"] != expected_prev:
-                return False
-            target = copy.deepcopy(entry)
-            stored_hash = target.pop("immutable_hash")
-            recalced = hashlib.sha256(json.dumps(target, sort_keys=True, default=str).encode()).hexdigest()
-            if stored_hash != recalced:
-                return False
-            expected_prev = stored_hash
-        return True
+    def _report(self, event: Dict[str, Any]) -> None:
+        if self._on_error is not None:
+            try:
+                self._on_error(event)
+            except Exception:  # noqa: BLE001
+                pass
 
-    def query_patient(self, patient_id: str) -> List[Dict[str, Any]]:
-        return [e for e in self.entries if e["patient_id"] == patient_id]
+    def _open_archive(self, flags: int, mode: int = 0o600):
+        """The archive file, never through a symbolic link, and tightened to owner-only if it was ever looser."""
+        fd = os.open(self.archive_path, flags | getattr(os, "O_NOFOLLOW", 0), mode)
+        if flags & (os.O_WRONLY | os.O_RDWR):
+            try:
+                os.fchmod(fd, 0o600)
+            except (AttributeError, OSError):
+                pass
+        return fd
 
-    def export_json(self) -> str:
-        return json.dumps(self.entries, indent=2, default=str)
+    def _resume(self) -> None:
+        """Continue the chain of an archive an earlier process wrote, after checking all of it."""
+        expected, count, good = "0" * 64, 0, 0
+        try:
+            with os.fdopen(self._open_archive(os.O_RDONLY), "rb") as fh:
+                for raw in fh:
+                    if not raw.endswith(b"\n"):
+                        break                      # a torn last line: a crash in the middle of a write
+                    try:
+                        entry = json.loads(raw)
+                    except ValueError as exc:
+                        raise LedgerArchiveError(f"archive entry {count + 1} is not valid JSON ({exc})") from None
+                    if not isinstance(entry, dict) or not self._entry_ok(entry, expected):
+                        raise LedgerArchiveError(f"archive entry {count + 1} breaks the hash chain; move the file aside and "
+                                                 "investigate before starting")
+                    expected, count, good = entry["immutable_hash"], count + 1, good + len(raw)
+        except OSError as exc:
+            raise LedgerArchiveError(f"the archive cannot be read ({type(exc).__name__}: {exc})") from None
+        size = os.path.getsize(self.archive_path)
+        if size > good:
+            torn = self.archive_path + ".torn"
+            try:
+                with os.fdopen(self._open_archive(os.O_RDONLY), "rb") as src:
+                    src.seek(good)
+                    tail = src.read()
+                with os.fdopen(os.open(torn, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0), 0o600), "ab") as out:
+                    out.write(tail)
+                    out.flush()
+                    os.fsync(out.fileno())
+                fd = self._open_archive(os.O_WRONLY)
+                try:
+                    os.ftruncate(fd, good)
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+            except OSError as exc:
+                raise LedgerArchiveError(f"the archive ends in a half-written line and could not be repaired "
+                                         f"({type(exc).__name__}: {exc})") from None
+            self.recovered = {"kind": "ledger_archive_torn_tail", "torn_bytes": size - good, "kept_entries": count,
+                              "saved_to": torn}
+        self.chain_head = self.anchor_hash = expected
+        self.archived_count = count
+        self._archive_size = good
+
+    def _rotate(self, everything: bool = False) -> None:
+        if self.max_entries is None:
+            return
+        if not everything and len(self.entries) <= self.max_entries + max(1, self.max_entries // 10):
+            return
+        n = len(self.entries) if everything else len(self.entries) - self.max_entries
+        if n <= 0:
+            return
+        batch = self.entries[:n]
+        fh = None
+        start = None
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(self.archive_path)), exist_ok=True)
+            fh = os.fdopen(self._open_archive(os.O_WRONLY | os.O_CREAT | os.O_APPEND), "ab")
+            start = os.fstat(fh.fileno()).st_size
+            try:
+                # Entries already in the file (written, then the fsync failed) are not written twice.
+                fresh = batch[min(self._written_through, len(batch)):]
+                fh.write("".join(self._line(e) + "\n" for e in fresh).encode("utf-8"))
+                fh.flush()
+            except Exception:
+                try:
+                    os.ftruncate(fh.fileno(), start)     # no half-written line, no entry left half in the file
+                except OSError:
+                    pass
+                raise
+            self._written_through = len(batch)
+            os.fsync(fh.fileno())
+            committed = os.fstat(fh.fileno()).st_size
+        except Exception as exc:  # noqa: BLE001 - keep the entries in memory rather than lose them
+            self._report({"kind": "ledger_archive_failed", "error": f"{type(exc).__name__}: {exc}", "retained": len(self.entries)})
+            return
+        finally:
+            if fh is not None:
+                try:
+                    fh.close()
+                except OSError:
+                    pass
+        self._archive_size = committed
+        self._written_through = 0
+        self.anchor_hash = batch[-1]["immutable_hash"]
+        self.archived_count += len(batch)
+        del self.entries[:len(batch)]
+
+    def flush_to_archive(self) -> int:
+        """Write every retained entry to the archive (a clean shutdown). Returns how many entries are archived in all; the retained
+        ones stay in memory until it succeeds, and a failure is reported through `on_error` like any other."""
+        with self._lock:
+            self._rotate(everything=True)
+            return self.archived_count
+
+    def _read_archive(self, size: int):
+        """The first `size` bytes of the archive as entries. `size` is a committed length taken under the lock, so a rotation that
+        runs while this reads can only append beyond it."""
+        with os.fdopen(self._open_archive(os.O_RDONLY), "rb") as fh:
+            remaining = size
+            while remaining > 0:
+                line = fh.readline()
+                if not line:
+                    raise ValueError("the archive is shorter than the ledger says it is")
+                remaining -= len(line)
+                if remaining < 0:
+                    raise ValueError("the archive's committed length does not end on an entry")
+                entry = json.loads(line)
+                if not isinstance(entry, dict):
+                    raise ValueError("an archive line is not an entry")
+                yield entry
+
+    def iter_all(self, retained_first: bool = False):
+        """Archived entries (oldest first, from the archive file) then the retained ones; `retained_first` yields the retained
+        ones first, so a search for something recent need not read the archive. One consistent snapshot, whatever rotates while it
+        is read. Raises ValueError or OSError if the archive is unreadable or damaged."""
+        with self._lock:
+            retained = list(self.entries)
+            size = self._archive_size
+        return self._iter(retained, size, retained_first)
+
+    def _iter(self, retained, size, retained_first):
+        if retained_first:
+            yield from retained
+        if size:
+            yield from self._read_archive(size)
+        if not retained_first:
+            yield from retained
+
+    def _entry_ok(self, entry: Dict[str, Any], expected_prev: str) -> bool:
+        if entry.get("previous_hash") != expected_prev:
+            return False
+        target = copy.deepcopy(entry)
+        stored_hash = target.pop("immutable_hash", None)
+        return stored_hash == self._digest(target)
+
+    def verify_integrity(self, full: bool = False) -> bool:
+        """Is the chain intact? The retained entries from the anchor by default; `full=True` also streams the archive from the
+        first entry ever written, which can be slow on a long-running deployment."""
+        try:
+            with self._lock:
+                if full:
+                    expected_prev, entries = "0" * 64, self.iter_all()
+                else:
+                    expected_prev, entries = self.anchor_hash, list(self.entries)
+            for entry in entries:
+                if not self._entry_ok(entry, expected_prev):
+                    return False
+                expected_prev = entry["immutable_hash"]
+            return True
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            return False
+
+    def query_patient(self, patient_id: str, include_archive: bool = False) -> List[Dict[str, Any]]:
+        if include_archive:
+            source = self.iter_all()
+        else:
+            with self._lock:
+                source = list(self.entries)
+        return [e for e in source if e["patient_id"] == patient_id]
+
+    def export_json(self, include_archive: bool = False) -> str:
+        if include_archive:
+            entries = list(self.iter_all())
+        else:
+            with self._lock:
+                entries = list(self.entries)
+        return json.dumps(entries, indent=2, default=str)
 
 
 # ============================================================================
@@ -1281,10 +1501,10 @@ class ProvisionalStore:
         self._evict_expired()
         entry = self.provisionals.get(patient_id)
         if entry is None:
-            logger.warning(f"reconcile: unknown patient {patient_id} (job {job_id})")
+            logger.warning(f"reconcile: unknown patient {patient_tag(patient_id)} (job {job_id})")
             return False
         if entry.get("job_id") != job_id:
-            logger.warning(f"reconcile: job_id mismatch for {patient_id} (expected {entry.get('job_id')}, got {job_id})")
+            logger.warning(f"reconcile: job_id mismatch for {patient_tag(patient_id)} (expected {entry.get('job_id')}, got {job_id})")
             return False
 
         entry["is_provisional"] = False
@@ -1324,7 +1544,7 @@ class ObserveClinicalEngine:
     }
 
     def __init__(self, max_tracked_patients: int = 10000, enable_kalman: bool = False,
-                 cassette=None, on_degraded=None):
+                 cassette=None, on_degraded=None, ledger_max_entries: Optional[int] = None, ledger_archive_path: Any = None):
         # Deferred import: the cassette imports this module for the engine
         # table it wraps, so binding it at module scope would be circular.
         # Defaulting here keeps every existing caller working unchanged while
@@ -1333,7 +1553,9 @@ class ObserveClinicalEngine:
             from pediatric_cassette import PediatricCassette
             cassette = PediatricCassette()
         self._cassette = cassette
-        self.audit_ledger = ImmutableAuditLedger()
+        # Unbounded and in memory unless a bound and an archive are given (decision D11: the production profile requires them).
+        self.audit_ledger = ImmutableAuditLedger(max_entries=ledger_max_entries, archive_path=ledger_archive_path,
+                                                 on_error=self._ledger_error)
         self.scheduler = AsyncJobScheduler(num_workers=2)
         self.provisional_store = ProvisionalStore()
         # PER-PATIENT STATE: escalation policy + entropy are keyed by patient_id.
@@ -1357,8 +1579,11 @@ class ObserveClinicalEngine:
         # state lock and a hook that raises is logged, never raised.
         self.degraded_events: "deque" = deque(maxlen=100)
         self.degraded_dropped = 0                       # events pushed out of the last 100 (the count is never lost)
-        self._degraded_pending: List[Dict[str, Any]] = []
+        self._degraded_pending: "deque" = deque()      # a deque: appended from inside the ledger and the state lock, so no lock
         self._on_degraded = on_degraded
+        self._degraded_lock = threading.Lock()          # guards the dropped count only; nothing else is taken inside it
+        if self.audit_ledger.recovered is not None:    # the archive of an earlier run ended in a half-written line
+            self._degraded(dict(self.audit_ledger.recovered))
         self._patient_policies: "OrderedDict[str, EscalationPolicy]" = OrderedDict()
         self._patient_entropy: Dict[str, float] = {}
         # Head of each subject's verdict-state chain. Evicted with the policy
@@ -1386,6 +1611,11 @@ class ObserveClinicalEngine:
         # a stateful "trajectory_kalman" adapter joins fusion (see evaluate()).
         self._enable_kalman = enable_kalman
         self._patient_kalman: "OrderedDict[str, PatientKalmanTracker]" = OrderedDict()
+
+    @property
+    def cassette(self):
+        """The domain this engine runs (read-only), so a deployment can show which settings are in force."""
+        return self._cassette
 
     def _get_kalman(self, patient_id: str) -> "PatientKalmanTracker":
         with self._state_lock:
@@ -1440,19 +1670,27 @@ class ObserveClinicalEngine:
     def _degraded(self, event: Dict[str, Any]) -> None:
         """Record and log housekeeping that failed, and queue it for the hook. Never raises and never calls the hook: this runs
         in the middle of an assessment, and a slow or re-entrant hook there would widen races with other evaluations."""
-        if len(self.degraded_events) == self.degraded_events.maxlen:
-            self.degraded_dropped += 1
-        self.degraded_events.append(event)
+        with self._degraded_lock:
+            if len(self.degraded_events) == self.degraded_events.maxlen:
+                self.degraded_dropped += 1
+            self.degraded_events.append(event)
         logger.critical("OBSERVE housekeeping failed (%s: %s); the assessment that triggered it continues",
                         event.get("kind"), event.get("error"))
-        with self._state_lock:
-            self._degraded_pending.append(event)
+        self._degraded_pending.append(event)
+
+    def _ledger_error(self, event: Dict[str, Any]) -> None:
+        """The ledger could not write its archive; the entries stayed in memory (see ImmutableAuditLedger)."""
+        self._degraded(dict(event))
 
     def _flush_degraded(self) -> None:
         """Give queued housekeeping failures to the hook, after the assessment that found them has finished and with no lock
         held. A hook that raises is logged, never raised; a hook may call back into this engine."""
-        with self._state_lock:
-            pending, self._degraded_pending = self._degraded_pending, []
+        pending = []
+        while True:
+            try:
+                pending.append(self._degraded_pending.popleft())
+            except IndexError:
+                break
         if self._on_degraded is None:
             return
         for event in pending:
@@ -1900,10 +2138,10 @@ class ObserveClinicalEngine:
         # assessment: logging is the one thing after the write, and it is never allowed to be fatal.
         try:
             if unassessable:
-                logger.warning(f"DATA_INTEGRITY_FAULT: subject={subject} faults={faults} "
+                logger.warning(f"DATA_INTEGRITY_FAULT: subject={patient_tag(subject)} faults={faults} "
                                f"assessed={selected} regime={final_regime.value}")
             if escalation:
-                logger.info(f"ESCALATION: subject={subject} regime={final_regime.value} risk={fused_risk:.2f}")
+                logger.info(f"ESCALATION: subject={patient_tag(subject)} regime={final_regime.value} risk={fused_risk:.2f}")
         except Exception:  # noqa: BLE001 - see above
             pass
 
@@ -1949,7 +2187,7 @@ class ObserveClinicalEngine:
             {**decision_data, "decision_fingerprint": fingerprint,
              "predecessor_state_commitment": predecessor, "state_commitment": commitment},
         )
-        logger.warning(f"DATA_INTEGRITY_FAULT: subject={subject} faults={faults}")
+        logger.warning(f"DATA_INTEGRITY_FAULT: subject={patient_tag(subject)} faults={faults}")
         return FusedVerdict(
             risk_score=0.0, regime=OperationalRegime.WARNING, confidence=0.0, entropy=0.0,
             active_engines=[], triggered_rules=triggered, timestamp=datetime.now(timezone.utc),
