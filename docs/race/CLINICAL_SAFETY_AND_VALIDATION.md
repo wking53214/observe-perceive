@@ -157,7 +157,7 @@ that is working.
 
 ### 4.2 What is missing (INSPECTED: the desk exposes `open_tickets()`; there is no metrics function)
 
-- **No LIVE alarm-burden measurement** (a replay tool now exists: `alarm_burden.py`, `ALARM_BURDEN.md`; it counts OBSERVE events and notifications on a recorded stream, and no real stream has been replayed): pages per patient-day, per unit, per hour; share acknowledged; time to acknowledge; share with a clinical action. The ticket log records the raw events, so these are computable, but nothing computes them.
+- **No LIVE alarm-burden measurement** (a replay tool now exists: `alarm_burden.py`, `ALARM_BURDEN.md`; `alarm_burden.py` counts OBSERVE events and notifications on a recorded stream and `ticket_burden.py` reads the share acknowledged, time to acknowledge and exhausted tickets from the desk's log; no real stream or log has been measured): pages per patient-day, per unit, per hour; share acknowledged; time to acknowledge; share with a clinical action. The ticket log records the raw events, so these are computable, but nothing computes them.
 - **No grouping:** two pages for one patient from different causes (a population finding and a CRITICAL) are two tickets.
 - **No unit or time-of-day tuning:** settings are per system, not per unit.
 - **No feedback loop:** a "page was not useful" signal does not reach the settings.
