@@ -203,7 +203,7 @@ _CALLABLE = REQUIRED[2:]
 #: callability is a failure: a capability declared wrongly is rejected at
 #: load rather than quietly skipped on some later evaluation.
 OPTIONAL = ("mask_faults", "hard_rule_confirm_window", "hard_rule_corroborated", "regime_floor",
-            "advisory_notes")
+            "advisory_notes", "logic_digest")
 
 
 #: Used when a cassette omits a label key. Neutral on purpose: a domain

@@ -35,6 +35,14 @@ import copy
 from cassette import label as cassette_label, optional_member as cassette_optional_member
 from governance_contracts import compute_state_commitment
 from kalman_trajectory import PatientKalmanTracker
+from logic_stamp import logic_digest
+from kalman_trajectory import _CHANNEL_TUNING, _MAX_DT_HOURS, _VELOCITY_RULES, _WARMUP_UPDATES
+
+
+def _kalman_constants() -> Dict[str, Any]:
+    """The Kalman tracker's tuning, for the logic digest (these are module constants there, outside its class source)."""
+    return {"channel_tuning": _CHANNEL_TUNING, "velocity_rules": _VELOCITY_RULES, "warmup": _WARMUP_UPDATES,
+            "max_dt_hours": _MAX_DT_HOURS}
 
 logger = logging.getLogger("OBSERVE")
 
@@ -1533,8 +1541,17 @@ class ObserveClinicalEngine:
         if isinstance(extras, dict):
             for key in sorted(extras):
                 identity[str(key)] = str(extras[key])
+        # What the scoring code and the domain's rules DO, as a digest (logic_stamp): a change to a point value, a syndrome
+        # threshold or a gate cutoff inside a function changes it, which the parameter-set version alone cannot see. One
+        # value for the core and the cassette together, so a record says which behaviour made it. Decision D9.
+        logic = getattr(self, "_logic_version", None)
+        if logic is None:                                   # parsing source is not free: once per engine, not per reading
+            cassette_logic = cassette_optional_member(self._cassette, "logic_digest")
+            logic = hashlib.sha256((ENGINE_LOGIC_DIGEST + (str(cassette_logic()) if cassette_logic else "")).encode()).hexdigest()
+            self._logic_version = logic
         return {
             "parameter_set_version": PARAMETER_SET_VERSION,
+            "logic_version": logic,
             "cassette": identity,
         }
 
@@ -1936,6 +1953,25 @@ class ObserveClinicalEngine:
             predecessor_state_commitment=predecessor, state_commitment=commitment,
             validation_faults=list(faults), unassessable=True,
         )
+
+
+# What the scoring code of this module DOES, as one digest (see logic_stamp). Defined here, after everything it reads, and
+# recorded in every decision's provenance. It covers the engines, the fusion, the escalation policy, the validation and the
+# evaluation path (the bypass, floor and hold rules), the Kalman tracker and its tuning. Editing a comment, a docstring or a
+# log message does not change it; changing a constant, a comparison or a branch does.
+_ENGINE_LOGIC_OBJECTS = (
+    validate_vitals, sanitize_context, get_age_group, regime_distribution, _max_severity,
+    RiskAdapters, RiskAdaptersPhysiological, BayesianFusion, EscalationPolicy,
+    ObserveClinicalEngine.select_engines, ObserveClinicalEngine._evaluate, ObserveClinicalEngine._fault_page,
+    ObserveClinicalEngine._fault_verdict, PatientKalmanTracker,
+)
+#: What the digest covers, by name, so a test can notice if something clinical is dropped from it.
+ENGINE_LOGIC_COVERS: Tuple[str, ...] = tuple(o.__qualname__ for o in _ENGINE_LOGIC_OBJECTS)
+ENGINE_LOGIC_DIGEST: str = logic_digest(
+    *_ENGINE_LOGIC_OBJECTS,
+    constants={"hard_rule_confirm_window_fallback": HARD_RULE_CONFIRM_WINDOW, "parameter_set_version": PARAMETER_SET_VERSION,
+               "kalman": _kalman_constants()},
+)
 
 
 if __name__ == "__main__":
