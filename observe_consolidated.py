@@ -1758,6 +1758,9 @@ class ObserveClinicalEngine:
         floor_of = cassette_optional_member(self._cassette, "regime_floor")
         floor = floor_of(recorded) if floor_of else None
         floor_notes: List[str] = []
+        # Notes the domain wants beside the verdict that change no regime (for example a probe that may be off).
+        notes_of = cassette_optional_member(self._cassette, "advisory_notes")
+        advisory_notes = list(notes_of(recorded)) if notes_of else []
         # The floor is a standing condition (a patient who stays out of the supported population stays so), so it pages
         # ONCE, when it first applies, and again only after a reading that is back in scope. It does not page on a
         # timer: a timed dedup would re-page an adult every window for as long as they are monitored.
@@ -1791,7 +1794,8 @@ class ObserveClinicalEngine:
             escalation_kind = ""
 
         fault_notes = [f"DATA_INTEGRITY_FAULT: {f}" for f in faults]
-        all_triggered = fault_notes + all_triggered_bypass_note + floor_notes + [r for o in outputs for r in o.triggered_rules]
+        all_triggered = (fault_notes + all_triggered_bypass_note + floor_notes + advisory_notes
+                         + [r for o in outputs for r in o.triggered_rules])
         avg_confidence = sum(o.confidence for o in outputs) / len(outputs) if outputs else 0.0
         if unassessable:
             avg_confidence *= UNASSESSABLE_CONFIDENCE_PENALTY
@@ -1806,6 +1810,8 @@ class ObserveClinicalEngine:
         }
         if all_triggered_bypass_note:  # present only then, so a clean entry keeps its shape
             decision_data["safety_bypass"] = list(all_triggered_bypass_note)
+        if advisory_notes:  # likewise
+            decision_data["advisory_notes"] = list(advisory_notes)
         if floor_notes:  # present only then, so an entry nothing floored keeps its shape
             decision_data["regime_floor"] = list(floor_notes)
         if escalation_kind in ("severity_increase", "de_escalation"):  # only the kinds this change adds

@@ -17,6 +17,14 @@
   directions), `test_detection_record.py` (`single_o2_spike_down` added to the risky set with the reason). No assertion about the
   mechanism changed. Documents: `HARD_RULE_FLOOR.md`, `CLINICIAN_SETTINGS_AND_POPULATION.md`.
 
+- **A probe that may be off is now said so.** An SpO2 of 0 is far more often a disconnected probe than a patient with no oxygen, and
+  may be both. A reading at or below `ClinicalSettings.probe_off_spo2_at_or_below` (default 0; `None` switches it off) now carries
+  `POSSIBLE_SENSOR_DISCONNECT: ... check the probe and check the patient. The reading is not downgraded.` in its rules and, only
+  then, under `advisory_notes` in the audit entry. It never changes a regime, a score or a page (a zero is still a hard rule), so
+  the only difference is the note, and an entry with no note keeps its shape. New cassette hook `advisory_notes` (optional). This is
+  the last item of the old session branch `ccr-2064e451-0djr9b` that was not on `main`. No pre-existing test edited. Document:
+  `docs/race/CLINICIAN_SETTINGS_AND_POPULATION.md`.
+
 - **Clinicians can now adjust the clinical lines, and a patient above the supported population is no longer scored silently as a
   child.** Measured on `main`: every age from 36 months to 125 years used the "child" norms, so a healthy 40 year old at heart rate 70
   was reported with `BRADYCARDIA: 70 < 100` and nothing said the patient was out of scope. New `clinical_settings.ClinicalSettings`

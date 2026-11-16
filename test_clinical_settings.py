@@ -144,6 +144,7 @@ def test_every_value_participates_in_the_digest():
     for change in ({"max_age_months": 217}, {"require_age": True}, {"critical_o2_below": 87.0},
                    {"hard_rule_confirm_window": 4}, {"outside_population": "assess_anyway"},
                    {"hard_rule_corroboration": False}, {"hard_rule_corroboration_margin": 0.2},
+                   {"probe_off_spo2_at_or_below": 1.0},
                    {"norms": {"generic": {"temp_high": 38.9}}}, {"age_group_upper_months": (4, 12, 36)}):
         assert ClinicalSettings.from_mapping(change).digest() != base, change
 
@@ -606,3 +607,62 @@ def test_the_governance_system_never_raises_about_housekeeping_with_no_desk_or_a
     with caplog.at_level("CRITICAL"):
         broken._engine_degraded(event)                                           # must not raise
     assert "could not tell a person" in caplog.text
+
+# ---- the probe note: an annotation that never changes a regime --------------------------------------------------------
+
+CALM = (110, 98.0, 25, 37.0)
+
+
+def _run(rows, eng=None, pid="probe"):
+    eng = eng or ObserveClinicalEngine()
+    return [eng.evaluate(VitalsSnapshot(pid, T0 + timedelta(minutes=i), *row, {"age_months": 24}))
+            for i, row in enumerate(rows)]
+
+
+def test_a_zero_spo2_carries_a_probe_note_and_the_regime_is_not_lowered_by_it():
+    noted = _run([CALM, (100, 0.0, 24, 37.0)])[1]
+    plain = _run([CALM, (100, 0.0, 24, 37.0)], engine(probe_off_spo2_at_or_below=None), pid="plain")[1]
+    assert any("POSSIBLE_SENSOR_DISCONNECT" in r and "check the patient" in r and "not downgraded" in r
+               for r in noted.triggered_rules)
+    assert not any("POSSIBLE_SENSOR_DISCONNECT" in r for r in plain.triggered_rules)
+    assert noted.regime == plain.regime and noted.escalation_required == plain.escalation_required
+    assert any(r.startswith("CRITICAL_O2") for r in noted.triggered_rules)         # a zero is still a hard rule
+    assert noted.decision_fingerprint != plain.decision_fingerprint                  # the note is in the evidence
+
+
+def test_the_probe_note_threshold_is_adjustable_and_validated():
+    assert not any("POSSIBLE_SENSOR_DISCONNECT" in r for r in _run([(100, 4.0, 24, 37.0)])[0].triggered_rules)
+    assert any("POSSIBLE_SENSOR_DISCONNECT" in r
+               for r in _run([(100, 4.0, 24, 37.0)], engine(probe_off_spo2_at_or_below=5.0), pid="t")[0].triggered_rules)
+    for bad in (100, -1, "x", True, float("nan")):
+        with pytest.raises(SettingsError):
+            ClinicalSettings(probe_off_spo2_at_or_below=bad)
+    assert ClinicalSettings(probe_off_spo2_at_or_below=None).weakenings() == []      # annotation only: never weaker
+
+
+def test_a_probe_threshold_spelled_5_or_5_point_0_is_one_value():
+    a, b = ClinicalSettings(probe_off_spo2_at_or_below=5), ClinicalSettings(probe_off_spo2_at_or_below=5.0)
+    assert a.digest() == b.digest() and a.non_default() == b.non_default() == {"probe_off_spo2_at_or_below": "5"}
+    assert type(a.probe_off_spo2_at_or_below) is int
+
+
+def test_a_normal_spo2_has_no_note_and_clean_entries_keep_their_shape():
+    v = ObserveClinicalEngine()
+    out = v.evaluate(VitalsSnapshot("P1", T0, *CALM, {"age_months": 24}))
+    assert not any("SENSOR_DISCONNECT" in r for r in out.triggered_rules)
+    assert "advisory_notes" not in v.audit_ledger.entries[-1]["data"]
+
+
+def test_the_note_is_in_the_audit_entry_and_the_probe_setting_is_recorded_when_changed():
+    e = ObserveClinicalEngine()
+    e.evaluate(VitalsSnapshot("P1", T0, 100, 0.0, 24, 37.0, {"age_months": 24}))
+    assert e.audit_ledger.entries[-1]["data"]["advisory_notes"][0].startswith("POSSIBLE_SENSOR_DISCONNECT")
+    c = PediatricCassette(settings=ClinicalSettings(probe_off_spo2_at_or_below=None))
+    assert c.identity_extras["setting.probe_off_spo2_at_or_below"] == "None"
+    assert PediatricCassette().advisory_notes(object()) == []                        # a reading with no SpO2 at all
+
+
+def test_a_cassette_without_the_hook_gets_no_note():
+    from cassette import conformance_failures
+    assert conformance_failures(PediatricCassette()) == []
+    assert "advisory_notes" in __import__("cassette").OPTIONAL

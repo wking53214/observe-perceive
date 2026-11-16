@@ -52,6 +52,7 @@ system = build_single_hospital_system(alert_human=page_charge_nurse, settings="u
 | `heart_rate_corroborates` | false (decision D2) | Whether a heart-rate finding alone corroborates a low SpO2. By default respiratory rate or temperature is needed, because heart rate usually shares the probe with SpO2. Only matters when the window is above 1 | not weaker when true |
 | `hard_rule_corroboration` | true | A hard rule beside another abnormal finding holds WARNING at once | false |
 | `hard_rule_corroboration_margin` | 0.05 | How far above the hard rule's own score the heuristic must be to count as corroborated | higher |
+| `probe_off_spo2_at_or_below` | 0.0 | At or below this SpO2 a `POSSIBLE_SENSOR_DISCONNECT` note ("check the probe and check the patient; the reading is not downgraded") is added. Annotation only: it never changes a regime, and a zero is still a CRITICAL_O2 hard rule. `null` switches it off. Ported from the old session branch | n/a |
 
 The hard-rule values keep their old route too: `PediatricCassette(hard_rule_confirm_window=...)`. Give them there or in
 the settings, never both (the cassette raises).
