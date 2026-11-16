@@ -42,7 +42,12 @@ chain = [
   "governance-gateway @ git+https://github.com/wking53214/Governance_Gateway@c507be7279c4488f98404514fcea2c900c53168e",
 ]
 # Opt-in strict stage; numpy comes in through its own metadata.
-fortress = ["fortress-kernel @ git+https://github.com/wking53214/fortress-kernel@4105ccb5fec2806f3f1ab5aeb0f88151e6a6fdc0"]
+# Pinned to fortress-kernel Main at f5d15b2 (2026-11-13). The earlier pin,
+# 4105ccb5, signed every audit record with the published default key
+# "fortress-key", so anyone could forge records that verify; fortress-kernel
+# c361569 removed that default. The key now comes from the adapter's audit_key
+# or FORTRESS_AUDIT_KEY; with neither, a random per-process key.
+fortress = ["fortress-kernel @ git+https://github.com/wking53214/fortress-kernel@f5d15b28a2a842a37c38f30dcde6ee3f47f361b7"]
 # Optional: lets cns_governed_decision combine gates from any library under the
 # cns.gate contract. Nothing imports CNS unless that module's pipeline is used.
 # Pinned to the tag v4.0.0 (eabe6c7). DecisionGuard and the issuance proof on Decision, which

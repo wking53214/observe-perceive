@@ -10,7 +10,8 @@ checking IDENTITY and BEHAVIOUR, not shape:
     callable, or a second `RootAdmission` the kernel does not hold, is refused.
   * The roster really refuses: a canary request that must be refused is put to it at startup. A roster that
     approves it (or a guard that opens for it) is refused. The canary registers nothing.
-  * The audit is durable and signed: receipts and the execution ledger have a path and a signer.
+  * The audit is durable and signed: receipts and the execution ledger have a path and a signer. When FORTRESS is in
+    the chain, its audit ledger signs with a configured key (FORTRESS_AUDIT_KEY), not a random per-process one.
   * OBSERVE is configured, runs the clinical settings the deployment attests (their digest is recorded in every handoff), and
     keeps a bounded ledger with an archive. Patient identifiers are not written to logs. Event-time source keys are registered.
   * The executor is guarded.
@@ -132,7 +133,7 @@ def _data_protection_problems(observe_engine: Any, clinical_settings: Any) -> Li
 def production_problems(*, conservation_kernel: Any, root_admission: Any, observe_engine: Any, receipts: Any,
                         execution_ledger: Any, alert_human: Any, source_signers: Any,
                         guard_executor: bool, escalations: Any = None, sweep_runner: Any = None,
-                        clinical_settings: Any = None) -> List[str]:
+                        clinical_settings: Any = None, fortress_adapter: Any = None) -> List[str]:
     """Every reason this wiring is not a production wiring; empty if it is."""
     problems: List[str] = []
 
@@ -176,6 +177,13 @@ def production_problems(*, conservation_kernel: Any, root_admission: Any, observ
         problems.append("the execution ledger is in memory: a replay after a restart would not be a replay")
     elif getattr(execution_ledger, "signer", None) is None:
         problems.append("the execution ledger is unsigned")
+    if fortress_adapter is not None:
+        fortress_audit = getattr(getattr(fortress_adapter, "fortress", None), "audit", None)
+        if getattr(fortress_audit, "ephemeral_key", None) is not False:
+            problems.append("FORTRESS is in the chain but its audit ledger has no configured key (set "
+                            "FORTRESS_AUDIT_KEY): its records are signed with a random per-process key (or, on a "
+                            "fortress-kernel older than c361569, the published key 'fortress-key') and cannot be "
+                            "verified outside this process")
     if escalations is None:
         problems.append("no escalation desk: a bare alert_human callable proves only that a function returned, not "
                         "that a person was told, took responsibility, or was followed up")

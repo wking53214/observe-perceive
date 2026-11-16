@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **fortress-kernel pin moved off the published audit key.** The `fortress` extra pinned fortress-kernel 4105ccb5, which signed every
+  audit record with the published default key `fortress-key`, so anyone could forge records that verify. It now pins fortress-kernel
+  Main at f5d15b28a2a842a37c38f30dcde6ee3f47f361b7 (c361569 removed the default; records also carry `key_id` and
+  `signature_algorithm`). `FortressPerceiveAdapter` takes `audit_key=`, else reads `FORTRESS_AUDIT_KEY`, and installs that key on the
+  kernel's ledger before anything is recorded; with neither, fortress-kernel signs with a random per-process key (records verify only
+  in that process). `profile="production"` with `fortress_controller=` now refuses to start unless the FORTRESS ledger has a configured
+  key. The orchestrator builds the FORTRESS adapter before the production check (it used to be built after). New
+  `test_fortress_adapter_audit_key.py` and two new tests in `test_production_profile.py`; no pre-existing test edited.
+
 - **Privacy hardening for production (decision D11).** (1) A patient identifier in a log line is now `log_redaction.patient_tag`: `pt:` plus 12
   hex of HMAC-SHA256 (key: `OBSERVE_LOG_SALT`, else a per-process secret), in the engine, the governance system, the notification desk and
   the identity refusal; `OBSERVE_LOG_RAW_PATIENT_IDS=1` is the troubleshooting switch. Measured before: a canary id was in 2 of 11 captured
