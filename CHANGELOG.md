@@ -29,6 +29,12 @@
   (a subclass that overrides `digest`, or a cassette that only claims `settings`, no longer passes). The degraded-event counter is locked.
   Known limits: `OBSERVE_LOG_RAW_PATIENT_IDS` is checked when the orchestrator starts, not on every log line; one process owns an archive.
 
+- **Clinician review sheet (decision D8).** New `docs/race/CLINICIAN_REVIEW_SHEET.md`: twelve illustrative readings with what the engine
+  does today, a mark column (fine / page at WARNING / page at CRITICAL / other) and a column for the threshold wanted, the settings that
+  already exist, the numbers that need acceptance, and the three questions only a clinical owner can answer. New
+  `test_single_channel_behaviour.py` pins the engine's current regime sequence and first page for each row, and checks that the sheet
+  has a row for every case, so a change to behaviour must be acknowledged in both. No engine code changed and no pre-existing test edited.
+
 - **Two integrity gaps closed (decisions D9 and D10).** (D10) PERCEIVE's audit hash covered `audit_id`, `timestamp`, `evaluated_gates` and
   `final_verdict` only, so the patient id and request context in `request_snapshot`, the gate outputs and the manifest version and hash
   could be rewritten with the chain still valid. Entries now carry `hash_version`: 1 is the old hash (every entry written before, which
