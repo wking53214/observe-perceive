@@ -11,6 +11,15 @@
   key of at least 32 bytes that is not the published `fortress-key`; a whitespace-only `audit_key=` counts as none. The orchestrator
   builds the FORTRESS adapter before the production check (it used to be built after). New
   `test_fortress_adapter_audit_key.py` and two new tests in `test_production_profile.py`; no pre-existing test edited.
+
+- **Ticket-log burden report (new tool, no behaviour change).** `ticket_burden.py` reads an escalation desk's hash-chained log read-only and reports tickets
+  by kind, reason and regime; per day and per patient-day with a ticket; time to first dispatch and to acknowledgement (acknowledged tickets only,
+  beside the unacknowledged share); acknowledged, exhausted and open tickets and the age of the oldest open one; tickets needing more than one tier,
+  overdue events and failed dispatches; re-paging within an hour; and concentration in a few patients. It checks the chain from the first event,
+  reports only the verified part on a break (exit status 2), says whether the log is signed (signatures are not verified there), requires a source
+  label and never prints a patient identifier. New `test_ticket_burden.py` (18 tests, a real desk on a controlled clock plus forged but well-formed
+  logs that isolate each chain check) and a section in `docs/race/ALARM_BURDEN.md`. No engine or desk code changed; no pre-existing test edited.
+
 - **Alarm-burden replay (new tool, no behaviour change).** `alarm_burden.py` replays a CSV of readings through a fresh OBSERVE engine under given
   clinical and notification settings and counts escalation events, the subset that would reach a person, events per patient-day (mean, median,
   p90, p99, max), and breakdowns by regime, kind, age group and rule, plus first-reading events, repeats within an hour and concentration in
