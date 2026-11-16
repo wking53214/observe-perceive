@@ -8,7 +8,8 @@
   `signature_algorithm`). `FortressPerceiveAdapter` takes `audit_key=`, else reads `FORTRESS_AUDIT_KEY`, and installs that key on the
   kernel's ledger before anything is recorded; with neither, fortress-kernel signs with a random per-process key (records verify only
   in that process). `profile="production"` with `fortress_controller=` now refuses to start unless the FORTRESS ledger has a configured
-  key. The orchestrator builds the FORTRESS adapter before the production check (it used to be built after). New
+  key of at least 32 bytes that is not the published `fortress-key`; a whitespace-only `audit_key=` counts as none. The orchestrator
+  builds the FORTRESS adapter before the production check (it used to be built after). New
   `test_fortress_adapter_audit_key.py` and two new tests in `test_production_profile.py`; no pre-existing test edited.
 
 - **Privacy hardening for production (decision D11).** (1) A patient identifier in a log line is now `log_redaction.patient_tag`: `pt:` plus 12
