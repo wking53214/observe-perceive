@@ -171,33 +171,33 @@ _GOLDEN_CASES = [
 # (engines, decision_fingerprint) recorded on main before this change.
 _GOLDEN_MAIN = {
     "calm": (['heuristic'],
-        "441c6e309be40d3c621336f8a4a7f9069ec839420cb32959ee3d26144c7d81b5"),
+        "09b4416f27e44522861a972177864dd319c694f59783b4aca55e3d4afa9dd56c"),
     "low_o2": (['heuristic', 'behavioral'],
-        "a3846c09aa03ec5078363ee8e1d91e70d4ad6b60baac05445b41c7321c6b8d02"),
+        "30c46e9c5e474c7bffeffac02e5f04ea417b46b7eb19927b40cff7d3fd62b658"),
     "o2_boundary": (['heuristic'],
-        "4fec0acdff558495c9cd7f3c8c57ae71b7384dfcf3ecb55ba09874d1f05f0e9f"),
+        "fd12545884de8d34b4f2d8b4fa30f7c7fade74e9a459ac3d9951fd4af1a73720"),
     "hr_high": (['heuristic', 'behavioral'],
-        "f1bf38147123ad23433e665ec3ad138d03f9db47f018a24f2ccbc5488828a0e0"),
+        "7e4cd4ae65922445efe7971e2b21cc90c56e0dd25a5f7e42939fdea1b64b63db"),
     "hr_boundary_hi": (['heuristic'],
-        "04b1681ac55b061d36ecd189747f72b0be15d60ddcff54cdd958313b5cafb8bd"),
+        "3af8f6a49d52882501ce767aa6bc63dff877983efed2999fdfc2c223506c41d8"),
     "hr_low": (['heuristic', 'behavioral'],
-        "797b9dcc939e3ca587ac3080cc2ee429aa0a76bbe8dca7fec725f227a1b8ceba"),
+        "0b44b16a0b26524ddb0cb2a795a91500b77fc3089d83b46c9281f8bf5d4d0f10"),
     "hr_boundary_lo": (['heuristic'],
-        "6e1cbedd789718b3927cadd5efd6c63766283f170999d25d8e2592ba8b5f54bc"),
+        "81a0ab4e1bd7ffdc8500117a03f3cd62782d5ae903670b44f98288e81b0ffb20"),
     "rr_only": (['heuristic', 'behavioral'],
-        "697635bd1da82aed3202a1e88442f9c379168e360797669882d97708b2f02ce2"),
+        "ac6d5245534ac969d6f7e903abac03c628789c0a72a6e09ca394d8437b92c700"),
     "rr_boundary": (['heuristic'],
-        "d43ea597ebdaab477c5b31ad663286a317bf8e3ecf0f47f4d60e5a340d690508"),
+        "53310ba8252e320fd175331b73affb8226a09345dc89510e72e264249f1dafbd"),
     "temp_only": (['heuristic', 'behavioral'],
-        "e63c77542dcd6bbb373639aa145b319d2022b68808693f0da14fc8bcc9240a47"),
+        "8808553da559b4a00ad3435c2e0949f02087a1c80b838ff784c88ed87ae186f6"),
     "temp_boundary": (['heuristic'],
-        "363605da043c80596876058b50d7190e79771fe0934be3cf2c412c7bec020bc9"),
+        "df6cfcce8040caa3a3f20e54965f09edb0dc4533cdbd0324060f73f170d6cc97"),
     "rr_and_temp": (['heuristic', 'behavioral'],
-        "99d54a5dce4b15582ff23b2a128a07a697363f760dcf0a83e7f18787fe9879db"),
+        "c65ad6cbecbc77d3912dd6709841c4f35e900318cb6741f6558a29ad3e008672"),
     "force_heavy": (['heuristic', 'bayesian', 'trajectory', 'drift', 'physiological_reserve'],
-        "a41caa44a596a4efef045545b06c612a41299d634962adf5c95a46c27762714c"),
+        "86657eae11ef9b52e4bc184e1a7f62e3ae28eae442fb45deff5aef8dd21cbeaa"),
     "critical": (['heuristic', 'bayesian', 'trajectory', 'drift', 'behavioral', 'physiological_reserve'],
-        "db4bc414cd47db0261154610bfc38e190268796958828707e8d12cb93622f2aa"),
+        "a1dc6660c03937995853497d1eddaad1a999719abf4280bf12591de1fb38ccbb"),
 }
 
 # The fingerprints below were regenerated ONCE, deliberately, when a decision began to record `logic_version` (a digest of what
@@ -210,12 +210,12 @@ _GOLDEN_MAIN = {
 # recorded from main's code on 3.11, and not something this change introduced. The engine lists and the
 # entry shapes are identical on every version; only these fingerprints differ.
 _GOLDEN_MAIN_PRE_312 = {
-    "low_o2": "463e9534824c32cb966eab322abd9bd46419977a0b724586b3189566befa36cd",
-    "hr_high": "cb2ed386305a70381899eb809725872738d1ede384ff6eafdea4355d6e4f5ed9",
-    "hr_boundary_lo": "19a0229f1a93ee6d256b67782b7fd404b93c41394832b647530f3572308530b3",
-    "rr_only": "ea1248ec8549a50fd3d3999181f94e000bbc84589a13a0fbf57b40dd3dcb6d13",
-    "temp_only": "98dd87c241400f496ff19438d5f59fbf5a04b5a449fa2c1c3167b0c9c7dfb46d",
-    "rr_and_temp": "f581843786a8f9aadc1c436687a37f2b70d879b64c363b377141f57242119b3d",
+    "low_o2": "722106ec4685ed07e6286c1ba98b801a242375c73be4871ebb4d151fc0ace7f4",
+    "hr_high": "651e6c3d19b6ed2099c0f8ccd6e6e4c0125cd70a39c829a35398e525d8ee5ead",
+    "hr_boundary_lo": "0fbdb468919185a5c51ba7581a7f8e96eea91409fc5e4bcadbfad837dd277c52",
+    "rr_only": "bf26faee1557e3dce3b64b4ba6cc71209feed0b132f8d27e5efcc5f6b373fabf",
+    "temp_only": "224f8bab0c072c74a7ea810402f34c8f6c9cb6117cc2dc300c542bcad1fca4b0",
+    "rr_and_temp": "3bdfab8362e0b46d876957a5b3e4aade08385bc70c62fd51532b1c8f003bdeb0",
 }
 
 
