@@ -64,6 +64,39 @@ The two events are the adult (S11) and the 5 year old at SpO2 86 (S12). **Neithe
 settings**, because both are WARNING. This was not visible in the review sheet's "Paged" column, which meant "an escalation event";
 the sheet now says so.
 
+## From the desk's own log: `ticket_burden.py`
+
+`alarm_burden.py` says what the engine WOULD page on a recorded stream. `ticket_burden.py` says what the escalation desk DID, from its
+hash-chained log (`human_escalation.EscalationLog`), with no new instrumentation:
+
+```
+python ticket_burden.py escalation_log.jsonl --source "ward 4 pilot, 2026-10-01 to 10-07" [--json]
+```
+
+| Measure | Meaning |
+|---|---|
+| Tickets | By kind, reason and regime; tickets per day with any; tickets per patient-day with a ticket |
+| Time to first dispatch | Opening to the first dispatch that was not a failure (median, 90th percentile, maximum, in seconds) |
+| Time to acknowledge | Opening to the signed acknowledgement, **for acknowledged tickets only**: read it beside the unacknowledged share, or it flatters |
+| Outcome | Acknowledged, exhausted (nobody could be reached) and still open at the end of the log, with the age of the oldest open ticket |
+| Escalation up the tiers | Tickets that needed more than one tier, overdue events, failed dispatches |
+| Re-paging and concentration | Tickets for one patient within an hour of their last; the share from the busiest 5% of patients |
+
+Handling rules it follows: it **reads the file read-only** (no writer lock, nothing repaired, unlike opening an `EscalationDesk`); it checks the
+hash chain from the first event and, on the first break or a half-written last line, reports the figures for the verified part only with a loud
+warning and exit status 2; it reports whether the log is signed but **does not verify signatures** (that needs the responders' keys); and it
+never prints a patient identifier, although the log it reads holds them (identifier data, `CLINICAL_ESCALATION_NOTIFICATION.md`), so keep the
+log and any copy of it in a controlled environment. A signed acknowledgement shows a responder took responsibility, not that they acted or that
+the page was needed. Tested against a real desk on a controlled clock (`test_ticket_burden.py`, 18 tests, hand-derived numbers).
+
+SYNTHETIC demonstration on a hand-built six-ticket ward (not a rate):
+
+```
+6 tickets; acknowledged 2 (33.3%); exhausted (nobody reached) 1; open at the end 3 (oldest 100.0 s)
+seconds to first successful dispatch: median 0, p90 0, max 0; to acknowledgement (acknowledged only): median 30, p90 80, max 80
+needed more than one tier: 1; overdue events: 1; failed dispatches: 3; repeat tickets within 1 hour for one patient: 1
+```
+
 ## For the clinical owner
 
 Two decisions this makes concrete:
