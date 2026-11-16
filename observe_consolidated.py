@@ -24,7 +24,7 @@ import json
 import logging
 import math
 import threading
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field, asdict, replace
 from datetime import datetime, timezone
 from enum import Enum
@@ -1318,7 +1318,7 @@ class ObserveClinicalEngine:
     }
 
     def __init__(self, max_tracked_patients: int = 10000, enable_kalman: bool = False,
-                 cassette=None):
+                 cassette=None, on_degraded=None):
         # Deferred import: the cassette imports this module for the engine
         # table it wraps, so binding it at module scope would be circular.
         # Defaulting here keeps every existing caller working unchanged while
@@ -1346,6 +1346,11 @@ class ObserveClinicalEngine:
         # patient (memory over a silent safety reset). Each eviction is written to the
         # audit ledger as STATE_EVICTED.
         self._max_tracked_patients = max_tracked_patients
+        # Housekeeping that failed without failing an assessment (an eviction record that could not be written). Kept in
+        # memory (the last 100) and given to `on_degraded(event)` so a person can be told; the hook is called outside the
+        # state lock and a hook that raises is logged, never raised.
+        self.degraded_events: "deque" = deque(maxlen=100)
+        self._on_degraded = on_degraded
         self._patient_policies: "OrderedDict[str, EscalationPolicy]" = OrderedDict()
         self._patient_entropy: Dict[str, float] = {}
         # Head of each subject's verdict-state chain. Evicted with the policy
@@ -1391,6 +1396,7 @@ class ObserveClinicalEngine:
         baseline (STABLE regime, escalation lock clear) is evicted. If none exists,
         every patient is kept: memory over a silent safety reset.
         """
+        events: List[Dict[str, Any]] = []
         with self._state_lock:
             if patient_id in self._patient_policies:
                 self._patient_policies.move_to_end(patient_id)
@@ -1412,10 +1418,27 @@ class ObserveClinicalEngine:
                 self._state_commitments.pop(evicted_id, None)
                 self._patient_fault_paged.pop(evicted_id, None)
                 self._patient_hard_rule_recent.pop(evicted_id, None)
-                self.audit_ledger.append(
-                    evicted_id, "STATE_EVICTED",
-                    {"reason": "lru_capacity", "cap": self._max_tracked_patients},
-                )
+                try:
+                    self.audit_ledger.append(
+                        evicted_id, "STATE_EVICTED",
+                        {"reason": "lru_capacity", "cap": self._max_tracked_patients},
+                    )
+                except Exception as exc:  # noqa: BLE001 - housekeeping: one patient's eviction record must not fail another's assessment
+                    events.append({"kind": "state_evicted_write_failed", "patient_id": evicted_id,
+                                   "error": f"{type(exc).__name__}: {exc}"})
+        for event in events:
+            self._degraded(event)
+
+    def _degraded(self, event: Dict[str, Any]) -> None:
+        """Record, log and (if a hook was given) report housekeeping that failed. Never raises."""
+        self.degraded_events.append(event)
+        logger.critical("OBSERVE housekeeping failed (%s: %s); the assessment that triggered it continues",
+                        event.get("kind"), event.get("error"))
+        if self._on_degraded is not None:
+            try:
+                self._on_degraded(dict(event))
+            except Exception as exc:  # noqa: BLE001
+                logger.critical("OBSERVE degraded-event hook failed: %s: %s", type(exc).__name__, exc)
 
     # -- evaluation is all-or-nothing for a patient's tracked state ---------------------------------------------------
     def _snapshot_tracked_state(self, subject: str) -> Dict[str, Any]:

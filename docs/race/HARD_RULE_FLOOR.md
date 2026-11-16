@@ -56,7 +56,7 @@ On `PediatricCassette`, validated at construction (a bad value refuses to start)
 
 | Setting | Default | What it does |
 |---|---|---|
-| `hard_rule_confirm_window` | 3 readings (1 to 1000) | How many readings make a repeat. 1 holds every hard rule at once. Longer tolerates more artefact and waits longer. |
+| `hard_rule_confirm_window` | **1** reading (1 to 1000; was 3 until decision D1) | How many readings make a repeat. 1 holds every hard rule at once. Longer tolerates more artefact and waits longer. |
 | `hard_rule_corroboration` | on | Another abnormal finding confirms at once. Off means only repeats confirm. |
 | `hard_rule_corroboration_margin` | 0.05 (0.001 to 1) | How far above the hard rule's own score the heuristic must sit to count as corroborated. Not zero: that would make every hard rule corroborated, which is a window of 1 and should be asked for as one. |
 
@@ -70,9 +70,11 @@ verdict says it was made with a longer window or without corroboration. At the d
 cassette version stays 1.1.0, because the existing recorded fingerprints must keep their meaning; the hard-rule logic is
 branch logic attested by the source revision, as the rest of `evaluate` is, and any lift it makes is in the entry.
 
-**The default is a decision for a clinician, not a finding.** With window 3 and corroboration on, the one case that still
-waits is a single hard-rule reading beside otherwise normal vitals. Setting the window to 1 removes that wait at the price of
-acting on a lone artefact. This PR ships the earlier agreed default and makes the other choice one argument.
+**The default is a decision for a clinician, not a finding.** This PR shipped window 3, where the one case that still waits is a
+single hard-rule reading beside otherwise normal vitals. **The default is now 1** (decision D1, taken for a first evaluation unit):
+a lone SpO2 below 88 holds WARNING at once, at the price of acting on a lone artefact (EXECUTED: `single_o2_spike_down` is now in the
+pinned risky set as an accepted false alarm). A cassette that gives no window still gets the core's own 3. A clinician can set any
+window; every window above 1 is recorded as weaker than the default.
 
 ## Limits
 

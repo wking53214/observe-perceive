@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Four policy defaults changed, on the clinician's instruction.** (D1) The hard-rule confirmation window now defaults to 1: a lone SpO2
+  below 88 holds WARNING at once (was 3: wait for a repeat). A cassette that supplies no window keeps the core's 3. Any window above 1 is
+  now listed as weaker than the default. Cost, measured: `single_o2_spike_down` (a lone artefact) is now an accepted false alarm in the
+  pinned detection record. (D2) New setting `heart_rate_corroborates` (default false): a heart-rate finding alone no longer corroborates a
+  hard rule; respiratory rate or temperature is needed. (D4) A CRITICAL that reaches PERCEIVE as an ordinary escalation (`severity` or
+  `regime` critical) is exempt from the escalation count and says so; the emergency path already was by design. (D6) A failed
+  `STATE_EVICTED` ledger write no longer fails another patient's assessment: it is logged at CRITICAL, kept in `degraded_events`, and given
+  to an optional `on_degraded` hook (`ClinicalGovernanceSystem` tells a person through its desk). (D3, no code change) A CRITICAL is
+  BLOCKED unless the integration supplies `physician_approved`, by design; a person is paged either way. **Edited pre-existing tests (each
+  asserted the old default or its exact behaviour):** `test_hard_rule_floor.py` (the shared `run` and `engine` helpers and six
+  constructions now name window 3, the mechanism they test; the default-window test now asserts 1; the identity and immutability tests
+  use window 3), `test_observe_crash.py` (one test names window 3), `test_clinical_settings.py` (default values and weakening
+  directions), `test_detection_record.py` (`single_o2_spike_down` added to the risky set with the reason). No assertion about the
+  mechanism changed. Documents: `HARD_RULE_FLOOR.md`, `CLINICIAN_SETTINGS_AND_POPULATION.md`.
+
 - **Clinicians can now adjust the clinical lines, and a patient above the supported population is no longer scored silently as a
   child.** Measured on `main`: every age from 36 months to 125 years used the "child" norms, so a healthy 40 year old at heart rate 70
   was reported with `BRADYCARDIA: 70 < 100` and nothing said the patient was out of scope. New `clinical_settings.ClinicalSettings`
