@@ -37,17 +37,17 @@ def _import_fortress_types():
     if os.path.isdir(fortress_path) and fortress_path not in sys.path:
         sys.path.insert(0, fortress_path)
     try:
-        from fortress_unified import FortressUnified, FortressConfig, Payload
+        from fortress_unified import FortressUnified, FortressConfig, Payload, ImmutableAuditLedger
     except ImportError as e:
         raise ImportError(
             "fortress-kernel not found. Clone it beside this repo "
             "(../fortress-kernel) or install it: "
             "pip install git+https://github.com/wking53214/fortress-kernel.git"
         ) from e
-    return FortressUnified, FortressConfig, Payload
+    return FortressUnified, FortressConfig, Payload, ImmutableAuditLedger
 
 
-FortressUnified, FortressConfig, Payload = _import_fortress_types()
+FortressUnified, FortressConfig, Payload, ImmutableAuditLedger = _import_fortress_types()
 
 logger = logging.getLogger("FORTRESS_ADAPTER")
 logger.setLevel(logging.INFO)
@@ -104,7 +104,8 @@ class FortressPerceiveAdapter:
     def __init__(
         self,
         controller_mode: str = "energy",
-        enable_logging: bool = True
+        enable_logging: bool = True,
+        audit_key: Optional[str] = None,
     ):
         """
         Initialize FORTRESS adapter with controller selection.
@@ -112,9 +113,21 @@ class FortressPerceiveAdapter:
         Args:
             controller_mode: "sage", "lyapunov", or "energy"
             enable_logging: Whether to log processing steps
+            audit_key: HMAC key for FORTRESS's audit ledger. None reads
+                FORTRESS_AUDIT_KEY. With neither, fortress-kernel signs with a
+                random per-process key (`fortress.audit.ephemeral_key` is
+                True): tampering is caught in this process, but the records
+                cannot be verified anywhere else. There is no default key.
         """
         self.config = FortressConfig(controller_mode=controller_mode)
         self.fortress = FortressUnified(self.config)
+        # FortressUnified builds its ledger without a key argument, so the
+        # configured key is passed here, before anything is recorded. The
+        # environment is read here too, so a kernel that does not read
+        # FORTRESS_AUDIT_KEY itself still gets the configured key.
+        audit_key = audit_key or os.environ.get("FORTRESS_AUDIT_KEY")
+        if audit_key:
+            self.fortress.audit = ImmutableAuditLedger(audit_key=audit_key)
         self.controller_mode = controller_mode
         self.enable_logging = enable_logging
 

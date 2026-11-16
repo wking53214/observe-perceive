@@ -408,3 +408,27 @@ def test_settings_that_override_their_own_digest_on_the_instance_are_not_trusted
     object.__setattr__(attested, "digest", lambda: ClinicalSettings().digest())     # claims to be the defaults the engine runs
     engine = ObserveClinicalEngine(ledger_max_entries=100, ledger_archive_path=tmp_path / "o.jsonl")
     assert "different clinical settings from the ones attested" in refused(tmp_path, observe_engine=engine, clinical_settings=attested)
+
+
+# ---- FORTRESS in the chain: its audit ledger signs with a configured key ---------------------------------------------
+
+def _fortress_or_skip():
+    try:
+        import fortress_perceive_adapter  # noqa: F401
+    except ImportError:  # the adapter raises a plain ImportError when fortress-kernel is absent
+        pytest.skip("fortress-kernel is not installed")
+
+
+def test_fortress_without_a_configured_audit_key_is_refused(tmp_path, monkeypatch):
+    _fortress_or_skip()
+    monkeypatch.delenv("FORTRESS_AUDIT_KEY", raising=False)
+    assert "FORTRESS is in the chain but its audit ledger has no configured key" in refused(
+        tmp_path, fortress_controller="energy")
+
+
+def test_fortress_with_a_configured_audit_key_starts(tmp_path, monkeypatch):
+    import secrets
+    _fortress_or_skip()
+    monkeypatch.setenv("FORTRESS_AUDIT_KEY", secrets.token_hex(32))   # generated per run, never written down
+    o = build(tmp_path, fortress_controller="energy")
+    assert o.fortress_adapter is not None and o.fortress_adapter.fortress.audit.ephemeral_key is False
