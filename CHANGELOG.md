@@ -7,11 +7,14 @@
   could be rewritten with the chain still valid. Entries now carry `hash_version`: 1 is the old hash (every entry written before, which
   loads unchanged), 2 also covers those fields (new entries). `verify_chain_integrity` now uses the one versioned `_hash`. (D9) Two
   builds with different clinical behaviour could write the same `parameter_set_version` (the SpO2 line 88 and the hypothermia line 35 were
-  not in it). New `logic_stamp.logic_digest` hashes what scoring code does (syntax tree: node kinds, names, constants; not comments,
-  formatting, docstrings or logging; stable across Python 3.11 to 3.13, which `ast.dump` is not), and every decision records
-  `logic_version` (core plus cassette) in its provenance, inside the fingerprinted payload. **This changes every recorded decision
-  fingerprint once, on purpose,** and from now on whenever the scoring logic changes. The cassette version stays 1.1.0.
-  **Edited pre-existing tests:** `test_engine_gate_profile.py` (the 14 pinned fingerprints, regenerated for Python 3.12 and for 3.11, and
+  not in it). New `logic_stamp.logic_digest` hashes what scoring code does (syntax tree: node kinds, names, constants and scalars; not
+  comments, formatting, docstrings or logging; identical on Python 3.11 to 3.13, which `ast.dump` is not), over WHOLE MODULES
+  (`observe_consolidated`, `kalman_trajectory`, `cassette`, `logic_stamp`, `pediatric_cassette`, `clinical_settings`, plus the module of
+  any subclass), because a hand-picked list of functions missed 13 clinically meaningful edits in review. Every decision records
+  `logic_version` in its provenance, inside the fingerprinted payload. **This changes every recorded decision fingerprint once, on
+  purpose,** and from now on whenever those modules change (a non-clinical edit too: that is the price of missing none). The
+  cassette version stays 1.1.0. The PERCEIVE hash is also computed over a JSON-normalised snapshot, so it is the same in memory and after
+  a reload (integer keys sorted differently before) and no longer raises on a tuple or mixed key. **Edited pre-existing tests:** `test_engine_gate_profile.py` (the 14 pinned fingerprints, regenerated for Python 3.12 and for 3.11, and
   `logic_version` added to the expected entry keys), `test_fault_overlay.py` (`logic_version` added to the expected entry keys). Nothing
   about any reading's verdict changed. Documents: `CHANGE_CONTROL_AND_VALIDATION.md`, `ADVERSARIAL_REGISTER.md`, `DATA_PRIVACY_AND_RESEARCH.md`.
 

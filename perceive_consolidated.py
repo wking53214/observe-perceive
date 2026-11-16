@@ -627,6 +627,18 @@ class ImmutableAuditLedger:
             self.chain_head = entry.immutable_hash
 
     @staticmethod
+    def _normalized(value: Any) -> Any:
+        """`value` as a JSON file round trip returns it. A key JSON cannot carry (a tuple) becomes its str(), as `default=str` does for
+        a value, so hashing never raises on a snapshot `main` accepted."""
+        def plain(v: Any) -> Any:
+            if isinstance(v, dict):
+                return {(k if isinstance(k, (str, int, float, bool, type(None))) else str(k)): plain(x) for k, x in v.items()}
+            if isinstance(v, (list, tuple)):
+                return [plain(x) for x in v]
+            return v
+        return json.loads(json.dumps(plain(value), default=str))
+
+    @staticmethod
     def _hash(entry: "AuditEntry") -> str:
         entry_dict = {
             "audit_id": entry.audit_id,
@@ -634,10 +646,13 @@ class ImmutableAuditLedger:
             "evaluated_gates": entry.evaluated_gates,
             "final_verdict": entry.final_verdict,
         }
-        if entry.hash_version >= 2:
+        if type(entry.hash_version) is int and entry.hash_version >= 2:
+            # Hashed in the form a JSON file round trip gives back (keys become strings, tuples lists, odd values their
+            # str()), so an entry hashes the same in memory and after it is persisted and reloaded: a snapshot with integer
+            # keys would otherwise sort numerically here and lexically after reload.
             entry_dict.update({
-                "request_snapshot": entry.request_snapshot,
-                "policy_outputs": entry.policy_outputs,
+                "request_snapshot": ImmutableAuditLedger._normalized(entry.request_snapshot),
+                "policy_outputs": ImmutableAuditLedger._normalized(entry.policy_outputs),
                 "manifest_version": entry.manifest_version,
                 "manifest_hash": entry.manifest_hash,
             })

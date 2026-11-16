@@ -271,9 +271,13 @@ class PediatricCassette:
         global _LOGIC_DIGEST
         if _LOGIC_DIGEST is not None:                       # the source cannot change within a process: compute it once
             return _LOGIC_DIGEST
+        import sys
+        import clinical_settings as _settings_module
         from clinical_settings import ClinicalSettings as _Settings
+        # Whole modules, for the reason given at ENGINE_LOGIC_DIGEST: this module and the settings module, so every constant and
+        # helper either reads is covered, not only the class.
         _LOGIC_DIGEST = logic_digest(
-            PediatricCassette, _Settings,
+            sys.modules[__name__], _settings_module,
             constants={"HARD_RULE_RISK": HARD_RULE_RISK, "HARD_RULE_ENGINE": HARD_RULE_ENGINE,
                        "neutral": _VITALS_NEUTRAL, "channel_context_keys": _CHANNEL_CONTEXT_KEYS,
                        "default_engine_gate": DEFAULT_ENGINE_GATE, "engine_gates": list(ENGINE_GATES),

@@ -101,3 +101,39 @@ def test_a_version_1_entry_cannot_be_used_to_launder_a_rewrite():
     ask(k)
     k.audit_ledger.entries[0].hash_version = 1
     assert not k.audit_ledger.verify_chain_integrity()
+
+
+def test_a_snapshot_with_integer_keys_hashes_the_same_in_memory_and_after_a_reload(tmp_path):
+    """Review finding: `sort_keys` orders integer keys numerically in memory and lexically once JSON has made them strings."""
+    path = tmp_path / "ints.jsonl"
+    ledger = ImmutableAuditLedger(path=path)
+    ledger.append_decision({9: "nine", 10: "ten", 100: "hundred"}, ["g"], [], {"approved": True}, "1", "h")
+    assert ledger.verify_chain_integrity()
+    assert ImmutableAuditLedger(path=path).verify_chain_integrity()                   # reloads without an integrity error
+
+
+def test_a_tuple_key_in_memory_no_longer_raises_when_hashing():
+    ledger = ImmutableAuditLedger(path=None)
+    ledger.append_decision({(1, 2): "tuple key"}, ["g"], [], {"approved": True}, "1", "h")
+    assert ledger.verify_chain_integrity()
+
+
+def test_a_snapshot_with_mixed_key_types_no_longer_raises_in_append():
+    ledger = ImmutableAuditLedger(path=None)
+    ledger.append_decision({"a": 1, 2: "two", None: "none"}, ["g"], [], {"approved": True}, "1", "h")
+    assert ledger.verify_chain_integrity()
+
+
+def test_a_hash_version_that_is_not_a_whole_number_is_an_integrity_error_not_a_crash(tmp_path):
+    path = tmp_path / "v.jsonl"
+    k = kernel(path)
+    ask(k)
+    raw = json.loads(path.read_text().splitlines()[0])
+    raw["hash_version"] = "2"
+    path.write_text(json.dumps(raw, sort_keys=True) + "\n")
+    with pytest.raises(AuditLedgerIntegrityError):
+        kernel(path)
+    k2 = kernel()
+    ask(k2)
+    k2.audit_ledger.entries[0].hash_version = "2"
+    assert not k2.audit_ledger.verify_chain_integrity()                                  # False, not a TypeError
