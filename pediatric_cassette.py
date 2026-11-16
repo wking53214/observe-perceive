@@ -117,7 +117,12 @@ class PediatricCassette:
     name = "pediatric_deterioration"
     # 1.1.0: supplies mask_faults. The hard-rule confirmation below is branch logic attested by the source revision, as
     # evaluate's other branches are; a setting that is not at its default is recorded in `identity_extras`, and any lift
-    # it causes in the decision's `safety_bypass` note. The version stays, so recorded fingerprints keep their meaning.
+    # it causes in the decision's `safety_bypass` note.
+    # The version stays 1.1.0 across the default changes of decisions D1 and D2 (window 1, heart rate alone does not corroborate),
+    # as it did across the hard-rule floor and the population floor, so recorded fingerprints keep their meaning. The cost is
+    # known and listed in the register: an entry with empty `identity_extras` was made under the defaults of ITS source
+    # revision, and nothing in the entry says which. Closing that is the parameter-set change (decision D9), which puts these
+    # defaults into the version stamp once, on purpose.
     version = "1.1.0"
 
     def __init__(self, engine_gate: str = DEFAULT_ENGINE_GATE, *,

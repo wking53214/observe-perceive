@@ -1350,6 +1350,8 @@ class ObserveClinicalEngine:
         # memory (the last 100) and given to `on_degraded(event)` so a person can be told; the hook is called outside the
         # state lock and a hook that raises is logged, never raised.
         self.degraded_events: "deque" = deque(maxlen=100)
+        self.degraded_dropped = 0                       # events pushed out of the last 100 (the count is never lost)
+        self._degraded_pending: List[Dict[str, Any]] = []
         self._on_degraded = on_degraded
         self._patient_policies: "OrderedDict[str, EscalationPolicy]" = OrderedDict()
         self._patient_entropy: Dict[str, float] = {}
@@ -1430,11 +1432,24 @@ class ObserveClinicalEngine:
             self._degraded(event)
 
     def _degraded(self, event: Dict[str, Any]) -> None:
-        """Record, log and (if a hook was given) report housekeeping that failed. Never raises."""
+        """Record and log housekeeping that failed, and queue it for the hook. Never raises and never calls the hook: this runs
+        in the middle of an assessment, and a slow or re-entrant hook there would widen races with other evaluations."""
+        if len(self.degraded_events) == self.degraded_events.maxlen:
+            self.degraded_dropped += 1
         self.degraded_events.append(event)
         logger.critical("OBSERVE housekeeping failed (%s: %s); the assessment that triggered it continues",
                         event.get("kind"), event.get("error"))
-        if self._on_degraded is not None:
+        with self._state_lock:
+            self._degraded_pending.append(event)
+
+    def _flush_degraded(self) -> None:
+        """Give queued housekeeping failures to the hook, after the assessment that found them has finished and with no lock
+        held. A hook that raises is logged, never raised; a hook may call back into this engine."""
+        with self._state_lock:
+            pending, self._degraded_pending = self._degraded_pending, []
+        if self._on_degraded is None:
+            return
+        for event in pending:
             try:
                 self._on_degraded(dict(event))
             except Exception as exc:  # noqa: BLE001
@@ -1495,7 +1510,13 @@ class ObserveClinicalEngine:
             if patient_id not in self._patient_policies:
                 self._patient_policies[patient_id] = EscalationPolicy()
         self._touch_patient(patient_id)
-        return self._patient_policies[patient_id]
+        with self._state_lock:
+            # Another evaluation may have evicted this patient between the two sections (only a calm, unlocked patient is ever
+            # evicted, so a fresh policy is exactly what eviction would have left): never fail this assessment for it.
+            policy = self._patient_policies.get(patient_id)
+            if policy is None:
+                policy = self._patient_policies[patient_id] = EscalationPolicy()
+            return policy
 
     def _provenance(self) -> Dict[str, Any]:
         """What produced a decision besides its inputs: the core's calibration
@@ -1589,6 +1610,8 @@ class ObserveClinicalEngine:
         except BaseException:
             self._restore_tracked_state(subject, snapshot)
             raise
+        finally:
+            self._flush_degraded()
 
     def _evaluate(self, vitals: VitalsSnapshot) -> FusedVerdict:
         subject = self._cassette.subject_id(vitals)
