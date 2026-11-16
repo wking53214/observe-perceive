@@ -998,7 +998,26 @@ class PerceiveGovernanceKernel:
             provenance=Provenance("system", gate_name, kind),
         )
 
+    @staticmethod
+    def _critical_exempt(request: PolicyRequest) -> bool:
+        """Is this a CRITICAL that OBSERVE itself found? Only the orchestrator's own `observe_assessment` counts (it drops a
+        caller's, and writes this one from the engine's verdict). A `severity` or `regime` the caller wrote is a claim, and
+        a claim could dodge the count, so it is not evidence. Decision D4."""
+        assessed = (request.context or {}).get("observe_assessment")
+        return (isinstance(assessed, dict) and assessed.get("status") == "assessed"
+                and str(assessed.get("regime", "")).lower() == "critical")
+
     def _escalation_rate_gate(self, request: PolicyRequest, ref: datetime) -> PolicyOutput:
+        # A CRITICAL is never rate-limited (life-safety): the emergency_override path has no rate gate by design, and a CRITICAL
+        # that reaches here as an ordinary escalation is exempt in the same way. The exemption is recorded on the output, is
+        # not an advisory violation, and the escalation is not counted (see `_critical_exempt` and the recording below).
+        if self._critical_exempt(request):
+            return PolicyOutput(
+                gate_name="escalation_rate_policy", approved=True, confidence=1.0,
+                violation_details=["CRITICAL is never rate-limited (life-safety); the count was not applied"],
+                timestamp=datetime.now(timezone.utc),
+                provenance=Provenance("system", "escalation_rate_policy", "critical_exempt"),
+            )
         day, hour, mins = self.gov_state.escalation_window_counts(request.subject_id, ref)
         ok, violations = EscalationPolicy.can_escalate(
             current_risk_tier=request.context.get("severity", "warning"),
@@ -1117,7 +1136,7 @@ class PerceiveGovernanceKernel:
         # through. Surface it on the verdict, and say what turns it on.
         advisory_violations = [
             f"{o.gate_name}: {d}"
-            for o in policy_outputs if o.approved
+            for o in policy_outputs if o.approved and o.provenance.justification != "critical_exempt"
             for d in o.violation_details
         ]
         if advisory_violations:
@@ -1147,7 +1166,8 @@ class PerceiveGovernanceKernel:
         # WS2a: record history only AFTER final approval, so a request never counts
         # against itself and the NEXT request sees it. Deterministic on ref_time.
         if approved:
-            if request.request_type == "escalate_patient":
+            if request.request_type == "escalate_patient" and not self._critical_exempt(request):
+                # An exempt CRITICAL is not counted either: it must not fill the day and refuse a later WARNING.
                 self.gov_state.record_escalation(request.subject_id, ref_time)
             elif request.request_type == "modify_rule":
                 self.gov_state.record_rule_modification(

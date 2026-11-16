@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Four policy defaults changed, on the clinician's instruction.** (D1) The hard-rule confirmation window now defaults to 1: a lone SpO2
+  below 88 holds WARNING at once (was 3: wait for a repeat). A cassette that supplies no window keeps the core's 3. Any window above 1 is
+  now listed as weaker than the default. Cost, measured: `single_o2_spike_down` (a lone artefact) is now an accepted false alarm in the
+  pinned detection record. (D2) New setting `heart_rate_corroborates` (default false): a heart-rate finding alone no longer corroborates a
+  hard rule; respiratory rate or temperature is needed. (D4) A CRITICAL that OBSERVE itself found (the orchestrator's own `observe_assessment`, authoritative) is exempt from the escalation count
+  when it reaches PERCEIVE as an ordinary escalation, is not counted against the day, and the exemption is on the record but is not an
+  "advisory violation"; a `severity` or `regime` a caller wrote is a claim and does not exempt (review: it could dodge the count). The
+  emergency path was already exempt by design. The exemption becomes active for orchestrator requests once PR 13 (OBSERVE first) merges,
+  because that is what writes `observe_assessment`. (D6) A failed `STATE_EVICTED` ledger write no longer fails another patient's assessment: it is
+  logged at CRITICAL, kept in `degraded_events` (with a `degraded_dropped` count past 100) and given to an optional `on_degraded`
+  hook AFTER the assessment that found it finishes, outside every lock (review: a hook run mid-assessment widened a race and a
+  re-entrant hook crashed it); `_get_policy` also no longer fails if another evaluation evicts the patient between its two steps.
+  `ClinicalGovernanceSystem` tells a person through its desk. **Known limit (listed in the register):** an entry with empty
+  `identity_extras` was made under the defaults of its source revision; the cassette version stays 1.1.0 to keep recorded
+  fingerprints, and the parameter-set change (D9) will close it. (D3, no code change) A CRITICAL is
+  BLOCKED unless the integration supplies `physician_approved`, by design; a person is paged either way. **Edited pre-existing tests (each
+  asserted the old default or its exact behaviour):** `test_hard_rule_floor.py` (the shared `run` and `engine` helpers and six
+  constructions now name window 3, the mechanism they test; the default-window test now asserts 1; the identity and immutability tests
+  use window 3), `test_observe_crash.py` (one test names window 3), `test_clinical_settings.py` (default values and weakening
+  directions), `test_detection_record.py` (`single_o2_spike_down` added to the risky set with the reason). No assertion about the
+  mechanism changed. Documents: `HARD_RULE_FLOOR.md`, `CLINICIAN_SETTINGS_AND_POPULATION.md`.
+
+
 - **OBSERVE now runs first, in every profile, and the request commits to what it found.** Measured on `main`: advisory assessed the patient
   after the action; a request refused at any earlier stage had no assessment and no page (a CRITICAL reading on a request the kernel refused
   paged nobody); an action that raised was never followed by an assessment; and the request commitment said nothing about the assessment.

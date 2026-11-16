@@ -205,7 +205,8 @@ class ClinicalGovernanceSystem:
         # Clinician-adjustable clinical settings: None (the defaults), a ClinicalSettings, a mapping of overrides, or a
         # path to a JSON file. Invalid or unreadable settings raise here; they never fall back to the defaults.
         self.settings = ClinicalSettings.coerce(settings)
-        self.observe = ObserveClinicalEngine(cassette=PediatricCassette(settings=self.settings))
+        self.observe = ObserveClinicalEngine(cassette=PediatricCassette(settings=self.settings),
+                                             on_degraded=self._engine_degraded)
         # WS2a: enforcement defaults to advisory inside the kernel (baseline unchanged).
         self.perceive = PerceiveGovernanceKernel(dgk_gateway=dgk_gateway, enforcement=enforcement)
 
@@ -345,6 +346,20 @@ class ClinicalGovernanceSystem:
 
         self._tell_a_person(decision, verdict, request)
         return decision
+
+    def _engine_degraded(self, event: Dict[str, Any]) -> None:
+        """OBSERVE housekeeping failed without failing an assessment (decision D6). With an escalation desk a person is
+        told, as for any stage that fails; otherwise the engine's own CRITICAL log line is all there is, and the event is
+        kept on `observe.degraded_events`. Never raises."""
+        if self.escalations is None:
+            return
+        try:
+            self.escalations.raise_and_dispatch(
+                kind="stage_error", request_id=None, artifact_id=None,
+                context={"stage": "observe_housekeeping", "stage_error": f"{event.get('kind')}: {event.get('error')}"})
+        except Exception as exc:  # noqa: BLE001 - telling a person must not alter an assessment
+            logger.critical("could not tell a person about an OBSERVE housekeeping failure: %s: %s",
+                            type(exc).__name__, exc)
 
     def _assessment_unavailable(self, vitals: VitalsSnapshot, error: Exception) -> ClinicalDecision:
         """OBSERVE crashed, so the patient was not assessed. An OBSERVE exception used to propagate: no decision came

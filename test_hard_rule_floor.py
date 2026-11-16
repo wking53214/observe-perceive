@@ -22,12 +22,20 @@ SICK = (138, 86.0, 34, 39.1)         # SpO2 86 with fever, a fast heart and fast
 
 
 def engine(**settings):
+    # The default window is 1 (decision D1); the mechanism tests below assert window 3 unless they name another.
+    settings.setdefault("hard_rule_confirm_window", 3)
     return ObserveClinicalEngine(cassette=PediatricCassette(**settings))
+
+
+def window3(**kw):
+    return ObserveClinicalEngine(cassette=PediatricCassette(hard_rule_confirm_window=3), **kw)
 
 
 def run(readings, eng=None, step_minutes=60, age=24, pid="P1"):
     """readings: (hr, spo2, rr, temp). Previous-reading history is supplied, as an integrator would."""
-    eng, out, prev = eng or ObserveClinicalEngine(), [], None
+    # These tests assert the confirmation MECHANISM at window 3 (a lone reading waits for a repeat), which was the default
+    # until the default became 1 (every hard rule holds WARNING at once). They name the window they test.
+    eng, out, prev = eng or ObserveClinicalEngine(cassette=PediatricCassette(hard_rule_confirm_window=3)), [], None
     for i, (hr, o2, rr, temp) in enumerate(readings):
         ctx = {"age_months": age}
         if prev:
@@ -40,8 +48,9 @@ def run(readings, eng=None, step_minutes=60, age=24, pid="P1"):
 
 # ---- a repeat confirms --------------------------------------------------------------------------------------------
 
-def test_the_default_window_is_the_one_these_tests_assume():
-    assert HARD_RULE_CONFIRM_WINDOW == 3 and PediatricCassette().hard_rule_confirm_window() == 3
+def test_the_default_window_is_one_and_the_core_fallback_for_a_cassette_with_no_answer_is_still_three():
+    assert PediatricCassette().hard_rule_confirm_window() == 1       # decision D1: hold WARNING at once by default
+    assert HARD_RULE_CONFIRM_WINDOW == 3                              # a cassette that gives no window keeps the core's own
 
 
 def test_a_repeated_hard_rule_escalates_even_when_history_dilutes_the_fusion():
@@ -74,7 +83,7 @@ def test_a_dip_followed_by_enough_normal_readings_is_a_lone_dip_again():
 
 
 def test_one_patients_dips_do_not_confirm_anothers():
-    eng = ObserveClinicalEngine()
+    eng = window3()
     ctx = {"age_months": 24, "previous_o2": 98, "previous_hr": 100, "previous_rr": 24, "previous_temp": 37.0,
            "time_delta_seconds": 60}
     eng.evaluate(VitalsSnapshot("A", T0, 104, 82, 28, 37.6, dict(ctx)))
@@ -135,7 +144,7 @@ def test_the_confirmation_window_is_a_setting(window, expected):
     spikes = [CALM, LOW, (104, 97, 28, 37.6), (106, 82, 30, 37.7)]         # low, normal, low
     assert run(spikes, engine(hard_rule_confirm_window=window))[3].escalation_required is expected
     assert PediatricCassette(hard_rule_confirm_window=window).identity_extras.get(
-        "hard_rule_confirm_window") == (None if window == 3 else str(window))
+        "hard_rule_confirm_window") == (None if window == 1 else str(window))
 
 
 def test_a_window_of_one_holds_every_hard_rule_at_once_with_nothing_to_wait_for():
@@ -160,7 +169,7 @@ def test_a_hard_rule_is_never_silent_beyond_the_window_across_ages_and_histories
     for age in AGES:
         for history in HISTORIES:
             for low in LOWS:
-                eng = ObserveClinicalEngine()
+                eng = window3()
                 r = run(history + [low, low], eng, age=age)
                 assert _hard_rule_fired_on_last(eng), (age, history, low)             # the sweep is not vacuous
                 assert SEVERITY.index(r[-1].regime.value) >= SEVERITY.index("warning"), (age, history, low)
@@ -274,7 +283,7 @@ def test_a_patient_with_a_hard_rule_waiting_for_confirmation_is_not_evicted_to_m
     """A had one low reading (a lone dip, judged as before). B and C arrive and the table is full. A's next low
     reading must still be a repeat: forgetting A here would silence exactly the case the window exists to catch."""
     for cap, expect in ((2, True), (10, True)):
-        eng = ObserveClinicalEngine(max_tracked_patients=cap)
+        eng = window3(max_tracked_patients=cap)
         run([CALM, LOW], eng, pid="A")
         for pid in ("B", "C"):
             run([CALM], eng, pid=pid)
@@ -292,7 +301,7 @@ def test_a_calm_patient_is_still_evicted_so_memory_stays_bounded():
 
 
 def test_the_same_reading_submitted_twice_is_not_its_own_repeat():
-    eng = ObserveClinicalEngine()
+    eng = window3()
     first = run([CALM], eng)
     reading = VitalsSnapshot("P1", T0 + timedelta(hours=1), 102, 85, 26, 37.5,
                              {"age_months": 24, "previous_hr": 100, "previous_o2": 98, "previous_rr": 24,
@@ -303,7 +312,7 @@ def test_the_same_reading_submitted_twice_is_not_its_own_repeat():
 
 
 def test_a_retry_after_a_crash_part_way_through_is_not_a_repeat(monkeypatch):
-    eng = ObserveClinicalEngine()
+    eng = window3()
     run([CALM], eng)
     reading = VitalsSnapshot("P1", T0 + timedelta(hours=1), 102, 85, 26, 37.5,
                              {"age_months": 24, "previous_hr": 100, "previous_o2": 98, "previous_rr": 24,
@@ -322,7 +331,7 @@ def test_a_retry_after_a_crash_part_way_through_is_not_a_repeat(monkeypatch):
 
 
 def test_an_earlier_timestamp_is_not_a_repeat_and_a_later_one_is():
-    eng = ObserveClinicalEngine()
+    eng = window3()
     low = lambda hours: VitalsSnapshot("P1", T0 + timedelta(hours=hours), 102, 85, 26, 37.5,       # noqa: E731
                                        {"age_months": 24, "previous_hr": 100, "previous_o2": 98, "previous_rr": 24,
                                         "previous_temp": 37.0, "time_delta_seconds": 3600})
@@ -332,7 +341,7 @@ def test_an_earlier_timestamp_is_not_a_repeat_and_a_later_one_is():
 
 
 def test_a_timestamp_that_cannot_be_ordered_counts_as_a_repeat_the_direction_that_escalates():
-    eng = ObserveClinicalEngine()
+    eng = window3()
     run([CALM], eng)
     eng._patient_hard_rule_recent["P1"] = [(datetime(2026, 1, 1), True)]       # naive: cannot be compared with aware
     r = eng.evaluate(VitalsSnapshot("P1", T0 + timedelta(hours=1), 102, 85, 26, 37.5,
@@ -356,7 +365,49 @@ def test_a_score_exactly_at_the_margin_counts_whatever_the_float_arithmetic_did(
 @pytest.mark.parametrize("name", ["hard_rule_confirm_window", "hard_rule_corroborated", "engine_gate",
                                   "_hard_rule_confirm_window", "_hard_rule_corroboration", "_hard_rule_corroboration_margin"])
 def test_a_setting_cannot_be_changed_after_the_cassette_is_built(name):
-    c = PediatricCassette(hard_rule_confirm_window=1)
+    c = PediatricCassette(hard_rule_confirm_window=3)
     with pytest.raises(AttributeError, match="fixed once"):
         setattr(c, name, 1)
-    assert c.hard_rule_confirm_window() == 1 and c.identity_extras == {"hard_rule_confirm_window": "1"}
+    assert c.hard_rule_confirm_window() == 3 and c.identity_extras == {"hard_rule_confirm_window": "3"}
+
+
+# ---- decision D2: heart rate alone does not corroborate a low SpO2 -----------------------------------------------------
+
+HR_ONLY = (150, 86.0, 24, 37.0)        # SpO2 86 and a fast heart (toddler limit 140), breathing and temperature normal
+RR_TOO = (100, 86.0, 45, 37.0)         # SpO2 86 and fast breathing (toddler limit 40)
+TEMP_TOO = (100, 86.0, 24, 39.1)       # SpO2 86 and fever
+
+
+def _second_reading_escalates(reading, eng):
+    return run([CALM, reading], eng, 15)[1].escalation_required
+
+
+def test_a_fast_heart_alone_does_not_corroborate_a_low_spo2_by_default():
+    from clinical_settings import ClinicalSettings
+    assert not _second_reading_escalates(HR_ONLY, engine())
+    on = ObserveClinicalEngine(cassette=PediatricCassette(settings=ClinicalSettings(
+        hard_rule_confirm_window=3, heart_rate_corroborates=True)))
+    assert _second_reading_escalates(HR_ONLY, on)
+
+
+def test_fast_breathing_or_fever_beside_a_low_spo2_still_corroborates():
+    assert _second_reading_escalates(RR_TOO, engine()) and _second_reading_escalates(TEMP_TOO, engine())
+
+
+def test_heart_rate_plus_another_channel_corroborates():
+    assert _second_reading_escalates((150, 86.0, 45, 37.0), engine())
+
+
+def test_an_unrecognised_finding_still_corroborates_the_direction_that_escalates():
+    out = _heuristic(0.7)
+    out.triggered_rules = ["SOMETHING_NEW: x", "TACHYCARDIA: 138 > 130"]
+    assert PediatricCassette().hard_rule_corroborated([out])
+
+
+def test_the_heart_rate_setting_is_validated_recorded_and_not_a_weakening():
+    from clinical_settings import ClinicalSettings, SettingsError
+    with pytest.raises(SettingsError):
+        ClinicalSettings(heart_rate_corroborates="yes")
+    on = ClinicalSettings(heart_rate_corroborates=True)
+    assert on.weakenings() == [] and on.non_default() == {"heart_rate_corroborates": "True"}
+    assert PediatricCassette(settings=on).identity_extras["setting.heart_rate_corroborates"] == "True"

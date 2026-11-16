@@ -24,7 +24,7 @@ import json
 import logging
 import math
 import threading
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field, asdict, replace
 from datetime import datetime, timezone
 from enum import Enum
@@ -1318,7 +1318,7 @@ class ObserveClinicalEngine:
     }
 
     def __init__(self, max_tracked_patients: int = 10000, enable_kalman: bool = False,
-                 cassette=None):
+                 cassette=None, on_degraded=None):
         # Deferred import: the cassette imports this module for the engine
         # table it wraps, so binding it at module scope would be circular.
         # Defaulting here keeps every existing caller working unchanged while
@@ -1346,6 +1346,13 @@ class ObserveClinicalEngine:
         # patient (memory over a silent safety reset). Each eviction is written to the
         # audit ledger as STATE_EVICTED.
         self._max_tracked_patients = max_tracked_patients
+        # Housekeeping that failed without failing an assessment (an eviction record that could not be written). Kept in
+        # memory (the last 100) and given to `on_degraded(event)` so a person can be told; the hook is called outside the
+        # state lock and a hook that raises is logged, never raised.
+        self.degraded_events: "deque" = deque(maxlen=100)
+        self.degraded_dropped = 0                       # events pushed out of the last 100 (the count is never lost)
+        self._degraded_pending: List[Dict[str, Any]] = []
+        self._on_degraded = on_degraded
         self._patient_policies: "OrderedDict[str, EscalationPolicy]" = OrderedDict()
         self._patient_entropy: Dict[str, float] = {}
         # Head of each subject's verdict-state chain. Evicted with the policy
@@ -1391,6 +1398,7 @@ class ObserveClinicalEngine:
         baseline (STABLE regime, escalation lock clear) is evicted. If none exists,
         every patient is kept: memory over a silent safety reset.
         """
+        events: List[Dict[str, Any]] = []
         with self._state_lock:
             if patient_id in self._patient_policies:
                 self._patient_policies.move_to_end(patient_id)
@@ -1412,10 +1420,40 @@ class ObserveClinicalEngine:
                 self._state_commitments.pop(evicted_id, None)
                 self._patient_fault_paged.pop(evicted_id, None)
                 self._patient_hard_rule_recent.pop(evicted_id, None)
-                self.audit_ledger.append(
-                    evicted_id, "STATE_EVICTED",
-                    {"reason": "lru_capacity", "cap": self._max_tracked_patients},
-                )
+                try:
+                    self.audit_ledger.append(
+                        evicted_id, "STATE_EVICTED",
+                        {"reason": "lru_capacity", "cap": self._max_tracked_patients},
+                    )
+                except Exception as exc:  # noqa: BLE001 - housekeeping: one patient's eviction record must not fail another's assessment
+                    events.append({"kind": "state_evicted_write_failed", "patient_id": evicted_id,
+                                   "error": f"{type(exc).__name__}: {exc}"})
+        for event in events:
+            self._degraded(event)
+
+    def _degraded(self, event: Dict[str, Any]) -> None:
+        """Record and log housekeeping that failed, and queue it for the hook. Never raises and never calls the hook: this runs
+        in the middle of an assessment, and a slow or re-entrant hook there would widen races with other evaluations."""
+        if len(self.degraded_events) == self.degraded_events.maxlen:
+            self.degraded_dropped += 1
+        self.degraded_events.append(event)
+        logger.critical("OBSERVE housekeeping failed (%s: %s); the assessment that triggered it continues",
+                        event.get("kind"), event.get("error"))
+        with self._state_lock:
+            self._degraded_pending.append(event)
+
+    def _flush_degraded(self) -> None:
+        """Give queued housekeeping failures to the hook, after the assessment that found them has finished and with no lock
+        held. A hook that raises is logged, never raised; a hook may call back into this engine."""
+        with self._state_lock:
+            pending, self._degraded_pending = self._degraded_pending, []
+        if self._on_degraded is None:
+            return
+        for event in pending:
+            try:
+                self._on_degraded(dict(event))
+            except Exception as exc:  # noqa: BLE001
+                logger.critical("OBSERVE degraded-event hook failed: %s: %s", type(exc).__name__, exc)
 
     # -- evaluation is all-or-nothing for a patient's tracked state ---------------------------------------------------
     def _snapshot_tracked_state(self, subject: str) -> Dict[str, Any]:
@@ -1472,7 +1510,13 @@ class ObserveClinicalEngine:
             if patient_id not in self._patient_policies:
                 self._patient_policies[patient_id] = EscalationPolicy()
         self._touch_patient(patient_id)
-        return self._patient_policies[patient_id]
+        with self._state_lock:
+            # Another evaluation may have evicted this patient between the two sections (only a calm, unlocked patient is ever
+            # evicted, so a fresh policy is exactly what eviction would have left): never fail this assessment for it.
+            policy = self._patient_policies.get(patient_id)
+            if policy is None:
+                policy = self._patient_policies[patient_id] = EscalationPolicy()
+            return policy
 
     def _provenance(self) -> Dict[str, Any]:
         """What produced a decision besides its inputs: the core's calibration
@@ -1566,6 +1610,8 @@ class ObserveClinicalEngine:
         except BaseException:
             self._restore_tracked_state(subject, snapshot)
             raise
+        finally:
+            self._flush_degraded()
 
     def _evaluate(self, vitals: VitalsSnapshot) -> FusedVerdict:
         subject = self._cassette.subject_id(vitals)

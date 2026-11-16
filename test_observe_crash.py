@@ -147,7 +147,7 @@ def test_a_crash_for_one_patient_leaves_every_other_patient_alone_and_writes_not
 
 
 def test_the_hard_rule_history_is_not_rolled_back_because_a_retry_is_never_its_own_repeat():
-    engine = ObserveClinicalEngine()
+    engine = ObserveClinicalEngine(cassette=PediatricCassette(hard_rule_confirm_window=3))   # the mechanism is window 3's
     ctx = dict(age_months=24, previous_hr=100, previous_o2=98, previous_rr=24, previous_temp=37.0, time_delta_seconds=3600)
     low = VitalsSnapshot("P1", T0 + timedelta(hours=1), 102, 85, 26, 37.5, ctx)
     crash_once_after_state_moves(engine)
