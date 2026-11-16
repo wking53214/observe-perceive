@@ -11,7 +11,8 @@ checking IDENTITY and BEHAVIOUR, not shape:
   * The roster really refuses: a canary request that must be refused is put to it at startup. A roster that
     approves it (or a guard that opens for it) is refused. The canary registers nothing.
   * The audit is durable and signed: receipts and the execution ledger have a path and a signer.
-  * OBSERVE is configured. Event-time source keys are registered.
+  * OBSERVE is configured, runs the clinical settings the deployment attests (their digest is recorded in every handoff), and
+    keeps a bounded ledger with an archive. Patient identifiers are not written to logs. Event-time source keys are registered.
   * The executor is guarded.
   * Someone can be told AND followed up: an EscalationDesk with a valid policy, a key for every responder, and a
     durable signed log (human_escalation.py), swept by a running SweepRunner bound to that same desk whose watchdog
@@ -97,9 +98,41 @@ def _canary_problem(kernel: Any, root_admission: Any) -> Optional[str]:
     return None
 
 
+def _data_protection_problems(observe_engine: Any, clinical_settings: Any) -> List[str]:
+    """What production needs of the clinical settings, the OBSERVE ledger and the logs (decision D11)."""
+    problems: List[str] = []
+    from clinical_settings import ClinicalSettings
+    if clinical_settings is None:
+        problems.append("no clinical settings were attested: pass the ClinicalSettings the clinical owner approved "
+                        "(clinical_settings=...), so the engine's behaviour is the approved one and its digest is recorded in "
+                        "every handoff, not silent defaults")
+    elif type(clinical_settings) is not ClinicalSettings:       # exactly the class: a subclass could say any digest it liked
+        problems.append(f"clinical_settings is a {type(clinical_settings).__name__}, not a ClinicalSettings")
+    elif observe_engine is not None:
+        from pediatric_cassette import PediatricCassette
+        cassette = getattr(observe_engine, "cassette", None)
+        held = getattr(cassette, "settings", None)
+        if not isinstance(cassette, PediatricCassette) or type(held) is not ClinicalSettings:
+            problems.append("the OBSERVE engine's cassette is not a PediatricCassette holding ClinicalSettings, so the attested "
+                            "settings cannot be shown to be the ones its scoring uses")
+        elif ClinicalSettings.digest(held) != ClinicalSettings.digest(clinical_settings):
+            problems.append("the OBSERVE engine runs different clinical settings from the ones attested "
+                            f"(engine {ClinicalSettings.digest(held)[:12]}, attested {ClinicalSettings.digest(clinical_settings)[:12]})")
+    if observe_engine is not None:
+        ledger = getattr(observe_engine, "audit_ledger", None)
+        if getattr(ledger, "max_entries", None) is None:        # a bounded ledger cannot exist without its archive
+            problems.append("the OBSERVE ledger is in memory and unbounded: give the engine ledger_max_entries and "
+                            "ledger_archive_path, so old entries go to an owner-only archive instead of growing forever")
+    from log_redaction import raw_ids_enabled
+    if raw_ids_enabled():
+        problems.append("OBSERVE_LOG_RAW_PATIENT_IDS is set: patient identifiers would be written to the logs")
+    return problems
+
+
 def production_problems(*, conservation_kernel: Any, root_admission: Any, observe_engine: Any, receipts: Any,
                         execution_ledger: Any, alert_human: Any, source_signers: Any,
-                        guard_executor: bool, escalations: Any = None, sweep_runner: Any = None) -> List[str]:
+                        guard_executor: bool, escalations: Any = None, sweep_runner: Any = None,
+                        clinical_settings: Any = None) -> List[str]:
     """Every reason this wiring is not a production wiring; empty if it is."""
     problems: List[str] = []
 
@@ -170,6 +203,7 @@ def production_problems(*, conservation_kernel: Any, root_admission: Any, observ
                 problems.append("the sweep runner is not running: start it before building the orchestrator")
     if observe_engine is None:
         problems.append("no OBSERVE engine is configured")
+    problems.extend(_data_protection_problems(observe_engine, clinical_settings))
     if not source_signers:
         problems.append("no event-time source keys are registered, so no request's event time can be attested")
     return problems

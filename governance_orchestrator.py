@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from governance_contracts import CONTRACT_VERSION
 from governance_chain import verify_result
 from human_escalation import AlertOutcome
+from log_redaction import patient_tag, safe_error
 from execution_guard import ExecutionLedger, ExecutionRefusal as LedgerRefusal, guard_ledger_of
 
 logger = logging.getLogger("GovernanceOrchestrator")
@@ -49,7 +50,8 @@ class GovernanceOrchestrator:
                  escalations=None,
                  clinical_notification=None,
                  sweep_runner=None,
-                 attempt_id_factory=None):
+                 attempt_id_factory=None,
+                 clinical_settings=None):
         """
         Initialize orchestrator with all governance systems.
 
@@ -219,6 +221,9 @@ class GovernanceOrchestrator:
         self.perceive = perceive
         self.conservation_kernel = conservation_kernel
         self.observe_engine = observe_engine
+        # The ClinicalSettings the deployment attests it runs (the production profile requires it and checks the engine against
+        # it); its digest is recorded in every handoff.
+        self.clinical_settings = clinical_settings
         if profile == "production":
             # Fail closed at construction: an orchestrator that cannot prove its wiring never starts.
             from production_profile import ProductionProfileError, production_problems
@@ -226,7 +231,7 @@ class GovernanceOrchestrator:
                 conservation_kernel=conservation_kernel, root_admission=root_admission,
                 observe_engine=observe_engine, receipts=receipts, execution_ledger=self.execution_ledger,
                 alert_human=alert_human, escalations=escalations, source_signers=source_signers,
-                guard_executor=guard_executor, sweep_runner=sweep_runner)
+                guard_executor=guard_executor, sweep_runner=sweep_runner, clinical_settings=clinical_settings)
             if problems:
                 raise ProductionProfileError(problems)
 
@@ -456,7 +461,9 @@ class GovernanceOrchestrator:
         for the patient the VITALS are for, so a deteriorating child is not lost with the refused request. The request is built
         first, so the record names the artifact and can be audited."""
         problems = "; ".join(mismatch["problems"])
-        logger.error(f"[Orchestrator] Refusing: identity mismatch: {problems}")
+        logger.error("[Orchestrator] Refusing: identity mismatch (context patient %s, vitals patient %s, %d problem(s))",
+                     patient_tag((mismatch.get("context") or {}).get("patient_id")), patient_tag(mismatch.get("vitals_patient")),
+                     len(mismatch.get("problems") or []))
         vitals_patient = mismatch.get("vitals_patient")
         alert = self._alert_stage_error("identity", IdentityMismatch(problems), governance_request, patient_id=vitals_patient)
         result = {
@@ -488,6 +495,12 @@ class GovernanceOrchestrator:
             out["reason"] = reason
         return out
 
+    @staticmethod
+    def _log_error(error: BaseException, governance_request=None) -> str:
+        """An exception as a log line may say it: the request's patient is a tag, not an identifier."""
+        context = getattr(governance_request, "context", None)
+        return safe_error(error, context.get("patient_id") if isinstance(context, dict) else None)
+
     def _alert_stage_error(self, stage: str, error: Exception, governance_request, patient_id=None) -> str:
         """Tell a person that a stage raised instead of reaching a verdict.
 
@@ -496,6 +509,11 @@ class GovernanceOrchestrator:
         whatever this does.
         """
         request_id = getattr(governance_request, "request_id", None)
+        # What the LOG may say about the error: the patients' identifiers (the one in hand and the request's own) are tags. The ticket and the alert, which go to a person, still carry the full text.
+        context_patient = (getattr(governance_request, "context", None) or {}).get("patient_id") \
+            if isinstance(getattr(governance_request, "context", None), dict) else None
+        ids = (patient_id, context_patient)
+        shown = safe_error(error, *ids)
         if self.escalations is not None:
             try:
                 ticket_id, state = self.escalations.raise_and_dispatch(
@@ -506,8 +524,8 @@ class GovernanceOrchestrator:
                              **self._patient_context(stage, patient_id)})
             except Exception as desk_error:  # noqa: BLE001 - never alter the rejection
                 logger.critical(
-                    f"[Orchestrator] HUMAN ALERT FAILED: {stage} stage raised {type(error).__name__}: {error} "
-                    f"on request {request_id}; the escalation desk raised {type(desk_error).__name__}: {desk_error}."
+                    f"[Orchestrator] HUMAN ALERT FAILED: {stage} stage raised {shown} "
+                    f"on request {request_id}; the escalation desk raised {safe_error(desk_error, *ids)}."
                 )
                 return AlertOutcome("failed")
             # "delivered" only when the channel itself returned a delivery receipt; "dispatched" when a callable
@@ -515,7 +533,7 @@ class GovernanceOrchestrator:
             return AlertOutcome({"exhausted": "failed", "delivered": "delivered"}.get(state, "dispatched"), ticket_id)
         if self.alert_human is None:
             logger.critical(
-                f"[Orchestrator] HUMAN ALERT NOT SENT: {stage} stage raised {type(error).__name__}: {error} "
+                f"[Orchestrator] HUMAN ALERT NOT SENT: {stage} stage raised {shown} "
                 f"on request {request_id}; no alert_human channel is configured."
             )
             return "no_channel"
@@ -530,8 +548,8 @@ class GovernanceOrchestrator:
             })
         except Exception as alert_error:  # noqa: BLE001 - never alter the rejection
             logger.critical(
-                f"[Orchestrator] HUMAN ALERT FAILED: {stage} stage raised {type(error).__name__}: {error} "
-                f"on request {request_id}; the alert channel raised {type(alert_error).__name__}: {alert_error}."
+                f"[Orchestrator] HUMAN ALERT FAILED: {stage} stage raised {shown} "
+                f"on request {request_id}; the alert channel raised {safe_error(alert_error, *ids)}."
             )
             return "failed"
         return "delivered"
@@ -572,7 +590,7 @@ class GovernanceOrchestrator:
                 result.setdefault("observe_escalation_ticket", told.ticket_id)
         result.setdefault("temporal_anomalies",
                           self._temporal_anomalies(governance_request) if governance_request is not None else [])
-        result.setdefault("handoff", {
+        handoff = {
             "producer": "observe-perceive.GovernanceOrchestrator",
             "contract_version": CONTRACT_VERSION,
             "issued_at": datetime.now(timezone.utc).isoformat(),
@@ -594,7 +612,10 @@ class GovernanceOrchestrator:
             "execution_ledger_signed": self.execution_ledger.signer is not None,
             "receipts": str(getattr(self.receipts, "path", None)) if self.receipts is not None else None,
             "receipts_signed": getattr(self.receipts, "signer", None) is not None,
-        })
+        }
+        if self.clinical_settings is not None:      # present only then, so a record without it keeps its shape
+            handoff["clinical_settings_digest"] = self.clinical_settings.digest()
+        result.setdefault("handoff", handoff)
         return result
 
     def _clinical_notice(self, verdict, vitals_snapshot, request, record_status):
@@ -623,7 +644,7 @@ class GovernanceOrchestrator:
                                     artifact_id=getattr(request, "artifact_id", None))
             return {"reason": reason, "status": status, "ticket": ticket}
         except Exception as exc:  # noqa: BLE001 - never alter the outcome
-            logger.critical(f"[Orchestrator] CLINICAL NOTIFICATION FAILED: {type(exc).__name__}: {exc}")
+            logger.critical(f"[Orchestrator] CLINICAL NOTIFICATION FAILED: {safe_error(exc, getattr(vitals_snapshot, 'patient_id', None))}")
             return {"reason": None, "status": "failed", "ticket": None}
 
     def _notify_clinical(self, result: dict, vitals_snapshot) -> None:
@@ -876,7 +897,7 @@ class GovernanceOrchestrator:
             # than a refusal. Same shape as the other stages now.
             logger.warning(
                 "[Orchestrator] PERCEIVE stage did not run to a verdict -- "
-                f"it raised {type(e).__name__}: {e}. Recording REJECTED with stage_refused=False."
+                f"it raised {self._log_error(e, governance_request)}. Recording REJECTED with stage_refused=False."
             )
             human_alert = self._alert_stage_error("perceive", e, governance_request)
             if self.raise_on_stage_error:
@@ -967,7 +988,7 @@ class GovernanceOrchestrator:
                 # refused" and "there was no kernel" used to be identical.
                 logger.warning(
                     "[Orchestrator] Conservation stage did not run to a verdict -- "
-                    f"it raised {type(e).__name__}: {e}. Recording REJECTED with "
+                    f"it raised {self._log_error(e, governance_request)}. Recording REJECTED with "
                     "stage_refused=False. Pass a working conservation_kernel, or "
                     "construct the orchestrator with raise_on_stage_error=True to "
                     "raise instead of filing a stage failure as a rejection."
@@ -975,7 +996,7 @@ class GovernanceOrchestrator:
                 human_alert = self._alert_stage_error("conservation", e, governance_request)
                 if self.raise_on_stage_error:
                     raise
-            logger.error(f"[Orchestrator] Conservation Kernel rejected: {e}")
+            logger.error(f"[Orchestrator] Conservation Kernel rejected: {self._log_error(e, governance_request)}")
             return self._stamp({
                 "status": "REJECTED",
                 "reason": f"Conservation Kernel rejected decision: {e}",
@@ -996,7 +1017,7 @@ class GovernanceOrchestrator:
             try:
                 self.receipts.probe()
             except Exception as e:  # noqa: BLE001
-                logger.error(f"[Orchestrator] Refusing: receipt store unavailable ({type(e).__name__}: {e})")
+                logger.error(f"[Orchestrator] Refusing: receipt store unavailable ({self._log_error(e, governance_request)})")
                 human_alert = self._alert_stage_error("receipt_store", e, governance_request)
                 return self._stamp({
                     "status": "REJECTED",
@@ -1058,14 +1079,14 @@ class GovernanceOrchestrator:
                 refused_by = None
                 logger.warning(
                     "[Orchestrator] Execution-approval stage did not run to a verdict -- "
-                    f"it raised {type(e).__name__}: {e}. Recording REJECTED with "
+                    f"it raised {self._log_error(e, governance_request)}. Recording REJECTED with "
                     "stage_refused=False. Construct the orchestrator with "
                     "raise_on_stage_error=True to raise instead."
                 )
                 human_alert = self._alert_stage_error("execution_approval", e, governance_request)
                 if self.raise_on_stage_error:
                     raise
-            logger.error(f"[Orchestrator] Execution rejected: {e}")
+            logger.error(f"[Orchestrator] Execution rejected: {self._log_error(e, governance_request)}")
             return self._stamp({
                 "status": "REJECTED",
                 "reason": str(e),
@@ -1213,7 +1234,7 @@ class GovernanceOrchestrator:
             gsa815_result = executor(execution_context)
         except Exception as e:
             executed_at["finished"] = datetime.now(timezone.utc).isoformat()
-            logger.error(f"[Orchestrator] Execution FAILED: {type(e).__name__}: {e}")
+            logger.error(f"[Orchestrator] Execution FAILED: {self._log_error(e, governance_request)}")
             # A person hears about a crashed executor before anything else
             # happens, including the re-raise below.
             human_alert = self._alert_stage_error("execution", e, governance_request)
