@@ -20,7 +20,7 @@ Nothing is above 2 and most clinical rows are 0 or 1. A reader should not averag
 
 | # | Area | Rating | Evidence | What holds it back |
 |---|---|---|---|---|
-| 1 | Escalation reaches a person | 2 | #74, #78, #81; settings, desk tiers, signed acknowledgements, sweep runner, watchdog; 1492 tests | never run against a real pager, real latency, or a soak test (unknown); one default build blocks a CRITICAL at the micropatch physician gate (decision D3) |
+| 1 | Escalation reaches a person | 2 | #74, #78, #81; settings, desk tiers, signed acknowledgements, sweep runner, watchdog; 1492 tests | never run against a real pager, real latency, or a soak test (unknown); a CRITICAL is BLOCKED (and paged) unless the integration supplies `physician_approved`, by design (D3) |
 | 2 | Failure handling | 2 | #80 transactional evaluate; crash told per profile (#86); faulted channels never read as stable | advisory still acts on no assessment (D12) |
 | 3 | Decision integrity and audit | 2 | #83, #86: attempt id, patient binding, reading digest, assessment bound and verified against OBSERVE's ledger; receipts verify from file | PERCEIVE audit hash excludes the snapshot (C4); the caller's identity is not covered (C14); the request commitment is unkeyed |
 | 4 | Clinician control and change control | 1 | #84 settings with digest and weakening flags | constants outside `PARAMETER_SET` (C3); no release process; no clinical owner named |
@@ -56,8 +56,8 @@ Nothing is above 2 and most clinical rows are 0 or 1. A reader should not averag
 |---|---|---|---|
 | D1 | Hard-rule confirmation window | A keep 3 (waits for one repeat); B set 1 (every SpO2 < 88 holds WARNING at once) | **B for a first evaluation unit**, because a lone SpO2 < 88 is a possible emergency and the cost is some probe-off pages; keep 3 only if the unit's burden says otherwise. A clinical call. |
 | D2 | Heart rate alone counts as corroboration of a hard rule | A yes (today); B no, require RR or temperature | **B**: heart rate usually shares the probe with SpO2, so it is weak corroboration. |
-| D3 | May a CRITICAL bypass the micropatch physician-approval gate | A yes, always page and let governance record; B no | **A for the page (already true since #78) and a decision on the block**: a blocked CRITICAL is told, but the block itself should be a conscious clinical-governance policy. |
-| D4 | Is a CRITICAL exempt from the per-day escalation count | A yes; B no | **A**: a count must not refuse a deteriorating patient's page. |
+| D3 | A CRITICAL is BLOCKED unless the integration supplies `physician_approved` (by design: a patient-safety override needs a physician). Keep that, or change the policy | A keep, and the integration supplies approval; B change the policy | **A, plus page either way (true since #78)**: it is a conscious clinical-governance rule, documented in the register (C5). Answered: "page, and decide the block as policy". |
+| D4 | (Corrected.) Is a CRITICAL exempt from the escalation count | It already is on the CRITICAL path: `emergency_override` has no rate gate by design, and the count is advisory by default and never read from the manifest. The remaining gap is a CRITICAL arriving as `escalate_patient` | **Exempt it there too** (answered yes). My original framing, that a count could refuse a CRITICAL, was wrong. |
 | D5 | Classify the patient id in the ticket log | A T2 identifier; B T1 | **A** (`DATA_PRIVACY_AND_RESEARCH.md`). |
 | D6 | A failed `STATE_EVICTED` write fails another patient's evaluation | A best-effort (log and continue); B fail | **A**: one patient's eviction record must not block another's assessment. |
 | D7 | Adults and older adolescents | A keep the floor (WARNING plus finding); B build an adult cassette; C raise `max_age_months` per unit | **A now, B only if the hospital will monitor adults here** (a clinical cassette needs its own sign-off). |
