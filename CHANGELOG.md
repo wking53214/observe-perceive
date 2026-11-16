@@ -10,6 +10,33 @@
   escalation event, but the default notification settings tell a person only at CRITICAL, so S11 and S12 (WARNING) reach nobody; the sheet's
   wording is corrected and a fourth question (at what regime should a person be told?) added. No engine code changed and no pre-existing test edited.
 
+- **Privacy hardening for production (decision D11).** (1) A patient identifier in a log line is now `log_redaction.patient_tag`: `pt:` plus 12
+  hex of HMAC-SHA256 (key: `OBSERVE_LOG_SALT`, else a per-process secret), in the engine, the governance system, the notification desk and
+  the identity refusal; `OBSERVE_LOG_RAW_PATIENT_IDS=1` is the troubleshooting switch. Measured before: a canary id was in 2 of 11 captured
+  lines (and in alert payloads, ledgers and exports, which this does not change). (2) OBSERVE's ledger can be bounded:
+  `ObserveClinicalEngine(ledger_max_entries=..., ledger_archive_path=...)`. Past the bound plus a tenth, the oldest entries are appended to an
+  owner-only, fsynced archive and leave memory; the chain continues across the boundary; `verify_integrity(full=True)` reads the archive;
+  `verify_result` still finds an archived assessment; an archive that cannot be written keeps every entry in memory and reports it, without
+  taking the engine's lock. Default unchanged (unbounded, in memory). The ledger append is now locked. (3) `profile="production"` now also
+  requires `clinical_settings=` (the object the clinical owner approved; the engine's cassette must hold exactly those, by digest, and the
+  digest is recorded in every handoff), a bounded ledger with an archive, and no raw patient ids in logs. **Edited pre-existing tests:**
+  `test_production_profile.py` (the shared correct-wiring helper now supplies the settings and a bounded engine; no assertion changed),
+  `test_engine_gate_profile.py` (the pinned fingerprints, regenerated for 3.11 and 3.12, because `observe_consolidated` changed and the
+  logic stamp covers it). Also: a log message lost an em dash. Documents: `DATA_PRIVACY_AND_RESEARCH.md`, `ADVERSARIAL_REGISTER.md`,
+  `PRODUCTION_READINESS.md`. **Review round (an independent review found four ledger blockers, all fixed and pinned):** a restart over an
+  existing archive now checks it from the first entry and continues its chain (before, the new ledger started again at genesis, so the full
+  check was false for good); a half-written last line from a crash is moved to `<archive>.torn` and reported as degraded, and a damaged or
+  symlinked archive is refused at start (`LedgerArchiveError`); a failed fsync no longer writes entries twice and a write that fails part
+  way is truncated back; reading the whole ledger while it rotates is one consistent snapshot (the archive is read only up to its committed
+  length); data with integer keys is hashed and archived through a JSON round trip, so it verifies after archiving (the hash of an
+  ordinary entry is unchanged); the archive is opened without following links and tightened to owner-only. New `flush_to_archive()` for a
+  clean shutdown (entries still in memory when a process dies are not in the archive: a documented limit). The two exports and
+  `verify_result` read archived entries, and a verifier that meets an unreadable archive fails a check instead of raising; a current record is
+  found without reading the archive. Log lines that carry exception text now replace the patient ids in hand with their tags (an identity
+  mismatch with no alert channel logged both ids). The attested-settings check needs exactly `ClinicalSettings` and a `PediatricCassette`
+  (a subclass that overrides `digest`, or a cassette that only claims `settings`, no longer passes). The degraded-event counter is locked.
+  Known limits: `OBSERVE_LOG_RAW_PATIENT_IDS` is checked when the orchestrator starts, not on every log line; one process owns an archive.
+
 - **Clinician review sheet (decision D8).** New `docs/race/CLINICIAN_REVIEW_SHEET.md`: twelve illustrative readings with what the engine
   does today, a mark column (fine / page at WARNING / page at CRITICAL / other) and a column for the threshold wanted, the settings that
   already exist, the numbers that need acceptance, and the three questions only a clinical owner can answer. New

@@ -73,7 +73,7 @@ set in `OBSERVE_DEID_SALT` and the code refuses to run with a guessable default;
    met by editing them. The honest options (**a decision for counsel, not for code**): keep identifiers out of the chained records and
    hold them in a separate erasable table keyed by the pseudonym; or crypto-shred per patient (encrypt T2/T3 fields under a per-patient
    key and destroy the key). Neither exists.
-7. **Log lines.** Patient ids reach logs (EXECUTED above). A redacting log filter, or logging a pseudonym, is a one-file change but a
+7. **Log lines (done, PR 18).** Patient ids reached logs (EXECUTED above). Log lines now carry `log_redaction.patient_tag`: `pt:` plus 12 hex of HMAC-SHA256 keyed by `OBSERVE_LOG_SALT` (stable across restarts when set; per-process when not). The raw id returns only with `OBSERVE_LOG_RAW_PATIENT_IDS=1`, which the production profile refuses. It was a
    deployment decision about where the real id is needed for operations.
 
 ## 4. De-identification failure test plan (PROPOSED; each test names the failure it would catch)
@@ -83,7 +83,7 @@ Run with a canary id, a canary age and a canary free-text value in `context`, th
 | # | Test | Passes when | Today |
 |---|---|---|---|
 | D1 | Search every exporter output (CSV, JSON, report text) for the canary id, canary age, canary text | none found in any T1 output | HIPAA CSV: passes for id (EXECUTED); age and free text not yet tested |
-| D2 | Search all log output at DEBUG for the canary | none found, or only a pseudonym | **fails** (EXECUTED: 2 of 11 lines) |
+| D2 | Search all log output at DEBUG for the canary | none found, or only a pseudonym | **passes since PR 18** (`test_log_redaction.py`: the canary is absent, its `pt:` tag present, across the governance system, the engine, the identity refusal and the notification desk). Exception text is still whatever the exception carried |
 | D3 | Pseudonym stability: same id and salt give the same pseudonym; a different salt gives a different one; no salt raises | all three | exists in code; test coverage not audited |
 | D4 | Collision check at export: two ids map to one pseudonym | export refuses, or lengthens the pseudonym | **no check** |
 | D5 | Salt absent or empty at export time | refuses | passes (code raises) |

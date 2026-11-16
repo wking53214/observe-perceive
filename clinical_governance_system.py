@@ -28,6 +28,7 @@ from typing import Callable, Dict, List, Optional, Any
 
 from clinical_notification import ClinicalNotificationSettings, notification_reason, notify, ticket_context
 from clinical_settings import ClinicalSettings
+from log_redaction import patient_tag, safe_error
 from observe_consolidated import (
     ObserveClinicalEngine,
     VitalsSnapshot,
@@ -281,7 +282,7 @@ class ClinicalGovernanceSystem:
                 # surface clearly. Critical/syndrome are exempt and never reach here.
                 should_escalate = False
                 decision.action = "escalation_deferred_capacity"
-                logger.warning(f"CAPACITY DEFER for {vitals.patient_id}: {mod.note}")
+                logger.warning(f"CAPACITY DEFER for {patient_tag(vitals.patient_id)}: {mod.note}")
 
         # --- No escalation: fast path, governance not invoked ---
         if not should_escalate:
@@ -299,7 +300,7 @@ class ClinicalGovernanceSystem:
             # Preserve the clinical escalation, but an unavailable governance result
             # is not approval and cannot authorize downstream action.
             logger.error(
-                f"GOVERNANCE UNAVAILABLE for {vitals.patient_id}: {e} — "
+                f"GOVERNANCE UNAVAILABLE for {patient_tag(vitals.patient_id)}: {safe_error(e, vitals.patient_id)}; "
                 "clinical escalation is preserved without approval"
             )
             decision.governance_status = GovernanceStatus.UNAVAILABLE
@@ -316,7 +317,7 @@ class ClinicalGovernanceSystem:
                     f"GOVERNANCE_FAILURE_AUDIT_UNAVAILABLE: {audit_error}"
                 )
                 logger.error(
-                    f"GOVERNANCE FAILURE AUDIT unavailable for {vitals.patient_id}: {audit_error}"
+                    f"GOVERNANCE FAILURE AUDIT unavailable for {patient_tag(vitals.patient_id)}: {audit_error}"
                 )
             self._tell_a_person(decision, verdict, request)
             return decision
@@ -338,10 +339,10 @@ class ClinicalGovernanceSystem:
         decision.action = "escalate_approved" if gov_verdict.approved else "escalate_blocked"
 
         if gov_verdict.approved:
-            logger.info(f"ESCALATION APPROVED for {vitals.patient_id} (regime={verdict.regime.value})")
+            logger.info(f"ESCALATION APPROVED for {patient_tag(vitals.patient_id)} (regime={verdict.regime.value})")
         else:
             logger.warning(
-                f"ESCALATION BLOCKED for {vitals.patient_id}: {'; '.join(gov_verdict.violations)}"
+                f"ESCALATION BLOCKED for {patient_tag(vitals.patient_id)}: {'; '.join(gov_verdict.violations)}"
             )
 
         self._tell_a_person(decision, verdict, request)
@@ -366,7 +367,7 @@ class ClinicalGovernanceSystem:
         back and nobody was told, and the patient simply was not assessed with nothing saying so. Return a decision that
         says exactly that, mark it as needing a person, and tell one. It carries no risk judgement (risk_score is 0.0
         only because the field is required; the regime says no assessment exists)."""
-        logger.error(f"ASSESSMENT UNAVAILABLE for {vitals.patient_id}: {type(error).__name__}: {error}")
+        logger.error(f"ASSESSMENT UNAVAILABLE for {patient_tag(vitals.patient_id)}: {safe_error(error, vitals.patient_id)}")
         decision = ClinicalDecision(
             patient_id=vitals.patient_id, timestamp=vitals.timestamp, risk_score=0.0,
             regime="assessment_unavailable", escalation_required=True, active_engines=[], triggered_rules=[],
@@ -390,7 +391,7 @@ class ClinicalGovernanceSystem:
         try:
             self._route_to_a_person(decision, verdict, request)
         except Exception as exc:  # noqa: BLE001 - telling a person must never lose the decision
-            logger.critical(f"CLINICAL NOTIFICATION FAILED for {decision.patient_id}: {type(exc).__name__}: {exc}")
+            logger.critical(f"CLINICAL NOTIFICATION FAILED for {patient_tag(decision.patient_id)}: {safe_error(exc, decision.patient_id)}")
             decision.clinical_notification = {"reason": None, "status": "failed", "ticket": None}
 
     def _route_to_a_person(self, decision: ClinicalDecision, verdict: Optional[FusedVerdict], request) -> None:
@@ -424,7 +425,7 @@ class ClinicalGovernanceSystem:
         if self.alert_human is None:
             decision.human_alert = "no_channel"
             logger.critical(
-                f"HUMAN ALERT NOT SENT for {decision.patient_id}: no alert_human channel is "
+                f"HUMAN ALERT NOT SENT for {patient_tag(decision.patient_id)}: no alert_human channel is "
                 "configured. The caller must put this decision in front of a clinician."
             )
             return
@@ -435,7 +436,7 @@ class ClinicalGovernanceSystem:
             decision.human_alert = "failed"
             decision.governance_violations.append(f"HUMAN_ALERT_FAILED: {alert_error}")
             logger.critical(
-                f"HUMAN ALERT FAILED for {decision.patient_id}: {alert_error}. "
+                f"HUMAN ALERT FAILED for {patient_tag(decision.patient_id)}: {safe_error(alert_error, decision.patient_id)}. "
                 "The caller must put this decision in front of a clinician."
             )
 
@@ -523,7 +524,7 @@ class ClinicalGovernanceSystem:
                 "action": e["action"],
                 "immutable_hash": e["immutable_hash"],
             }
-            for e in self.observe.audit_ledger.entries
+            for e in self.observe.audit_ledger.iter_all()
         ]
 
     def export_perceive_audit(self) -> List[Dict]:

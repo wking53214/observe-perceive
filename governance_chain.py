@@ -233,11 +233,18 @@ def verify_result(result: Dict[str, Any], kernel=None, perceive=None, observe=No
                   and bool(binding.get("unassessable")) == bool(getattr(verdict_on_record, "unassessable", False)),
                   "the request commits to the assessment the record carries")
             ledger = getattr(observe, "audit_ledger", None)
-            entries = getattr(ledger, "entries", None)
+            # A bounded ledger keeps old entries in its archive: look there too, or an old record would look unwitnessed.
+            # The retained (recent) entries are searched first, so a current record does not read the whole archive; an archive that
+            # cannot be read is a failed check, not an exception out of the verifier.
+            entries = (ledger.iter_all(retained_first=True) if callable(getattr(ledger, "iter_all", None))
+                       else getattr(ledger, "entries", None))
             if entries is not None:
-                entry = next((e for e in entries if isinstance(e, dict) and isinstance(e.get("data"), dict)
-                              and e["data"].get("decision_fingerprint") == binding.get("decision_fingerprint")
-                              and e["data"].get("state_commitment") == binding.get("state_commitment")), None)
+                try:
+                    entry = next((e for e in entries if isinstance(e, dict) and isinstance(e.get("data"), dict)
+                                  and e["data"].get("decision_fingerprint") == binding.get("decision_fingerprint")
+                                  and e["data"].get("state_commitment") == binding.get("state_commitment")), None)
+                except (OSError, ValueError):
+                    entry = None
                 check("assessment.in_observe_ledger", entry is not None, "the committed assessment is in OBSERVE's ledger")
                 if entry is not None:
                     said = entry["data"].get("verdict") if isinstance(entry["data"].get("verdict"), dict) else {}
