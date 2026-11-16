@@ -64,7 +64,7 @@ Nothing is above 2 and most clinical rows are 0 or 1. A reader should not averag
 | D8 | The nine single-channel rows | A accept as designed; B add single-channel WARNING rules for specific danger signs; C more engines or history | **Clinical owner decides row by row**; I would expect B for the severe rows (HR 45 or 200, SpO2 below the age norm, T 34.5, RR 70), but I am not the clinician. |
 | D9 | Constants into the version stamp | Answered yes, and done in PR 17 as `logic_version` (a digest of the scoring code's behaviour, not a list of constants) | Done. |
 | D10 | PERCEIVE hash covers the snapshot | Answered yes, and done in PR 17 (`hash_version` 2; older entries load unchanged) | Done. |
-| D11 | Production profile requires settings | A yes; B no | **A**. |
+| D11 | Production profile requires settings, log redaction, a bounded ledger | Answered yes, and done in PR 18 | Done. |
 | D12 | Advisory proceeds when OBSERVE crashes | A yes (told, committed as unavailable); B refuse | **A for advisory, B is strict**; a deployment picks its profile. |
 | D13 | Strict judges attestation before assessing | A build the request twice; B accept | **B** until a threat model shows the extra state movement matters. |
 | D14 | Right to erasure against immutable chains | A crypto-shred per patient; B separate erasable id table; C counsel decides | **C first**; then A. |

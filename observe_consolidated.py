@@ -1464,6 +1464,11 @@ class ObserveClinicalEngine:
         self._enable_kalman = enable_kalman
         self._patient_kalman: "OrderedDict[str, PatientKalmanTracker]" = OrderedDict()
 
+    @property
+    def cassette(self):
+        """The domain this engine runs (read-only), so a deployment can show which settings are in force."""
+        return self._cassette
+
     def _get_kalman(self, patient_id: str) -> "PatientKalmanTracker":
         with self._state_lock:
             if patient_id not in self._patient_kalman:

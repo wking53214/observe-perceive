@@ -19,6 +19,7 @@ from governance_orchestrator import GovernanceOrchestrator  # noqa: E402
 from governance_record import ReceiptLog  # noqa: E402
 from escalation_runner import SweepRunner  # noqa: E402
 from human_escalation import EscalationDesk, EscalationLog, NotificationPolicy, Tier  # noqa: E402
+from clinical_settings import ClinicalSettings  # noqa: E402
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot  # noqa: E402
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest  # noqa: E402
 from production_profile import ProductionProfileError, REQUIRED_CNS, production_problems  # noqa: E402
@@ -76,7 +77,8 @@ def wiring(tmp_path, **override):
     escalations = override.get("escalations", desk(tmp_path))
     parts = dict(
         perceive=perceive(), conservation_kernel=ConservationKernel(root_guard=admission),
-        observe_engine=ObserveClinicalEngine(), root_admission=admission, profile="production",
+        observe_engine=ObserveClinicalEngine(ledger_max_entries=1000, ledger_archive_path=tmp_path / "observe.archive.jsonl"),
+        clinical_settings=ClinicalSettings(), root_admission=admission, profile="production",
         receipts=ReceiptLog(tmp_path / "receipts.jsonl", signer=DEPLOYER),
         execution_ledger=ExecutionLedger(tmp_path / "ledger.jsonl", signer=DEPLOYER),
         escalations=escalations, source_signers=[SOURCE],
@@ -338,3 +340,50 @@ def test_a_runner_with_no_desk_is_reported_not_raised(tmp_path):
                          max_tickets_per_sweep=1, alarm=lambda payload: None)
     msg = refused(tmp_path, sweep_runner=broken)
     assert "no escalation desk to sweep" in msg and "not running" in msg
+
+
+# ---- decision D11: settings attested, ledger bounded, no raw patient ids in logs -------------------------------------------
+
+def test_no_attested_clinical_settings_is_refused_because_silent_defaults_are_not_approval(tmp_path):
+    assert "no clinical settings were attested" in refused(tmp_path, clinical_settings=None)
+
+
+def test_something_that_is_not_clinical_settings_is_refused(tmp_path):
+    assert "not a ClinicalSettings" in refused(tmp_path, clinical_settings={"critical_o2_below": 90})
+
+
+def test_an_engine_running_other_settings_than_the_attested_ones_is_refused(tmp_path):
+    from pediatric_cassette import PediatricCassette
+    tuned = ClinicalSettings(critical_o2_below=90.0)
+    engine = ObserveClinicalEngine(cassette=PediatricCassette(settings=tuned), ledger_max_entries=100,
+                                   ledger_archive_path=tmp_path / "o.jsonl")
+    problem = refused(tmp_path, observe_engine=engine, clinical_settings=ClinicalSettings())
+    assert "different clinical settings from the ones attested" in problem
+    build(tmp_path, observe_engine=engine, clinical_settings=tuned)                    # attested and in force: starts
+
+
+def test_a_cassette_that_hides_its_settings_is_refused(tmp_path):
+    engine = ObserveClinicalEngine(ledger_max_entries=100, ledger_archive_path=tmp_path / "o.jsonl")
+    engine._cassette = type("C", (), {"name": "x", "version": "1"})()
+    assert "does not expose its settings" in refused(tmp_path, observe_engine=engine)
+
+
+def test_an_unbounded_or_archiveless_observe_ledger_is_refused(tmp_path):
+    assert "unbounded" in refused(tmp_path, observe_engine=ObserveClinicalEngine())
+
+
+def test_raw_patient_ids_in_logs_are_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("OBSERVE_LOG_RAW_PATIENT_IDS", "1")
+    assert "OBSERVE_LOG_RAW_PATIENT_IDS" in refused(tmp_path)
+
+
+def test_the_settings_digest_is_in_every_handoff_and_absent_when_none_was_given(tmp_path):
+    from conftest import ChainArtifact
+    production = build(tmp_path)
+    result = production.orchestrate_request(ChainArtifact("pp-1"), "escalate", lambda c: {}, vitals_snapshot=None,
+                                            context={"execution_id": "pp-e1"})
+    assert result["handoff"]["clinical_settings_digest"] == ClinicalSettings().digest()
+    advisory = GovernanceOrchestrator(perceive(), ConservationKernel(allow_unguarded_roots=True))
+    plain = advisory.orchestrate_request(ChainArtifact("pp-2"), "escalate", lambda c: {}, vitals_snapshot=None,
+                                         context={"execution_id": "pp-e2"})
+    assert "clinical_settings_digest" not in plain["handoff"]

@@ -50,7 +50,8 @@ class GovernanceOrchestrator:
                  escalations=None,
                  clinical_notification=None,
                  sweep_runner=None,
-                 attempt_id_factory=None):
+                 attempt_id_factory=None,
+                 clinical_settings=None):
         """
         Initialize orchestrator with all governance systems.
 
@@ -220,6 +221,9 @@ class GovernanceOrchestrator:
         self.perceive = perceive
         self.conservation_kernel = conservation_kernel
         self.observe_engine = observe_engine
+        # The ClinicalSettings the deployment attests it runs (the production profile requires it and checks the engine against
+        # it); its digest is recorded in every handoff.
+        self.clinical_settings = clinical_settings
         if profile == "production":
             # Fail closed at construction: an orchestrator that cannot prove its wiring never starts.
             from production_profile import ProductionProfileError, production_problems
@@ -227,7 +231,7 @@ class GovernanceOrchestrator:
                 conservation_kernel=conservation_kernel, root_admission=root_admission,
                 observe_engine=observe_engine, receipts=receipts, execution_ledger=self.execution_ledger,
                 alert_human=alert_human, escalations=escalations, source_signers=source_signers,
-                guard_executor=guard_executor, sweep_runner=sweep_runner)
+                guard_executor=guard_executor, sweep_runner=sweep_runner, clinical_settings=clinical_settings)
             if problems:
                 raise ProductionProfileError(problems)
 
@@ -575,7 +579,7 @@ class GovernanceOrchestrator:
                 result.setdefault("observe_escalation_ticket", told.ticket_id)
         result.setdefault("temporal_anomalies",
                           self._temporal_anomalies(governance_request) if governance_request is not None else [])
-        result.setdefault("handoff", {
+        handoff = {
             "producer": "observe-perceive.GovernanceOrchestrator",
             "contract_version": CONTRACT_VERSION,
             "issued_at": datetime.now(timezone.utc).isoformat(),
@@ -597,7 +601,10 @@ class GovernanceOrchestrator:
             "execution_ledger_signed": self.execution_ledger.signer is not None,
             "receipts": str(getattr(self.receipts, "path", None)) if self.receipts is not None else None,
             "receipts_signed": getattr(self.receipts, "signer", None) is not None,
-        })
+        }
+        if self.clinical_settings is not None:      # present only then, so a record without it keeps its shape
+            handoff["clinical_settings_digest"] = self.clinical_settings.digest()
+        result.setdefault("handoff", handoff)
         return result
 
     def _clinical_notice(self, verdict, vitals_snapshot, request, record_status):
