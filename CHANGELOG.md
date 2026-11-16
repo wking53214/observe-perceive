@@ -15,7 +15,19 @@
   `test_production_profile.py` (the shared correct-wiring helper now supplies the settings and a bounded engine; no assertion changed),
   `test_engine_gate_profile.py` (the pinned fingerprints, regenerated for 3.11 and 3.12, because `observe_consolidated` changed and the
   logic stamp covers it). Also: a log message lost an em dash. Documents: `DATA_PRIVACY_AND_RESEARCH.md`, `ADVERSARIAL_REGISTER.md`,
-  `PRODUCTION_READINESS.md`.
+  `PRODUCTION_READINESS.md`. **Review round (an independent review found four ledger blockers, all fixed and pinned):** a restart over an
+  existing archive now checks it from the first entry and continues its chain (before, the new ledger started again at genesis, so the full
+  check was false for good); a half-written last line from a crash is moved to `<archive>.torn` and reported as degraded, and a damaged or
+  symlinked archive is refused at start (`LedgerArchiveError`); a failed fsync no longer writes entries twice and a write that fails part
+  way is truncated back; reading the whole ledger while it rotates is one consistent snapshot (the archive is read only up to its committed
+  length); data with integer keys is hashed and archived through a JSON round trip, so it verifies after archiving (the hash of an
+  ordinary entry is unchanged); the archive is opened without following links and tightened to owner-only. New `flush_to_archive()` for a
+  clean shutdown (entries still in memory when a process dies are not in the archive: a documented limit). The two exports and
+  `verify_result` read archived entries, and a verifier that meets an unreadable archive fails a check instead of raising; a current record is
+  found without reading the archive. Log lines that carry exception text now replace the patient ids in hand with their tags (an identity
+  mismatch with no alert channel logged both ids). The attested-settings check needs exactly `ClinicalSettings` and a `PediatricCassette`
+  (a subclass that overrides `digest`, or a cassette that only claims `settings`, no longer passes). The degraded-event counter is locked.
+  Known limits: `OBSERVE_LOG_RAW_PATIENT_IDS` is checked when the orchestrator starts, not on every log line; one process owns an archive.
 
 - **Two integrity gaps closed (decisions D9 and D10).** (D10) PERCEIVE's audit hash covered `audit_id`, `timestamp`, `evaluated_gates` and
   `final_verdict` only, so the patient id and request context in `request_snapshot`, the gate outputs and the manifest version and hash

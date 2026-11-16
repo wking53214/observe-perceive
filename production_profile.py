@@ -106,16 +106,18 @@ def _data_protection_problems(observe_engine: Any, clinical_settings: Any) -> Li
         problems.append("no clinical settings were attested: pass the ClinicalSettings the clinical owner approved "
                         "(clinical_settings=...), so the engine's behaviour is the approved one and its digest is recorded in "
                         "every handoff, not silent defaults")
-    elif not isinstance(clinical_settings, ClinicalSettings):
+    elif type(clinical_settings) is not ClinicalSettings:       # exactly the class: a subclass could say any digest it liked
         problems.append(f"clinical_settings is a {type(clinical_settings).__name__}, not a ClinicalSettings")
     elif observe_engine is not None:
-        held = getattr(getattr(observe_engine, "cassette", None), "settings", None)
-        if held is None or not callable(getattr(held, "digest", None)):
-            problems.append("the OBSERVE engine's cassette does not expose its settings, so the attested settings cannot be "
-                            "shown to be the ones in force")
-        elif held.digest() != clinical_settings.digest():
+        from pediatric_cassette import PediatricCassette
+        cassette = getattr(observe_engine, "cassette", None)
+        held = getattr(cassette, "settings", None)
+        if not isinstance(cassette, PediatricCassette) or type(held) is not ClinicalSettings:
+            problems.append("the OBSERVE engine's cassette is not a PediatricCassette holding ClinicalSettings, so the attested "
+                            "settings cannot be shown to be the ones its scoring uses")
+        elif ClinicalSettings.digest(held) != ClinicalSettings.digest(clinical_settings):
             problems.append("the OBSERVE engine runs different clinical settings from the ones attested "
-                            f"(engine {held.digest()[:12]}, attested {clinical_settings.digest()[:12]})")
+                            f"(engine {ClinicalSettings.digest(held)[:12]}, attested {ClinicalSettings.digest(clinical_settings)[:12]})")
     if observe_engine is not None:
         ledger = getattr(observe_engine, "audit_ledger", None)
         if getattr(ledger, "max_entries", None) is None:        # a bounded ledger cannot exist without its archive

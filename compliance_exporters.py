@@ -338,7 +338,7 @@ if __name__ == "__main__":
             "data": e["data"],
             "immutable_hash": e["immutable_hash"],
         }
-        for e in system.observe.audit_ledger.entries
+        for e in system.observe.audit_ledger.iter_all()
     ]
     perceive_entries = system.export_perceive_audit()
     audits = system.verify_all_audits()

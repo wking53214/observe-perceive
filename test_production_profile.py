@@ -365,7 +365,7 @@ def test_an_engine_running_other_settings_than_the_attested_ones_is_refused(tmp_
 def test_a_cassette_that_hides_its_settings_is_refused(tmp_path):
     engine = ObserveClinicalEngine(ledger_max_entries=100, ledger_archive_path=tmp_path / "o.jsonl")
     engine._cassette = type("C", (), {"name": "x", "version": "1"})()
-    assert "does not expose its settings" in refused(tmp_path, observe_engine=engine)
+    assert "not a PediatricCassette holding ClinicalSettings" in refused(tmp_path, observe_engine=engine)
 
 
 def test_an_unbounded_or_archiveless_observe_ledger_is_refused(tmp_path):
@@ -387,3 +387,24 @@ def test_the_settings_digest_is_in_every_handoff_and_absent_when_none_was_given(
     plain = advisory.orchestrate_request(ChainArtifact("pp-2"), "escalate", lambda c: {}, vitals_snapshot=None,
                                          context={"execution_id": "pp-e2"})
     assert "clinical_settings_digest" not in plain["handoff"]
+
+
+def test_a_settings_subclass_that_lies_about_its_digest_is_refused(tmp_path):
+    class Liar(ClinicalSettings):
+        def digest(self):
+            return ClinicalSettings().digest()
+    engine = ObserveClinicalEngine(ledger_max_entries=100, ledger_archive_path=tmp_path / "o.jsonl")
+    assert "not a ClinicalSettings" in refused(tmp_path, observe_engine=engine, clinical_settings=Liar(critical_o2_below=80.0))
+
+
+def test_a_cassette_that_only_claims_the_attested_settings_is_refused(tmp_path):
+    engine = ObserveClinicalEngine(ledger_max_entries=100, ledger_archive_path=tmp_path / "o.jsonl")
+    engine._cassette = type("C", (), {"name": "x", "version": "1", "settings": ClinicalSettings()})()
+    assert "not a PediatricCassette holding ClinicalSettings" in refused(tmp_path, observe_engine=engine)
+
+
+def test_settings_that_override_their_own_digest_on_the_instance_are_not_trusted(tmp_path):
+    attested = ClinicalSettings(critical_o2_below=80.0)
+    object.__setattr__(attested, "digest", lambda: ClinicalSettings().digest())     # claims to be the defaults the engine runs
+    engine = ObserveClinicalEngine(ledger_max_entries=100, ledger_archive_path=tmp_path / "o.jsonl")
+    assert "different clinical settings from the ones attested" in refused(tmp_path, observe_engine=engine, clinical_settings=attested)
