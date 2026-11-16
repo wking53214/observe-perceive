@@ -62,8 +62,8 @@ Nothing is above 2 and most clinical rows are 0 or 1. A reader should not averag
 | D6 | A failed `STATE_EVICTED` write fails another patient's evaluation | A best-effort (log and continue); B fail | **A**: one patient's eviction record must not block another's assessment. |
 | D7 | Adults and older adolescents | A keep the floor (WARNING plus finding); B build an adult cassette; C raise `max_age_months` per unit | **A now, B only if the hospital will monitor adults here** (a clinical cassette needs its own sign-off). |
 | D8 | The nine single-channel rows | A accept as designed; B add single-channel WARNING rules for specific danger signs; C more engines or history | **Clinical owner decides row by row**; I would expect B for the severe rows (HR 45 or 200, SpO2 below the age norm, T 34.5, RR 70), but I am not the clinician. |
-| D9 | Constants into `PARAMETER_SET` | A yes (one hash change); B no | **A**. |
-| D10 | PERCEIVE hash covers the snapshot | A yes; B no | **A**. |
+| D9 | Constants into the version stamp | Answered yes, and done in PR 17 as `logic_version` (a digest of the scoring code's behaviour, not a list of constants) | Done. |
+| D10 | PERCEIVE hash covers the snapshot | Answered yes, and done in PR 17 (`hash_version` 2; older entries load unchanged) | Done. |
 | D11 | Production profile requires settings | A yes; B no | **A**. |
 | D12 | Advisory proceeds when OBSERVE crashes | A yes (told, committed as unavailable); B refuse | **A for advisory, B is strict**; a deployment picks its profile. |
 | D13 | Strict judges attestation before assessing | A build the request twice; B accept | **B** until a threat model shows the extra state movement matters. |

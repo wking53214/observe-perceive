@@ -30,9 +30,10 @@ Facts worth stating plainly:
 - **The only de-identified output in the repository is the HIPAA CSV exporter.** Every ledger, receipt, ticket log, alert and
   most log lines carry the raw patient id, and the OBSERVE ledger carries raw vitals and age.
 - **Persistent files are protected by file mode (0600) only, and only when this code creates them** (`os.open(..., O_CREAT, 0o600)`; a pre-existing file keeps its old mode). No encryption at rest, no key management, no retention limit.
-- **PERCEIVE's audit hash does not cover the request snapshot** (`perceive_consolidated.py:626-634` hashes `audit_id`, `timestamp`,
-  `evaluated_gates`, `final_verdict`). The patient id and the request context in that ledger are therefore not tamper-evident by
-  that chain, though the request commitment in the orchestrator record does cover the context (since #83 and #86). See the register.
+- **PERCEIVE's audit hash now covers the request snapshot** (PR 17, `hash_version` 2: the patient id, the request context, the gate
+  outputs and the manifest are in the chain hash; entries written before it keep the old hash and load unchanged). Before that,
+  `perceive_consolidated.py:626-634` hashed only `audit_id`, `timestamp`, `evaluated_gates` and `final_verdict`, so those fields were
+  not tamper-evident. Entries written before PR 17 remain unprotected in that respect.
 - **`context` is free-form caller data** and is copied into ledgers and receipts. Nothing prevents a caller putting a name or a
   free-text note in it.
 
