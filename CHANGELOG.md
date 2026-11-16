@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Privacy hardening for production (decision D11).** (1) A patient identifier in a log line is now `log_redaction.patient_tag`: `pt:` plus 12
+  hex of HMAC-SHA256 (key: `OBSERVE_LOG_SALT`, else a per-process secret), in the engine, the governance system, the notification desk and
+  the identity refusal; `OBSERVE_LOG_RAW_PATIENT_IDS=1` is the troubleshooting switch. Measured before: a canary id was in 2 of 11 captured
+  lines (and in alert payloads, ledgers and exports, which this does not change). (2) OBSERVE's ledger can be bounded:
+  `ObserveClinicalEngine(ledger_max_entries=..., ledger_archive_path=...)`. Past the bound plus a tenth, the oldest entries are appended to an
+  owner-only, fsynced archive and leave memory; the chain continues across the boundary; `verify_integrity(full=True)` reads the archive;
+  `verify_result` still finds an archived assessment; an archive that cannot be written keeps every entry in memory and reports it, without
+  taking the engine's lock. Default unchanged (unbounded, in memory). The ledger append is now locked. (3) `profile="production"` now also
+  requires `clinical_settings=` (the object the clinical owner approved; the engine's cassette must hold exactly those, by digest, and the
+  digest is recorded in every handoff), a bounded ledger with an archive, and no raw patient ids in logs. **Edited pre-existing tests:**
+  `test_production_profile.py` (the shared correct-wiring helper now supplies the settings and a bounded engine; no assertion changed),
+  `test_engine_gate_profile.py` (the pinned fingerprints, regenerated for 3.11 and 3.12, because `observe_consolidated` changed and the
+  logic stamp covers it). Also: a log message lost an em dash. Documents: `DATA_PRIVACY_AND_RESEARCH.md`, `ADVERSARIAL_REGISTER.md`,
+  `PRODUCTION_READINESS.md`.
+
 - **Two integrity gaps closed (decisions D9 and D10).** (D10) PERCEIVE's audit hash covered `audit_id`, `timestamp`, `evaluated_gates` and
   `final_verdict` only, so the patient id and request context in `request_snapshot`, the gate outputs and the manifest version and hash
   could be rewritten with the chain still valid. Entries now carry `hash_version`: 1 is the old hash (every entry written before, which
