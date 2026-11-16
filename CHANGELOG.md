@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Alarm-burden replay (new tool, no behaviour change).** `alarm_burden.py` replays a CSV of readings through a fresh OBSERVE engine under given
+  clinical and notification settings and counts escalation events, the subset that would reach a person, events per patient-day (mean, median,
+  p90, p99, max), and breakdowns by regime, kind, age group and rule, plus first-reading events, repeats within an hour and concentration in
+  the busiest patients. The source of the readings is required and printed; a patient identifier is never printed. New `test_alarm_burden.py`
+  (19 tests, hand-derived counts) and `docs/race/ALARM_BURDEN.md`. **It showed a gap in the review sheet**: the "Paged" column meant an
+  escalation event, but the default notification settings tell a person only at CRITICAL, so S11 and S12 (WARNING) reach nobody; the sheet's
+  wording is corrected and a fourth question (at what regime should a person be told?) added. No engine code changed and no pre-existing test edited.
+
 - **Clinician review sheet (decision D8).** New `docs/race/CLINICIAN_REVIEW_SHEET.md`: twelve illustrative readings with what the engine
   does today, a mark column (fine / page at WARNING / page at CRITICAL / other) and a column for the threshold wanted, the settings that
   already exist, the numbers that need acceptance, and the three questions only a clinical owner can answer. New
