@@ -122,3 +122,49 @@ def test_production_refuses_a_fortress_ledger_that_cannot_say_whether_its_key_is
             audit = OldLedger()
 
     assert [p for p in _problems(OldAdapter()) if FORTRESS_PROBLEM in p]
+
+
+def _from(source, key, monkeypatch):
+    """An adapter given `key` as its argument, or through FORTRESS_AUDIT_KEY."""
+    if source == "env":
+        monkeypatch.setenv("FORTRESS_AUDIT_KEY", key)
+        return adapter()
+    return adapter(audit_key=key)
+
+
+@pytest.mark.parametrize("source", ["env", "arg"])
+@pytest.mark.parametrize("value", [OLD_PUBLISHED_DEFAULT, f"  {OLD_PUBLISHED_DEFAULT}  "])
+def test_production_refuses_the_old_published_key_configured_on_purpose(monkeypatch, source, value):
+    a = _from(source, value, monkeypatch)
+    assert a.fortress.audit.ephemeral_key is False   # it is configured, so only the key check can catch it
+    problems = [p for p in _problems(a) if FORTRESS_PROBLEM in p]
+    assert len(problems) == 1 and "published key" in problems[0] and "FORTRESS_AUDIT_KEY" in problems[0]
+
+
+def test_production_refuses_a_whitespace_only_environment_key(monkeypatch):
+    monkeypatch.setenv("FORTRESS_AUDIT_KEY", "   ")
+    problems = [p for p in _problems(adapter()) if FORTRESS_PROBLEM in p]
+    assert len(problems) == 1 and "FORTRESS_AUDIT_KEY" in problems[0]
+
+
+def test_a_whitespace_only_passed_key_counts_as_unset():
+    a = adapter(audit_key="   ")
+    assert a.fortress.audit.ephemeral_key is True
+    problems = [p for p in _problems(a) if FORTRESS_PROBLEM in p]
+    assert len(problems) == 1 and "no configured key" in problems[0]
+
+
+@pytest.mark.parametrize("source", ["env", "arg"])
+def test_production_refuses_a_short_key_and_does_not_print_it(monkeypatch, source):
+    key = secrets.token_hex(16)[:31]   # 31 bytes, generated per run
+    a = _from(source, key, monkeypatch)
+    problems = _problems(a)
+    fortress = [p for p in problems if FORTRESS_PROBLEM in p]
+    assert len(fortress) == 1 and "shorter than 32 bytes" in fortress[0] and "FORTRESS_AUDIT_KEY" in fortress[0]
+    assert key not in " ".join(problems)
+
+
+@pytest.mark.parametrize("source", ["env", "arg"])
+def test_production_accepts_a_key_of_exactly_32_bytes(monkeypatch, source):
+    a = _from(source, secrets.token_hex(16), monkeypatch)   # 32 bytes, generated per run
+    assert not [p for p in _problems(a) if FORTRESS_PROBLEM in p]

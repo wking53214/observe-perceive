@@ -118,6 +118,8 @@ class FortressPerceiveAdapter:
                 random per-process key (`fortress.audit.ephemeral_key` is
                 True): tampering is caught in this process, but the records
                 cannot be verified anywhere else. There is no default key.
+                A whitespace-only audit_key is not installed. Profile
+                "production" refuses a blank, short or published key.
         """
         self.config = FortressConfig(controller_mode=controller_mode)
         self.fortress = FortressUnified(self.config)
@@ -126,7 +128,7 @@ class FortressPerceiveAdapter:
         # environment is read here too, so a kernel that does not read
         # FORTRESS_AUDIT_KEY itself still gets the configured key.
         audit_key = audit_key or os.environ.get("FORTRESS_AUDIT_KEY")
-        if audit_key:
+        if audit_key and audit_key.strip():
             self.fortress.audit = ImmutableAuditLedger(audit_key=audit_key)
         self.controller_mode = controller_mode
         self.enable_logging = enable_logging
