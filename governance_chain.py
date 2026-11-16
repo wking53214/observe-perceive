@@ -233,7 +233,8 @@ def verify_result(result: Dict[str, Any], kernel=None, perceive=None, observe=No
                   and bool(binding.get("unassessable")) == bool(getattr(verdict_on_record, "unassessable", False)),
                   "the request commits to the assessment the record carries")
             ledger = getattr(observe, "audit_ledger", None)
-            entries = getattr(ledger, "entries", None)
+            # A bounded ledger keeps old entries in its archive: look there too, or an old record would look unwitnessed.
+            entries = ledger.iter_all() if callable(getattr(ledger, "iter_all", None)) else getattr(ledger, "entries", None)
             if entries is not None:
                 entry = next((e for e in entries if isinstance(e, dict) and isinstance(e.get("data"), dict)
                               and e["data"].get("decision_fingerprint") == binding.get("decision_fingerprint")
