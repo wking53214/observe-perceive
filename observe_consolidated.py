@@ -36,6 +36,7 @@ from cassette import label as cassette_label, optional_member as cassette_option
 from governance_contracts import compute_state_commitment
 from kalman_trajectory import PatientKalmanTracker
 from logic_stamp import logic_digest, module_logic_digest
+from log_redaction import patient_tag
 import cassette as _cassette_module
 import kalman_trajectory as _kalman_module
 import logic_stamp as _logic_stamp_module
@@ -459,7 +460,7 @@ class RiskAdapters:
         has_history = "previous_o2" in vitals.context and "previous_hr" in vitals.context
 
         if age_months is None:
-            logger.warning(f"HEURISTIC: age_months missing for {vitals.patient_id}; using generic norms")
+            logger.warning(f"HEURISTIC: age_months missing for {patient_tag(vitals.patient_id)}; using generic norms")
 
         age_group = get_age_group(age_months, age_bounds)
         thresh = (PEDIATRIC_NORMS if norms is None else norms)[age_group]
@@ -1281,10 +1282,10 @@ class ProvisionalStore:
         self._evict_expired()
         entry = self.provisionals.get(patient_id)
         if entry is None:
-            logger.warning(f"reconcile: unknown patient {patient_id} (job {job_id})")
+            logger.warning(f"reconcile: unknown patient {patient_tag(patient_id)} (job {job_id})")
             return False
         if entry.get("job_id") != job_id:
-            logger.warning(f"reconcile: job_id mismatch for {patient_id} (expected {entry.get('job_id')}, got {job_id})")
+            logger.warning(f"reconcile: job_id mismatch for {patient_tag(patient_id)} (expected {entry.get('job_id')}, got {job_id})")
             return False
 
         entry["is_provisional"] = False
@@ -1900,10 +1901,10 @@ class ObserveClinicalEngine:
         # assessment: logging is the one thing after the write, and it is never allowed to be fatal.
         try:
             if unassessable:
-                logger.warning(f"DATA_INTEGRITY_FAULT: subject={subject} faults={faults} "
+                logger.warning(f"DATA_INTEGRITY_FAULT: subject={patient_tag(subject)} faults={faults} "
                                f"assessed={selected} regime={final_regime.value}")
             if escalation:
-                logger.info(f"ESCALATION: subject={subject} regime={final_regime.value} risk={fused_risk:.2f}")
+                logger.info(f"ESCALATION: subject={patient_tag(subject)} regime={final_regime.value} risk={fused_risk:.2f}")
         except Exception:  # noqa: BLE001 - see above
             pass
 
@@ -1949,7 +1950,7 @@ class ObserveClinicalEngine:
             {**decision_data, "decision_fingerprint": fingerprint,
              "predecessor_state_commitment": predecessor, "state_commitment": commitment},
         )
-        logger.warning(f"DATA_INTEGRITY_FAULT: subject={subject} faults={faults}")
+        logger.warning(f"DATA_INTEGRITY_FAULT: subject={patient_tag(subject)} faults={faults}")
         return FusedVerdict(
             risk_score=0.0, regime=OperationalRegime.WARNING, confidence=0.0, entropy=0.0,
             active_engines=[], triggered_rules=triggered, timestamp=datetime.now(timezone.utc),

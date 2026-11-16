@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from governance_contracts import CONTRACT_VERSION
 from governance_chain import verify_result
 from human_escalation import AlertOutcome
+from log_redaction import patient_tag
 from execution_guard import ExecutionLedger, ExecutionRefusal as LedgerRefusal, guard_ledger_of
 
 logger = logging.getLogger("GovernanceOrchestrator")
@@ -456,7 +457,9 @@ class GovernanceOrchestrator:
         for the patient the VITALS are for, so a deteriorating child is not lost with the refused request. The request is built
         first, so the record names the artifact and can be audited."""
         problems = "; ".join(mismatch["problems"])
-        logger.error(f"[Orchestrator] Refusing: identity mismatch: {problems}")
+        logger.error("[Orchestrator] Refusing: identity mismatch (context patient %s, vitals patient %s, %d problem(s))",
+                     patient_tag((mismatch.get("context") or {}).get("patient_id")), patient_tag(mismatch.get("vitals_patient")),
+                     len(mismatch.get("problems") or []))
         vitals_patient = mismatch.get("vitals_patient")
         alert = self._alert_stage_error("identity", IdentityMismatch(problems), governance_request, patient_id=vitals_patient)
         result = {
