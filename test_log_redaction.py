@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from clinical_governance_system import ClinicalGovernanceSystem, build_single_hospital_system
-from log_redaction import patient_tag, raw_ids_enabled
+from log_redaction import patient_tag, raw_ids_enabled, safe_error, scrub
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
 from test_identity_binding import orch, run, vit
 
@@ -105,3 +105,33 @@ def test_the_notification_desk_failure_line_uses_the_tag(captured, monkeypatch):
             raise RuntimeError("desk down")
     assert notify(Broken(), context={"patient_id": CANARY})[1] == "failed"
     assert CANARY not in captured.getvalue()
+
+
+def test_safe_error_replaces_every_identifier_in_hand_and_never_raises(monkeypatch):
+    monkeypatch.delenv("OBSERVE_LOG_RAW_PATIENT_IDS", raising=False)
+    text = safe_error(ValueError("PATIENT-A is not PATIENT-B (PATIENT-AB too)"), "PATIENT-A", "PATIENT-B", "PATIENT-AB", None, "")
+    assert "PATIENT" not in text and text.startswith("ValueError: ") and patient_tag("PATIENT-AB") in text   # longest id first
+    assert scrub("no ids here") == "no ids here"
+
+    class Bad:
+        def __str__(self):
+            raise RuntimeError("no text")
+    assert scrub(Bad(), "x") == "?" and safe_error(ValueError(Bad())) in ("error", "ValueError: ?")
+
+
+def test_an_identity_mismatch_with_no_alert_channel_does_not_log_either_id(captured, monkeypatch):
+    monkeypatch.delenv("OBSERVE_LOG_RAW_PATIENT_IDS", raising=False)
+    run(orch(), "red2", vit("VITALS-PATIENT-9"), ctx={"patient_id": "CONTEXT-PATIENT-4"})
+    log = captured.getvalue()
+    assert "HUMAN ALERT NOT SENT" in log and "identity" in log
+    assert "VITALS-PATIENT-9" not in log and "CONTEXT-PATIENT-4" not in log
+
+
+def test_a_failing_alert_channel_on_an_identity_mismatch_does_not_log_either_id(captured, monkeypatch):
+    monkeypatch.delenv("OBSERVE_LOG_RAW_PATIENT_IDS", raising=False)
+
+    def broken(alert):
+        raise RuntimeError(f"pager rejected {alert.get('patient_id')} and {alert.get('stage_error')}")
+    run(orch(alert_human=broken), "red3", vit("VITALS-PATIENT-9"), ctx={"patient_id": "CONTEXT-PATIENT-4"})
+    log = captured.getvalue()
+    assert "HUMAN ALERT FAILED" in log and "VITALS-PATIENT-9" not in log and "CONTEXT-PATIENT-4" not in log

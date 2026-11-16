@@ -19,7 +19,7 @@ import os
 import secrets
 from typing import Any
 
-__all__ = ["patient_tag", "raw_ids_enabled"]
+__all__ = ["patient_tag", "raw_ids_enabled", "safe_error", "scrub"]
 
 _PROCESS_SALT = secrets.token_bytes(32)
 
@@ -40,3 +40,23 @@ def patient_tag(patient_id: Any) -> str:
         return "pt:" + hmac.new(key, str(patient_id).encode("utf-8"), hashlib.sha256).hexdigest()[:12]
     except Exception:  # noqa: BLE001 - a logging helper must never be the reason something fails
         return "pt:?"
+
+
+def scrub(text: Any, *patient_ids: Any) -> str:
+    """`text` with every given patient identifier replaced by its tag. Never raises."""
+    try:
+        out = str(text)
+        for pid in sorted({str(p) for p in patient_ids if p not in (None, "")}, key=len, reverse=True):
+            out = out.replace(pid, patient_tag(pid))
+        return out
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
+def safe_error(error: BaseException, *patient_ids: Any) -> str:
+    """`Type: message` for a log line, with the identifiers of the patients in hand replaced by their tags (an exception that
+    says "patient X is not patient Y" would otherwise put both in the log). Never raises."""
+    try:
+        return f"{type(error).__name__}: {scrub(error, *patient_ids)}"
+    except Exception:  # noqa: BLE001
+        return "error"
