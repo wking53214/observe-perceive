@@ -11,6 +11,13 @@
   key of at least 32 bytes that is not the published `fortress-key`; a whitespace-only `audit_key=` counts as none. The orchestrator
   builds the FORTRESS adapter before the production check (it used to be built after). New
   `test_fortress_adapter_audit_key.py` and two new tests in `test_production_profile.py`; no pre-existing test edited.
+- **Alarm-burden replay (new tool, no behaviour change).** `alarm_burden.py` replays a CSV of readings through a fresh OBSERVE engine under given
+  clinical and notification settings and counts escalation events, the subset that would reach a person, events per patient-day (mean, median,
+  p90, p99, max), and breakdowns by regime, kind, age group and rule, plus first-reading events, repeats within an hour and concentration in
+  the busiest patients. The source of the readings is required and printed; a patient identifier is never printed. New `test_alarm_burden.py`
+  (19 tests, hand-derived counts) and `docs/race/ALARM_BURDEN.md`. **It showed a gap in the review sheet**: the "Paged" column meant an
+  escalation event, but the default notification settings tell a person only at CRITICAL, so S11 and S12 (WARNING) reach nobody; the sheet's
+  wording is corrected and a fourth question (at what regime should a person be told?) added. No engine code changed and no pre-existing test edited.
 
 - **Privacy hardening for production (decision D11).** (1) A patient identifier in a log line is now `log_redaction.patient_tag`: `pt:` plus 12
   hex of HMAC-SHA256 (key: `OBSERVE_LOG_SALT`, else a per-process secret), in the engine, the governance system, the notification desk and
