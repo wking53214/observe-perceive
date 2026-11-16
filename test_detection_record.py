@@ -39,12 +39,15 @@ from adversarial_sensor_faults import AdversarialSensorTestSuite
 from deterioration_simulator import SCENARIOS, DeteriorationSimulator
 
 #: Sensor-fault cases the engine currently handles unsafely.
-#: All four are FAILURES TO ESCALATE. There is no false alarm in this set;
-#: there was one until the harness identity fix on 2026-09-10.
+#: Four are FAILURES TO ESCALATE. One is a FALSE ALARM, `single_o2_spike_down`, accepted on purpose by decision D1
+#: (the default hard-rule window is 1): a lone SpO2 spike down now holds WARNING at once, because a lone SpO2 below 88 may be a
+#: real emergency and the unit chose to be paged for the probe artefacts that come with that. It was in this set before the
+#: harness identity fix on 2026-09-10, left it, and is back for a different reason.
 #: repeated_spikes_o2 left this set with the hard-rule floor: a hard rule that fires again within the confirmation
 #: window now holds the regime at WARNING whatever the fusion says.
 KNOWN_RISKY_FAULT_CASES = frozenset({
     "coordinated_lie_sepsis_masking",
+    "single_o2_spike_down",
     "slow_o2_drift_downward",
     "stuck_hr_baseline",
     "stuck_o2_sensor",
