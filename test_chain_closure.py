@@ -61,7 +61,9 @@ def test_a_failed_execution_carries_a_committed_outcome_that_says_it_failed(orch
     assert result["status"] == "EXECUTION_FAILED"
     outcome = result["outcome_context"]
     assert outcome.outcome["execution_status"] == "failed" and outcome.outcome["gsa815_result"] is None
-    assert result["chain_verification"]["valid"] and not result["chain_verification"]["complete"]
+    # OBSERVE now runs first, so a failed execution is an observed one: its chain verifies and is complete (it used to be
+    # "not complete" only because OBSERVE, which ran after the action, never ran when the action raised).
+    assert result["chain_verification"]["valid"] and result["chain_verification"]["complete"]
     # Claiming it completed after the fact breaks the record.
     result["execution_status"] = "completed"
     assert "outcome.execution_status" in _failed(result)
