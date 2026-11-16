@@ -717,3 +717,19 @@ def test_events_pushed_out_of_the_last_hundred_are_counted_not_lost_silently():
     for i in range(105):
         eng._degraded({"kind": "state_evicted_write_failed", "error": f"e{i}", "patient_id": f"p{i}"})
     assert len(eng.degraded_events) == 100 and eng.degraded_dropped == 5
+
+
+def test_through_the_orchestrator_a_critical_reading_is_exempt_and_a_calm_one_is_not():
+    """Integration of D4 with PR 13: the orchestrator writes `observe_assessment` from OBSERVE's own verdict, and that is
+    what the gate trusts. A calm reading on the same path carries no exemption."""
+    from perceive_consolidated import PolicyEnforcementConfig
+    from test_identity_binding import CRIT, orch, run, vit
+    o = orch()
+    o.perceive.enforcement = PolicyEnforcementConfig(enforce_escalation_limits=True)
+
+    def gate_note(artifact, **reading):
+        run(o, artifact, vit("P1", **reading))
+        outputs = o.perceive.audit_ledger.entries[-1].policy_outputs
+        return [x for x in outputs if x["gate_name"] == "escalation_rate_policy"][0]["violations"]
+    assert any("never rate-limited" in v for v in gate_note("int-crit", **CRIT))
+    assert not any("never rate-limited" in v for v in gate_note("int-calm"))
