@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **OBSERVE now runs first, in every profile, and the request commits to what it found.** Measured on `main`: advisory assessed the patient
+  after the action; a request refused at any earlier stage had no assessment and no page (a CRITICAL reading on a request the kernel refused
+  paged nobody); an action that raised was never followed by an assessment; and the request commitment said nothing about the assessment.
+  Now the reading is assessed once, before PERCEIVE, and `context["observe_assessment"]` (fingerprint, state commitment, regime, escalation,
+  unassessable; or `unavailable` with the error type) is part of the request, so the PERCEIVE ruling and the approvals chained to it cover it.
+  Crash policy: strict refuses before PERCEIVE and tells a person; advisory proceeds, tells a person and commits that there is none. Every
+  record carries the verdict or the failure whatever stage refused it, so a refused request's CRITICAL reading is paged. A failed action is
+  observed, so its chain is now valid and complete. `verify_result(..., observe=engine)` checks the assessment against the record, OBSERVE's
+  ledger and the reading. **Visible changes:** advisory order is OBSERVE then action; OBSERVE state advances for requests later refused;
+  every request with vitals has a new commitment; strict OBSERVE refusals happen before PERCEIVE (`governance_decision` is `None`); in strict the reading is assessed before the event-time attestation is judged (the request must exist to be attested, and it commits to the assessment); a caller-supplied `observe_assessment` is dropped, never committed. Edited
+  pre-existing tests: `test_chain_closure.py::test_a_failed_execution_carries_a_committed_outcome_that_says_it_failed` and
+  `test_chain_failure_paths.py::test_execution_failure_is_a_recorded_state_that_keeps_the_approval` (a failed execution's chain is now valid
+  and complete, no longer "not complete"; nothing else in them changed). Document: `docs/race/OBSERVE_FIRST_10B.md`.
 - **A probe that may be off is now said so.** An SpO2 of 0 is far more often a disconnected probe than a patient with no oxygen, and
   may be both. A reading at or below `ClinicalSettings.probe_off_spo2_at_or_below` (default 0; `None` switches it off) now carries
   `POSSIBLE_SENSOR_DISCONNECT: ... check the probe and check the patient. The reading is not downgraded.` in its rules and, only

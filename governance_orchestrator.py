@@ -257,7 +257,8 @@ class GovernanceOrchestrator:
         decision is in both kernels' ledgers -- AND the chain reached an
         outcome. The per-check detail travels in `chain_verification`.
         """
-        verification = verify_result(result, kernel=self.conservation_kernel, perceive=self.perceive)
+        verification = verify_result(result, kernel=self.conservation_kernel, perceive=self.perceive,
+                                     observe=self.observe_engine)
         result["chain_verification"] = verification.as_dict()
         result["audit_chain_valid"] = verification.valid and verification.complete
         if forensic_proof is not None:
@@ -415,7 +416,39 @@ class GovernanceOrchestrator:
         mismatch = {"problems": problems, "context": claimed, "vitals_patient": vitals_patient} if problems else None
         return context, identity, mismatch
 
-    def _identity_refusal(self, mismatch, governance_request, vitals_snapshot) -> dict:
+    def _observe_first(self, vitals_snapshot):
+        """Assess the reading BEFORE anything is asked of PERCEIVE, in every profile. Returns (verdict, error).
+
+        The patient's physiology does not depend on the action's fate, so the assessment is made once, first, and every
+        later stage reads it: a request refused at any stage still has its assessment, and a person is still told about
+        an escalation event it reports. A crash is not raised here: the policy for it differs by profile (strict
+        refuses, advisory proceeds and tells a person) and needs the request to exist, so it is returned."""
+        if vitals_snapshot is None:
+            return None, None
+        try:
+            if self.observe_engine is None:
+                raise RuntimeError("no OBSERVE engine configured")
+            verdict = self.observe_engine.evaluate(vitals_snapshot)
+        except Exception as exc:  # noqa: BLE001 - the profile decides what a crash means
+            self._seen.observe_error = f"{type(exc).__name__}: {exc}"
+            return None, exc
+        self._seen.verdict = verdict
+        return verdict, None
+
+    @staticmethod
+    def _assessment_binding(verdict, error) -> dict:
+        """What the request commits to about the assessment: which one (its reproducible fingerprint and its chained state
+        commitment), what it said, or that there is none. Plain data, so the request commitment, the PERCEIVE ruling that
+        carries it and the approvals chained to that ruling all cover the assessment and not only the reading."""
+        if verdict is None:
+            return {"status": "unavailable", "error_type": type(error).__name__ if error is not None else None}
+        return {"status": "assessed", "decision_fingerprint": getattr(verdict, "decision_fingerprint", ""),
+                "state_commitment": getattr(verdict, "state_commitment", ""),
+                "regime": getattr(getattr(verdict, "regime", None), "value", None),
+                "escalation_required": bool(getattr(verdict, "escalation_required", False)),
+                "unassessable": bool(getattr(verdict, "unassessable", False))}
+
+    def _identity_refusal(self, mismatch, governance_request, vitals_snapshot, observe_exc=None) -> dict:
         """Refuse a request whose own statements disagree, before PERCEIVE is asked, in every profile.
 
         It is not an ordinary refusal: it means an integration is sending one patient's data with another's request, so a
@@ -436,15 +469,11 @@ class GovernanceOrchestrator:
             "governance_decision": None,
             "audit_chain": None,
         }
-        verdict = None
-        if vitals_snapshot is not None and self.observe_engine is not None:
-            try:
-                verdict = self.observe_engine.evaluate(vitals_snapshot)
-            except Exception as exc:  # noqa: BLE001 - a crash is told like any other OBSERVE crash
-                result["observe_error"] = f"{type(exc).__name__}: {exc}"
-                self._alert_stage_error("observe", exc, governance_request, patient_id=vitals_patient)
-        if verdict is not None:
-            result["observe_verdict"] = verdict
+        # The reading was assessed first (`_observe_first`); `_stamp` puts the verdict, or the error, on the record. A crash
+        # there is told like any other OBSERVE crash.
+        if observe_exc is not None:
+            self._seen.observe_alert = self._alert_stage_error("observe", observe_exc, governance_request,
+                                                               patient_id=vitals_patient)
         return self._stamp(result, governance_request)
 
     @staticmethod
@@ -528,6 +557,19 @@ class GovernanceOrchestrator:
         result.setdefault("attempt_id", getattr(self._seen, "attempt_id", None))
         if getattr(self._seen, "identity", None) is not None:
             result.setdefault("identity", self._seen.identity)
+        # OBSERVE runs first, so a request refused at any later stage still carries the assessment that was made (and
+        # the failure to make one), instead of looking as though nobody had looked at the patient.
+        if getattr(self._seen, "verdict", None) is not None:
+            result.setdefault("observe_verdict", self._seen.verdict)
+        if getattr(self._seen, "observe_error", None) is not None:
+            result.setdefault("observe_error", self._seen.observe_error)
+        # Whether a person was told about that failure is on every record too, under its own key: a record's own stage
+        # alert (an execution that raised, say) must not displace it.
+        told = getattr(self._seen, "observe_alert", None)
+        if told is not None:
+            result.setdefault("observe_human_alert", told)
+            if getattr(told, "ticket_id", None):
+                result.setdefault("observe_escalation_ticket", told.ticket_id)
         result.setdefault("temporal_anomalies",
                           self._temporal_anomalies(governance_request) if governance_request is not None else [])
         result.setdefault("handoff", {
@@ -603,16 +645,19 @@ class GovernanceOrchestrator:
         The per-call state (the attempt id, the bound identity, the last OBSERVE verdict) is saved and restored around the call:
         an executor that calls this orchestrator again on the same thread must not change what the outer call records."""
         seen = self._seen
-        saved = (getattr(seen, "verdict", None), getattr(seen, "attempt_id", None), getattr(seen, "identity", None))
+        saved = (getattr(seen, "verdict", None), getattr(seen, "attempt_id", None), getattr(seen, "identity", None),
+                 getattr(seen, "observe_error", None), getattr(seen, "observe_alert", None))
         try:
             return self._orchestrate_one(sentinel_artifact, operation_type, gsa815_operation_func, vitals_snapshot, context)
         finally:
-            seen.verdict, seen.attempt_id, seen.identity = saved
+            seen.verdict, seen.attempt_id, seen.identity, seen.observe_error, seen.observe_alert = saved
 
     def _orchestrate_one(self, sentinel_artifact, operation_type, gsa815_operation_func, vitals_snapshot, context) -> dict:
         self._seen.verdict = None
         self._seen.attempt_id = self._new_attempt_id()
         self._seen.identity = None
+        self._seen.observe_error = None
+        self._seen.observe_alert = None
         try:
             result = self._orchestrate(sentinel_artifact, operation_type, gsa815_operation_func, vitals_snapshot,
                                        context)
@@ -706,6 +751,19 @@ class GovernanceOrchestrator:
         # another's data. See docs/race/IDENTITY_BINDING_DESIGN.md.
         context, identity, mismatch = self._bind_identity(context, vitals_snapshot)
         self._seen.identity = identity
+        # The reading is assessed FIRST, in every profile, and the assessment is bound into the request beside the reading
+        # (see `_observe_first`). A caller who supplies an `observe_assessment` that is not the one OBSERVE made is
+        # claiming an assessment nobody made: that is an identity mismatch like any other.
+        observe_verdict, observe_exc = self._observe_first(vitals_snapshot)
+        if isinstance(context, dict):
+            # The assessment in the request is the orchestrator's alone. A caller's own `observe_assessment` (a replayed
+            # context, or a claim) is dropped, never committed: an assessment is not replayable (the engine's state has moved
+            # on), and one the caller wrote is not one OBSERVE made.
+            if context.pop("observe_assessment", None) is not None:
+                logger.warning("[Orchestrator] A caller-supplied observe_assessment was dropped; the orchestrator's own "
+                               "assessment is the only one committed")
+            if vitals_snapshot is not None:
+                context["observe_assessment"] = self._assessment_binding(observe_verdict, observe_exc)
         # The sealed Gateway admission is checked here, not committed into
         # the request: the request's context is part of its commitment and
         # must stay plain data. What is recorded about the admission is its
@@ -728,13 +786,57 @@ class GovernanceOrchestrator:
             )
         except Exception:
             if mismatch is None:
+                if observe_exc is not None:
+                    # OBSERVE crashed and now the request cannot be built either: the crash would otherwise reach nobody.
+                    self._seen.observe_alert = self._alert_stage_error(
+                        "observe", observe_exc, None, patient_id=getattr(vitals_snapshot, "patient_id", None))
                 raise
             # The request cannot be built, and it was already known to disagree with the vitals: refuse with the mismatch,
             # tell a person, and assess the reading, rather than losing all three to the construction error.
-            return self._identity_refusal(mismatch, None, vitals_snapshot)
+            return self._identity_refusal(mismatch, None, vitals_snapshot, observe_exc)
         logger.info(f"[Orchestrator] Request ID: {governance_request.request_id}")
         if mismatch is not None:
-            return self._identity_refusal(mismatch, governance_request, vitals_snapshot)
+            return self._identity_refusal(mismatch, governance_request, vitals_snapshot, observe_exc)
+        # What the assessment means for this profile, now that the request exists (an alert names it). A crash: strict
+        # refuses (OBSERVE is mandatory there) and a person is told, as for any stage that raises instead of reaching a
+        # verdict; advisory proceeds without an assessment, tells a person, and records the failure. A reading OBSERVE
+        # itself cannot stand behind (unassessable, or no engine contributed evidence) is refused in strict.
+        observe_error = None
+        observe_alert = None
+        if observe_exc is not None:
+            observe_error = f"{type(observe_exc).__name__}: {observe_exc}"
+            logger.error(f"[Orchestrator] OBSERVE did not produce a verdict: {observe_error}")
+            observe_alert = self._alert_stage_error("observe", observe_exc, governance_request,
+                                                    patient_id=getattr(vitals_snapshot, "patient_id", None))
+            self._seen.observe_alert = observe_alert
+            if self.profile in ("strict", "production"):
+                if self.raise_on_stage_error:
+                    raise observe_exc
+                return self._stamp({
+                    "status": "REJECTED",
+                    "reason": f"OBSERVE stage did not run to a verdict: {observe_error}",
+                    "refused_by": "observe",
+                    "stage_refused": False,
+                    "stage_error": observe_error,
+                    **self._alert_field(observe_alert),
+                    "governance_decision": None,
+                    "observe_enforced": False,
+                    "observe_error": observe_error,
+                    "audit_chain": None,
+                }, governance_request)
+        elif observe_verdict is not None and self.profile in ("strict", "production"):
+            problems = self._observe_problems(observe_verdict)
+            if problems:
+                logger.error(f"[Orchestrator] Refusing: OBSERVE cannot back the action: {problems}")
+                return self._stamp({
+                    "status": "REJECTED",
+                    "reason": "OBSERVE cannot back the action: " + "; ".join(problems),
+                    "refused_by": "observe",
+                    "stage_refused": True,
+                    "governance_decision": None,
+                    "observe_enforced": True,
+                    "audit_chain": None,
+                }, governance_request)
         if self.require_attested_event_time and not governance_request.event_time_attested:
             why = governance_request.event_time_attestation_problem or (
                 "no attestation offered" if governance_request.event_time else "no event time stated")
@@ -1098,63 +1200,6 @@ class GovernanceOrchestrator:
                 "the orchestrator with require_vitals=True to refuse instead."
             )
 
-        # Strict OBSERVE runs BEFORE the action (OP-1). An observation that is a precondition can only be one if it
-        # is made before the thing it conditions; run after, it could only describe what had already happened. An
-        # observation OBSERVE itself marks unassessable is a refusal: strict does not act on a reading it cannot read.
-        # The advisory profile keeps OBSERVE after the action, as before.
-        observe_verdict = None
-        observe_error = None
-        observe_alert = None
-        observed_before_action = False
-        if self.profile in ("strict", "production") and vitals_snapshot is not None:
-            logger.info("[Orchestrator] Phase 4b: OBSERVE before the action (strict)")
-            try:
-                if self.observe_engine is None:
-                    raise RuntimeError("no OBSERVE engine configured")
-                observe_verdict = self.observe_engine.evaluate(vitals_snapshot)
-                self._seen.verdict = observe_verdict
-            except Exception as e:
-                # OP-2: in strict, OBSERVE is mandatory, so a crash is a refusal and a person is told, as for any
-                # other stage that raises instead of reaching a verdict.
-                logger.error(f"[Orchestrator] Refusing execution: OBSERVE raised {type(e).__name__}: {e}")
-                human_alert = self._alert_stage_error("observe", e, governance_request,
-                                                      patient_id=getattr(vitals_snapshot, "patient_id", None))
-                if self.raise_on_stage_error:
-                    raise
-                return self._stamp({
-                    "status": "REJECTED",
-                    "reason": f"OBSERVE stage did not run to a verdict: {type(e).__name__}: {e}",
-                    "refused_by": "observe",
-                    "stage_refused": False,
-                    "stage_error": f"{type(e).__name__}: {e}",
-                    **self._alert_field(human_alert),
-                    "governance_decision": perceive_decision,
-                    "conservation_decision": conservation_decision,
-                    "execution_approval": execution_approval,
-                    "scope_enforced": declared_scope is not None,
-                    "observe_enforced": False,
-                    "observe_error": f"{type(e).__name__}: {e}",
-                    "audit_chain": None,
-                }, governance_request)
-            else:
-                observed_before_action = True
-                problems = self._observe_problems(observe_verdict)
-                if problems:
-                    logger.error(f"[Orchestrator] Refusing execution: OBSERVE cannot back it: {problems}")
-                    return self._stamp({
-                        "status": "REJECTED",
-                        "reason": "OBSERVE cannot back the action: " + "; ".join(problems),
-                        "refused_by": "observe",
-                        "stage_refused": True,
-                        "governance_decision": perceive_decision,
-                        "conservation_decision": conservation_decision,
-                        "execution_approval": execution_approval,
-                        "scope_enforced": declared_scope is not None,
-                        "observe_enforced": True,
-                        "observe_verdict": observe_verdict,
-                        "audit_chain": None,
-                    }, governance_request)
-
         logger.info("[Orchestrator] Phase 5: GSA-815 execution")
         executor = gsa815_operation_func
         # Only a wrapper `guarded` made, for THIS orchestrator's ledger, counts as already guarded. The
@@ -1181,7 +1226,7 @@ class GovernanceOrchestrator:
             # leave an approval that can be tried again.
             execution_authorization = self._consume(execution_context, None, "failed")
             outcome_context = self.gsa815_adapter.create_outcome_context(
-                execution_context, None, None, execution_status="failed")
+                execution_context, None, observe_verdict, execution_status="failed")
             failed = self._stamp({
                 "status": "EXECUTION_FAILED",
                 "reason": f"execution raised {type(e).__name__}: {e}",
@@ -1227,28 +1272,9 @@ class GovernanceOrchestrator:
         logger.info(f"[Orchestrator] GSA-815 result ({execution_status}): {gsa815_result}")
         execution_authorization = self._consume(execution_context, attached, execution_status)
 
-        # PHASE 6: OBSERVE monitoring
-        logger.info("[Orchestrator] Phase 6: OBSERVE clinical monitoring")
-        if observed_before_action:
-            logger.info("[Orchestrator] OBSERVE already ran before the action (strict)")
-        elif vitals_snapshot:
-            # The action has already run. Whatever happens here must not lose
-            # the record of it, so an OBSERVE failure is recorded beside the
-            # execution rather than raised over it.
-            try:
-                if self.observe_engine is None:
-                    raise RuntimeError("no OBSERVE engine configured")
-                observe_verdict = self.observe_engine.evaluate(vitals_snapshot)
-                self._seen.verdict = observe_verdict
-                logger.info(f"[Orchestrator] OBSERVE verdict: regime={observe_verdict.regime.value}")
-            except Exception as e:
-                observe_error = f"{type(e).__name__}: {e}"
-                logger.error(f"[Orchestrator] OBSERVE did not produce a verdict: {observe_error}")
-                # The patient was not assessed. Tell a person (strict does, and the record alone is read by nobody). The
-                # engine has already put the patient's tracked state back, so the next reading is judged fresh.
-                observe_alert = self._alert_stage_error("observe", e, governance_request,
-                                                        patient_id=getattr(vitals_snapshot, "patient_id", None))
-        else:
+        # PHASE 6: OBSERVE monitoring already happened, first (see `_observe_first`): every later stage read that one
+        # assessment, so there is nothing left to run here and nothing that can fail after the action.
+        if vitals_snapshot is None:
             logger.info("[Orchestrator] No vitals provided, OBSERVE evaluation skipped (warned above)")
 
         # PHASE 7: Link audit chains
