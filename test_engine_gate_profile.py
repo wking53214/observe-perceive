@@ -171,51 +171,56 @@ _GOLDEN_CASES = [
 # (engines, decision_fingerprint) recorded on main before this change.
 _GOLDEN_MAIN = {
     "calm": (['heuristic'],
-        "b9d0dbab29a07d6b9a710aee3d4ccf5287362f2c394affdae5806f7babffc505"),
+        "441c6e309be40d3c621336f8a4a7f9069ec839420cb32959ee3d26144c7d81b5"),
     "low_o2": (['heuristic', 'behavioral'],
-        "d3293d7cc2fc75cf6e327b33254ef54563ef28108e4b5e4b8a0dca11a5cab28e"),
+        "a3846c09aa03ec5078363ee8e1d91e70d4ad6b60baac05445b41c7321c6b8d02"),
     "o2_boundary": (['heuristic'],
-        "03eb43f4d0a78f8fae0a5a3bdbed65f6da359dc3c23a9751926e12309d37209f"),
+        "4fec0acdff558495c9cd7f3c8c57ae71b7384dfcf3ecb55ba09874d1f05f0e9f"),
     "hr_high": (['heuristic', 'behavioral'],
-        "ece39c6dcf94bc48e618a922757e9a7aa32fef0b6a5b331ff705f1a28013aba8"),
+        "f1bf38147123ad23433e665ec3ad138d03f9db47f018a24f2ccbc5488828a0e0"),
     "hr_boundary_hi": (['heuristic'],
-        "9074ac31dc3b5918d85943256fb5be34ef2b602307e183e3859fdb524628e915"),
+        "04b1681ac55b061d36ecd189747f72b0be15d60ddcff54cdd958313b5cafb8bd"),
     "hr_low": (['heuristic', 'behavioral'],
-        "cbdfa29d2485809f93089f94db5a73135c26ce7f6f004761566fea4df0cf65ba"),
+        "797b9dcc939e3ca587ac3080cc2ee429aa0a76bbe8dca7fec725f227a1b8ceba"),
     "hr_boundary_lo": (['heuristic'],
-        "8df76de03389d608c524f41d5917c629b02442e9853fe3987eb36f6b6b9f8975"),
+        "6e1cbedd789718b3927cadd5efd6c63766283f170999d25d8e2592ba8b5f54bc"),
     "rr_only": (['heuristic', 'behavioral'],
-        "b7bdcafb5fe8a1c6d3777a0d210d10415d272a84ba06fc97628652c9403b0bd8"),
+        "697635bd1da82aed3202a1e88442f9c379168e360797669882d97708b2f02ce2"),
     "rr_boundary": (['heuristic'],
-        "4f30cb292797565d59ee60537e815f2988c12b1c416d63e2f595f5b2eee7d30f"),
+        "d43ea597ebdaab477c5b31ad663286a317bf8e3ecf0f47f4d60e5a340d690508"),
     "temp_only": (['heuristic', 'behavioral'],
-        "426a897c6d1fa166f6d59b3e73d7e9c080b06668c5d80903b5f7f8be99b683a7"),
+        "e63c77542dcd6bbb373639aa145b319d2022b68808693f0da14fc8bcc9240a47"),
     "temp_boundary": (['heuristic'],
-        "1759d535ee405f33ba2a9de32a1f4ee07c84f71b67e215e4fb37a7b719e4c583"),
+        "363605da043c80596876058b50d7190e79771fe0934be3cf2c412c7bec020bc9"),
     "rr_and_temp": (['heuristic', 'behavioral'],
-        "468be431ff35ff32edfcd5d07cf79a4b4be543ed723db1835b7b055d799998f3"),
+        "99d54a5dce4b15582ff23b2a128a07a697363f760dcf0a83e7f18787fe9879db"),
     "force_heavy": (['heuristic', 'bayesian', 'trajectory', 'drift', 'physiological_reserve'],
-        "31ae875dafe743518b0c2ecabd72e62c40e5a329050dcfa2c956db2a1a9d5010"),
+        "a41caa44a596a4efef045545b06c612a41299d634962adf5c95a46c27762714c"),
     "critical": (['heuristic', 'bayesian', 'trajectory', 'drift', 'behavioral', 'physiological_reserve'],
-        "58792cb0dac7fa0f2e25abe2fa87a7946b694778df70a63264f2e29d65023013"),
+        "db4bc414cd47db0261154610bfc38e190268796958828707e8d12cb93622f2aa"),
 }
 
+# The fingerprints below were regenerated ONCE, deliberately, when a decision began to record `logic_version` (a digest of what
+# the scoring code does: decision D9, docs/race/CHANGE_CONTROL_AND_VALIDATION.md). Nothing about any reading's verdict changed;
+# only the provenance every entry carries gained a key. From now on a change to the scoring logic moves them again, and that is
+# the point: it forces the change to be acknowledged here.
+#
 # Python 3.12 changed how sum() adds floats, so on 3.11 the engine's entropy differs from 3.12 in the
 # last digit for some readings and the (unrounded) fingerprint with it. This is main's own behaviour,
 # recorded from main's code on 3.11, and not something this change introduced. The engine lists and the
 # entry shapes are identical on every version; only these fingerprints differ.
 _GOLDEN_MAIN_PRE_312 = {
-    "low_o2": "92e7dc312e62b79a38da332dfa8a327d60db4911e878f33921d6b44e31168f63",
-    "hr_high": "58b18da82a7437902018c5093838869558ceea023a3ca6c5de78079b52d3fa68",
-    "hr_boundary_lo": "466f12ce9372eef3d0aca8405b0cf41f6f7b7624e350983c0d257c80a2145cda",
-    "rr_only": "072b4fdbfc099f4b34ba1e22fa5330e7e79628faeb9d24f5c818d4482a8c66a9",
-    "temp_only": "dc8bce0bf31e3556fa07beb015f05bff7ba4c569711431619bab3b15f67b5251",
-    "rr_and_temp": "7982017825b7887f4a9dab62a71e7b90f597a68dbbc6d8703f13a7ed36fa7488",
+    "low_o2": "463e9534824c32cb966eab322abd9bd46419977a0b724586b3189566befa36cd",
+    "hr_high": "cb2ed386305a70381899eb809725872738d1ede384ff6eafdea4355d6e4f5ed9",
+    "hr_boundary_lo": "19a0229f1a93ee6d256b67782b7fd404b93c41394832b647530f3572308530b3",
+    "rr_only": "ea1248ec8549a50fd3d3999181f94e000bbc84589a13a0fbf57b40dd3dcb6d13",
+    "temp_only": "98dd87c241400f496ff19438d5f59fbf5a04b5a449fa2c1c3167b0c9c7dfb46d",
+    "rr_and_temp": "f581843786a8f9aadc1c436687a37f2b70d879b64c363b377141f57242119b3d",
 }
 
 
 _BASE_ENTRY_KEYS = {
-    "cassette", "decision_fingerprint", "outputs", "parameter_set_version",
+    "cassette", "decision_fingerprint", "logic_version", "outputs", "parameter_set_version",
     "predecessor_state_commitment", "selected_engines", "state_commitment", "verdict", "vitals",
 }
 _RECORDED_PARAMETER_SET_VERSION = "7761a1db8d54b54925f7fbb682aca7e780167de53b9008acc196573eb3ed2cef"

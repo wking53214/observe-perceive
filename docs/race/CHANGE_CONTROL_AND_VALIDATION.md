@@ -18,7 +18,9 @@ Every OBSERVE ledger entry carries, inside the fingerprinted payload (`observe_c
 
 So a verdict can be traced to **the numbers it was made with**, provided those numbers are in one of those places.
 
-## 2. What the version stamp does NOT cover (EXECUTED and INSPECTED)
+## 2. What the version stamp does NOT cover (EXECUTED and INSPECTED), and what now closes it (D9)
+
+**Status: closed by `logic_version` (below), on `main` after PR 17.** The rest of this section is the finding as measured.
 
 `PARAMETER_SET` has exactly these keys (EXECUTED): `drift_critical_floor`, `drift_sigma_threshold`, `escalation_dwell_threshold`,
 `escalation_lock_seconds`, `pediatric_norms`, `regime_critical_floor_default`, `regime_distribution_bands`, `regime_risk_floor`,
@@ -36,9 +38,27 @@ So a verdict can be traced to **the numbers it was made with**, provided those n
 Two consequences: (a) **two builds with different clinical behaviour can write the same `parameter_set_version`**; (b) the only thing that
 distinguishes them in a record is the source revision, and the cassette `version` ("1.1.0") was deliberately not bumped for the hard-rule
 and floor changes (the comments say so), so recorded fingerprints keep their meaning. That was the right call for fingerprint
-continuity and the wrong basis for change control. **PROPOSED fix (small, not done):** put every constant above into `PARAMETER_SET`
-(it is a dictionary; adding keys changes the hash once, deliberately, and every later change is then visible), and record the source
-revision in each decision.
+continuity and the wrong basis for change control.
+
+**The fix (done, decision D9): `logic_version`.** Listing every constant in `PARAMETER_SET` would have meant copying literals out
+of functions and trusting the copy; instead `logic_stamp.logic_digest` hashes what the code DOES. It walks a syntax tree and records
+node kinds, every name and constant, and every scalar a node carries, in order, ignoring comments, formatting, docstrings and
+logging calls (a call to `logger.info` and its siblings, not `log.append`). It never uses `ast.dump`, whose fields differ between
+Python versions and would change every recorded fingerprint when an installation upgrades; the digests were checked identical on 3.11,
+3.12 and 3.13, for a pinned snippet and for the whole scoring modules. **It hashes whole modules, not a list of functions:** a first
+version hashed a hand-picked list, and an independent review found 13 clinically meaningful edits it missed (the severity order, the
+engine table, the context bounds, the Kalman gain and tuning, the fingerprint function, an evaluation helper and others), because
+module-level constants and helpers are read by the code but are not in it. The core digest now covers `observe_consolidated`,
+`kalman_trajectory`, `cassette` and `logic_stamp`; the cassette digest covers `pediatric_cassette` and `clinical_settings` and the
+settings defaults; the engine also digests the module that defines its own class or its cassette's class (a subclass is its own code).
+Every decision records `logic_version` (all of these together) in its provenance, inside the fingerprinted payload. A changed point
+value, syndrome threshold, gate cutoff, rule text, default, bound or helper now changes it (EXECUTED: `test_logic_stamp.py`, which
+applies eleven such edits one at a time to the real source). **The price of not missing a clinical edit is that a non-clinical edit in
+those modules (a new method, a changed message that is not a logging call) also changes it**; that is a change to be reviewed, and it
+says so in the pinned fingerprints. It changed every recorded fingerprint ONCE, deliberately; the pinned fingerprints in
+`test_engine_gate_profile.py` were regenerated for 3.11 and 3.12 and will move again whenever the scoring modules do, which is the
+tripwire's job. An installation with no Python source (compiled files only) imports normally and records `source-unavailable` for what it
+cannot read, rather than failing. It does not say whether a change was approved: that is the change request in section 3.
 
 ## 3. A change-control procedure (PROPOSED)
 
