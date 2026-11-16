@@ -10,7 +10,7 @@ signed). Please add cases of your own at the end of section A.
 ## How to read the table in section A
 
 Each row is one reading, repeated three times one minute apart, with no earlier history, on default settings, at the age shown.
-"Regime" is what the engine reports (stable, caution, warning, critical). "Paged" means a person would be told (an escalation event).
+"Regime" is what the engine reports (stable, caution, warning, critical). "Paged" means OBSERVE raised an escalation event. **Whether a person is then told depends on the notification setting, and the default tells a person only at CRITICAL, on a severity increase, and for an unassessable reading, so a WARNING event (S11, S12) reaches nobody unless the deployment sets `min_regime` to `warning`** (`ALARM_BURDEN.md` counts both).
 Where the engine reports **stable and never pages**, that is the question: is that acceptable for this patient?
 
 ## A. What the engine does today, and your call
@@ -37,7 +37,7 @@ If you mark W, C or X, give the number or rule you want in the last column; the 
 What these rows show about the design, in one paragraph: findings add small amounts to a score, the engines are averaged by
 confidence, and so a single abnormal channel (S4 to S9) does not reach WARNING unless it is SpO2 below 88 or a named syndrome. S10
 is the opposite problem: one "child" row of norms covers ages 3 to 18, so a healthy adolescent at HR 70 is reported at CAUTION. S11 is
-by design (the system is pediatric; adults are reported at WARNING with a finding so a person looks). S12 pages at once because
+by design (the system is pediatric; adults are reported at WARNING with a finding, which is an event on the record; a person looks only if the notification setting reaches WARNING). S12 pages at once because
 the default confirmation window is 1.
 
 ## B. What you can already change without a code change
@@ -72,13 +72,14 @@ write in the last column, behind a setting, and the case is pinned in `test_sing
 | Dwell before a first escalation; lock after it | `ESCALATION_DWELL_THRESHOLD`, `ESCALATION_LOCK_SECONDS` | two confirming readings; five minutes | |
 | Who is paged | `ClinicalNotificationSettings.min_regime` | CRITICAL, any increase, blocked, unassessable | |
 
-## D. Three things only you can answer
+## D. Four things only you can answer
 
 1. **How many pages per patient per day is acceptable on a unit?** The system does not measure this yet (the alarm-burden report is
    the next engineering item), so there is no number to react to; your answer sets the target it will be judged against.
 2. **Which events count as deterioration** for validation (a documented sepsis alert, a rapid response call, an unplanned
    transfer to higher care, intubation)? The validation plan needs this list before any data can be replayed.
-3. **Who signs?** A clinical owner with the authority to approve a rule is a prerequisite for everything in
+3. **At what regime should a person be told?** Today only CRITICAL (and a severity increase, and an unassessable reading) reaches a person. If WARNING should, the count of how many more people are told is what `alarm_burden.py` is for.
+4. **Who signs?** A clinical owner with the authority to approve a rule is a prerequisite for everything in
    `CHANGE_CONTROL_AND_VALIDATION.md`.
 
 Return this page marked. Engineering will turn every W, C and X into a rule with your numbers, pinned by a test, and will not change
