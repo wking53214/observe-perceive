@@ -35,14 +35,12 @@ import copy
 from cassette import label as cassette_label, optional_member as cassette_optional_member
 from governance_contracts import compute_state_commitment
 from kalman_trajectory import PatientKalmanTracker
-from logic_stamp import logic_digest
-from kalman_trajectory import _CHANNEL_TUNING, _MAX_DT_HOURS, _VELOCITY_RULES, _WARMUP_UPDATES
+from logic_stamp import logic_digest, module_logic_digest
+import cassette as _cassette_module
+import kalman_trajectory as _kalman_module
+import logic_stamp as _logic_stamp_module
+import sys as _sys
 
-
-def _kalman_constants() -> Dict[str, Any]:
-    """The Kalman tracker's tuning, for the logic digest (these are module constants there, outside its class source)."""
-    return {"channel_tuning": _CHANNEL_TUNING, "velocity_rules": _VELOCITY_RULES, "warmup": _WARMUP_UPDATES,
-            "max_dt_hours": _MAX_DT_HOURS}
 
 logger = logging.getLogger("OBSERVE")
 
@@ -1533,8 +1531,9 @@ class ObserveClinicalEngine:
         A cassette that was built with a non-default setting may expose
         `identity_extras` (a dict); it is recorded under the cassette identity so a
         decision made under that setting is distinguishable in the stored entry and
-        in the fingerprint. A cassette with no extras, or none at all, adds nothing,
-        so every existing entry keeps its exact shape and hash."""
+        in the fingerprint. A cassette with no extras, or none at all, adds nothing to
+        the cassette identity. (Every entry now also records `logic_version`, below: that
+        changed every recorded fingerprint once, deliberately; decision D9.)"""
         identity = {"name": str(getattr(self._cassette, "name", "")),
                     "version": str(getattr(self._cassette, "version", ""))}
         extras = getattr(self._cassette, "identity_extras", None)
@@ -1546,8 +1545,14 @@ class ObserveClinicalEngine:
         # value for the core and the cassette together, so a record says which behaviour made it. Decision D9.
         logic = getattr(self, "_logic_version", None)
         if logic is None:                                   # parsing source is not free: once per engine, not per reading
+            parts = [ENGINE_LOGIC_DIGEST]
+            if type(self).__module__ != __name__:           # an engine subclass is its own code
+                parts.append(module_logic_digest(type(self).__module__))
+            parts.append(module_logic_digest(type(self._cassette).__module__))   # the cassette's module, hook or no hook
             cassette_logic = cassette_optional_member(self._cassette, "logic_digest")
-            logic = hashlib.sha256((ENGINE_LOGIC_DIGEST + (str(cassette_logic()) if cassette_logic else "")).encode()).hexdigest()
+            if cassette_logic:
+                parts.append(str(cassette_logic()))
+            logic = hashlib.sha256("|".join(parts).encode()).hexdigest()
             self._logic_version = logic
         return {
             "parameter_set_version": PARAMETER_SET_VERSION,
@@ -1955,24 +1960,18 @@ class ObserveClinicalEngine:
         )
 
 
-# What the scoring code of this module DOES, as one digest (see logic_stamp). Defined here, after everything it reads, and
-# recorded in every decision's provenance. It covers the engines, the fusion, the escalation policy, the validation and the
-# evaluation path (the bypass, floor and hold rules), the Kalman tracker and its tuning. Editing a comment, a docstring or a
-# log message does not change it; changing a constant, a comparison or a branch does.
-_ENGINE_LOGIC_OBJECTS = (
-    validate_vitals, sanitize_context, get_age_group, regime_distribution, _max_severity,
-    RiskAdapters, RiskAdaptersPhysiological, BayesianFusion, EscalationPolicy,
-    ObserveClinicalEngine.select_engines, ObserveClinicalEngine._evaluate, ObserveClinicalEngine._fault_page,
-    ObserveClinicalEngine._fault_verdict, PatientKalmanTracker,
-)
-#: What the digest covers, by name, so a test can notice if something clinical is dropped from it.
-ENGINE_LOGIC_COVERS: Tuple[str, ...] = tuple(o.__qualname__ for o in _ENGINE_LOGIC_OBJECTS)
+# What the scoring code DOES, as one digest (see logic_stamp). Defined here, at the end, and recorded in every decision's
+# provenance. It hashes WHOLE MODULES, not a list of functions: this module, the Kalman tracker, the cassette seam and the stamp
+# itself, so a module-level constant (the severity order, the engine table, the context bounds, the Kalman tuning) or a helper the
+# scoring reads cannot be missed. (A first version hashed a hand-picked list of functions; an independent review found 13
+# clinically meaningful edits it did not see.) Editing a comment, a docstring or a log message does not change it; changing a
+# constant, a comparison or a branch anywhere in these modules does, including a change that is not clinical, which is the price of
+# not missing one that is: such a change is a model change to be reviewed, and says so in the pinned fingerprints.
+ENGINE_LOGIC_COVERS: Tuple[str, ...] = (__name__, _kalman_module.__name__, _cassette_module.__name__, _logic_stamp_module.__name__)
 ENGINE_LOGIC_DIGEST: str = logic_digest(
-    *_ENGINE_LOGIC_OBJECTS,
-    constants={"hard_rule_confirm_window_fallback": HARD_RULE_CONFIRM_WINDOW, "parameter_set_version": PARAMETER_SET_VERSION,
-               "kalman": _kalman_constants()},
+    _sys.modules[__name__], _kalman_module, _cassette_module, _logic_stamp_module,
+    constants={"hard_rule_confirm_window_fallback": HARD_RULE_CONFIRM_WINDOW, "parameter_set_version": PARAMETER_SET_VERSION},
 )
-
 
 if __name__ == "__main__":
     # Smoke test: critical hypoxia + fever case

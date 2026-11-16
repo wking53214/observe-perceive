@@ -25,9 +25,11 @@ import json
 import textwrap
 from typing import Any, Dict, List, Optional
 
-__all__ = ["logic_digest", "source_digest"]
+__all__ = ["logic_digest", "module_logic_digest", "source_digest"]
 
 _LOGGER_NAMES = frozenset({"logger", "log", "logging"})
+#: Only calls to these methods are logging; `log.append(...)` on a local list named `log` is logic and is hashed.
+_LOGGING_METHODS = frozenset({"debug", "info", "warning", "warn", "error", "exception", "critical", "fatal", "log"})
 
 
 def _is_docstring(stmt: ast.stmt) -> bool:
@@ -38,28 +40,26 @@ def _is_logging(stmt: ast.stmt) -> bool:
     if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)):
         return False
     func = stmt.value.func
-    return isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in _LOGGER_NAMES
+    return (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in _LOGGER_NAMES
+            and func.attr in _LOGGING_METHODS)
 
 
-def _walk(node: ast.AST, out: List[str], first_in_body: bool = False) -> None:
+def _walk(node: ast.AST, out: List[str]) -> None:
     kind = type(node).__name__
     out.append(kind)
     if isinstance(node, ast.Constant):
         out.append(repr(node.value))
-    elif isinstance(node, ast.Name):
-        out.append(node.id)
-    elif isinstance(node, ast.Attribute):
-        out.append(node.attr)
-    elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-        out.append(node.name)
-    elif isinstance(node, (ast.arg, ast.keyword)):
-        out.append(str(node.arg))
-    elif isinstance(node, ast.alias):
-        out.append(f"{node.name}:{node.asname}")
-    elif isinstance(node, ast.ImportFrom):
-        out.append(f"{node.module}:{node.level}")
     for field in node._fields:
         value = getattr(node, field, None)
+        # Every scalar a node carries (a name, an operator-free flag, a conversion code, a capture name, a `global` name) is
+        # part of what the code does, so it is recorded generically rather than for a hand-picked list of node kinds.
+        if isinstance(value, (str, int, float, bool, bytes)) or value is None:
+            if not (isinstance(node, ast.Constant) and field == "value"):    # a Constant's value is recorded above, with repr
+                out.append(f"{field}={value!r}")
+            continue
+        if isinstance(value, list) and value and all(isinstance(v, str) for v in value):
+            out.append(f"{field}={value!r}")
+            continue
         if isinstance(value, list):
             for position, child in enumerate(value):
                 if not isinstance(child, ast.AST):
@@ -86,6 +86,23 @@ def source_digest(source: str) -> str:
     return hashlib.sha256("\x1f".join(out).encode("utf-8")).hexdigest()
 
 
+_NO_SOURCE = "source-unavailable"
+
+
+@functools.lru_cache(maxsize=64)
+def module_logic_digest(module_name: str) -> str:
+    """The digest of a whole module by name, or `source-unavailable` when its source cannot be read (an installation that ships
+    only compiled files). A module is the unit of change control: hashing the whole module covers every module-level constant
+    and helper the scoring code reads, which a hand-picked list of functions cannot promise (a review found 13 meaningful edits
+    a list missed)."""
+    import sys
+    module = sys.modules.get(module_name)
+    try:
+        return source_digest(inspect.getsource(module)) if module is not None else _NO_SOURCE
+    except (OSError, TypeError):
+        return _NO_SOURCE
+
+
 def logic_digest(*objects: Any, constants: Optional[Dict[str, Any]] = None) -> str:
     """One digest over the given functions and classes (by their source) and the given constants (by value).
 
@@ -94,7 +111,10 @@ def logic_digest(*objects: Any, constants: Optional[Dict[str, Any]] = None) -> s
     parts: List[str] = []
     for obj in objects:
         label = getattr(obj, "__qualname__", None) or getattr(obj, "__name__", None) or repr(obj)
-        parts.append(f"{label}:{source_digest(inspect.getsource(obj))}")
+        try:
+            parts.append(f"{label}:{source_digest(inspect.getsource(obj))}")
+        except (OSError, TypeError):
+            parts.append(f"{label}:{_NO_SOURCE}")
     if constants:
         parts.append("constants:" + hashlib.sha256(
             json.dumps(constants, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")).hexdigest())
