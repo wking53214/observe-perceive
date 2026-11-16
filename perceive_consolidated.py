@@ -137,6 +137,10 @@ class AuditEntry:
     manifest_hash: str
     previous_hash: str = ""
     immutable_hash: str = ""
+    # 1: the chain hash covers audit_id, timestamp, evaluated_gates and final_verdict only (every entry written before this
+    # field existed, which load with the default). 2: it also covers request_snapshot (the patient and the request context),
+    # policy_outputs and the manifest version and hash, so none of them can be rewritten without breaking the chain.
+    hash_version: int = 1
 
 
 # ============================================================================
@@ -630,6 +634,13 @@ class ImmutableAuditLedger:
             "evaluated_gates": entry.evaluated_gates,
             "final_verdict": entry.final_verdict,
         }
+        if entry.hash_version >= 2:
+            entry_dict.update({
+                "request_snapshot": entry.request_snapshot,
+                "policy_outputs": entry.policy_outputs,
+                "manifest_version": entry.manifest_version,
+                "manifest_hash": entry.manifest_hash,
+            })
         combined = entry.previous_hash + hashlib.sha256(json.dumps(entry_dict, sort_keys=True, default=str).encode()).hexdigest()
         return hashlib.sha256(combined.encode()).hexdigest()
 
@@ -666,6 +677,7 @@ class ImmutableAuditLedger:
             manifest_version=manifest_version,
             manifest_hash=manifest_hash,
             previous_hash=self.chain_head,
+            hash_version=2,
         )
 
         entry.immutable_hash = self._hash(entry)
@@ -678,15 +690,7 @@ class ImmutableAuditLedger:
     def verify_chain_integrity(self) -> bool:
         expected_hash = hashlib.sha256(b"PERCEIVE_GENESIS").hexdigest()
         for entry in self.entries:
-            entry_dict = {
-                "audit_id": entry.audit_id,
-                "timestamp": entry.timestamp.isoformat(),
-                "evaluated_gates": entry.evaluated_gates,
-                "final_verdict": entry.final_verdict,
-            }
-            combined = entry.previous_hash + hashlib.sha256(json.dumps(entry_dict, sort_keys=True, default=str).encode()).hexdigest()
-            computed_hash = hashlib.sha256(combined.encode()).hexdigest()
-            if computed_hash != entry.immutable_hash:
+            if self._hash(entry) != entry.immutable_hash:           # one definition of the hash, versioned per entry
                 return False
             if entry.previous_hash != expected_hash:
                 return False
