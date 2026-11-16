@@ -252,6 +252,20 @@ class PediatricCassette:
                                "interpret with caution")
         return None
 
+    def advisory_notes(self, obs: Any) -> List[str]:
+        """Notes that sit beside the verdict and change no regime.
+
+        An SpO2 at or below `probe_off_spo2_at_or_below` (default 0) is far more often a probe that is off than a
+        patient with no oxygen, but it may be both: the note says to check the probe AND the patient, and the reading
+        is assessed exactly as before (a zero is still a CRITICAL_O2 hard rule). `None` switches the note off."""
+        limit = self.settings.probe_off_spo2_at_or_below
+        o2 = getattr(obs, "oxygen_saturation", None)
+        if limit is not None and isinstance(o2, (int, float)) and not isinstance(o2, bool) \
+                and math.isfinite(o2) and o2 <= limit:
+            return [f"POSSIBLE_SENSOR_DISCONNECT: SpO2 reads {o2:g}%; check the probe and check the patient. "
+                    "The reading is not downgraded."]
+        return []
+
     def mask_faults(self, obs: Any, faults: List[str]) -> Optional[Any]:
         """The reading to assess in place of a faulted one, or None.
 
