@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Three hand-off documents (docs only).** `docs/race/COUNSEL_BRIEF_ERASURE.md` (decision D14: the conflict between tamper-evident chains and erasure, what each
+  store holds, four designs with their costs, and seven questions for counsel), `docs/race/CLINICAL_OWNER_ROLE.md` (decision D15: what the clinical owner
+  decides, signs and should refuse to sign, with the document that puts each decision to them) and `docs/race/REAL_DATA_REPLAY_CHECKLIST.md` (handling rules and
+  steps for the first replay of real readings and a pilot's desk log). No code, no tests; decision rows D14 and D15 note the status.
+
 - **Alarm-burden replay (new tool, no behaviour change).** `alarm_burden.py` replays a CSV of readings through a fresh OBSERVE engine under given
   clinical and notification settings and counts escalation events, the subset that would reach a person, events per patient-day (mean, median,
   p90, p99, max), and breakdowns by regime, kind, age group and rule, plus first-reading events, repeats within an hour and concentration in
