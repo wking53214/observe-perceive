@@ -132,7 +132,7 @@ against the code, then a second claims check that corrected the provenance of R1
 | R30 | Physical-plausibility bounds | HR 0 to 350, SpO2 0 to 100, RR 0 to 150, T 20 to 45 | "ENGINEERING guards, not clinical norms ... open to clinician review" | no |
 | R31 | Kalman velocity rules (off by default) | SpO2 -1.0/h 0.20, HR +10/h 0.15, RR +5/h 0.15, T +0.5/h 0.10 | "PROVISIONAL ... pending pediatrician sign-off" | no |
 | R32 | Notification settings | page at CRITICAL, on severity increase, on blocked and on unassessable; always on governance or assessment unavailable | "chosen to err toward telling someone about the worst events" | yes (`ClinicalNotificationSettings`) |
-| R33 | Escalation policy defaults | PERCEIVE `max_daily` 10 per subject; micropatch gate needs physician approval | none | not a clinical setting |
+| R33 | Escalation policy defaults | PERCEIVE class constants: 10 per day, 3 per hour, 15 minutes between escalations, for `escalate_patient` only and advisory unless enforcement is on; a CRITICAL goes down `emergency_override`, never rate-limited, and needs `physician_approved` | "Critical / emergency_override escalations are NEVER rate-limited (life-safety)" | not a clinical setting |
 
 A rule becomes approved when the clinical owner signs its row with the evidence from section 2 attached, and the release names the
 `settings_digest` and `parameter_set_version` in force (`CHANGE_CONTROL_AND_VALIDATION.md`). Until then the honest label for every
