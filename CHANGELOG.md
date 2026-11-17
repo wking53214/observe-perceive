@@ -6,6 +6,11 @@
   C15 notes the changed defaults, C16 notes the counting tools exist, the C6 note and the pull-request note at the top are brought up to date). New `docs/race/CLINICAL_GAPS_BRIEFING.md`:
   seven clinical gaps in plain language, each with the one decision it needs from the clinical owner and a suggested order. No code, tests or numbers invented.
 
+- **Hypothermia comment corrected (register C18), behaviour unchanged.** A comment in the engine said HYPOTHERMIA is a hard rule. It scores 0.4 and the hard-rule line is
+  0.5, so alone it is not one; with one more finding (a raised respiratory rate adds 0.15) it is. The comment now says so, and new `test_hypothermia_scoring.py` pins both
+  facts (three tests, mutation-checked: six breakages, none survived). Comment-only change in the engine: the logic digest ignores comments, so no pinned fingerprint moved.
+  Whether a lone low temperature should page remains a clinical decision (review sheet S7).
+
 - **GEMS pin moved to the same commit on GEMS main's rewritten history (CI repair).** Every CI install began failing with `git checkout -q f70da70: pathspec did not match`: the
   pinned GEMS commit is no longer reachable from any branch on GitHub (GEMS now has only `main`, whose history was rewritten; the old branch that also held the commit is gone).
   The same commit on the new history is `f7d40fc7c0a6b38b5a2d7073ee59a5686db65d8e` ("Tighten HUMAN_AUTHORIZATION to a HUMAN-origin allowlist (#13)"). The two trees differ by one
