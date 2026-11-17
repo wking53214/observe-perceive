@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Hypothermia comment corrected (register C18), behaviour unchanged.** A comment in the engine said HYPOTHERMIA is a hard rule. It scores 0.4 and the hard-rule line is
+  0.5, so alone it is not one; with one more finding (a raised respiratory rate adds 0.15) it is. The comment now says so, and new `test_hypothermia_scoring.py` pins both
+  facts (three tests, mutation-checked: six breakages, none survived). Comment-only change in the engine: the logic digest ignores comments, so no pinned fingerprint moved.
+  Whether a lone low temperature should page remains a clinical decision (review sheet S7).
+
 - **fortress-kernel pin moved off the published audit key.** The `fortress` extra pinned fortress-kernel 4105ccb5, which signed every
   audit record with the published default key `fortress-key`, so anyone could forge records that verify. It now pins fortress-kernel
   Main at f5d15b28a2a842a37c38f30dcde6ee3f47f361b7 (c361569 removed the default; records also carry `key_id` and
