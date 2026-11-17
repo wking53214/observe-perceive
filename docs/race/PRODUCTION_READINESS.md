@@ -67,8 +67,8 @@ Nothing is above 2 and most clinical rows are 0 or 1. A reader should not averag
 | D11 | Production profile requires settings, log redaction, a bounded ledger | Answered yes, and done in PR 18 | Done. |
 | D12 | Advisory proceeds when OBSERVE crashes | A yes (told, committed as unavailable); B refuse | **A for advisory, B is strict**; a deployment picks its profile. |
 | D13 | Strict judges attestation before assessing | A build the request twice; B accept | **B** until a threat model shows the extra state movement matters. |
-| D14 | Right to erasure against immutable chains | A crypto-shred per patient; B separate erasable id table; C counsel decides | **C first**; then A. |
-| D15 | Who is the clinical owner and what is their authority | a named role | a prerequisite for everything in Phase 2. |
+| D14 | Right to erasure against immutable chains | A crypto-shred per patient; B separate erasable id table; C counsel decides | **C first**; then A. **Status: the counsel brief is prepared (`COUNSEL_BRIEF_ERASURE.md`); waiting for counsel.** |
+| D15 | Who is the clinical owner and what is their authority | a named role | a prerequisite for everything in Phase 2. **Status: the role description is prepared (`CLINICAL_OWNER_ROLE.md`); nobody is named.** |
 
 ## 5. Unknowns I could not resolve
 
