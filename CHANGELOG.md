@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Register wording and a clinical gaps briefing (docs only).** `ADVERSARIAL_REGISTER.md`: rows that were decided or built now say so (C8 fixed in #89, C9 and C10 decided to keep as documented,
+  C15 notes the changed defaults, C16 notes the counting tools exist, the C6 note and the pull-request note at the top are brought up to date). New `docs/race/CLINICAL_GAPS_BRIEFING.md`:
+  seven clinical gaps in plain language, each with the one decision it needs from the clinical owner and a suggested order. No code, tests or numbers invented.
+
 - **fortress-kernel pin moved off the published audit key.** The `fortress` extra pinned fortress-kernel 4105ccb5, which signed every
   audit record with the published default key `fortress-key`, so anyone could forge records that verify. It now pins fortress-kernel
   Main at f5d15b28a2a842a37c38f30dcde6ee3f47f361b7 (c361569 removed the default; records also carry `key_id` and
