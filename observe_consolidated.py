@@ -1941,7 +1941,9 @@ class ObserveClinicalEngine:
         candidate_regime = OperationalRegime(max_regime_name)
 
         # CLINICAL SAFETY BYPASS: two triggers skip dwell/hysteresis entirely —
-        #   (1) a heuristic hard rule (risk >= 0.5: CRITICAL_O2, HYPOTHERMIA, etc.), and
+        #   (1) a heuristic hard rule (risk >= 0.5). CRITICAL_O2 reaches it alone (it scores 0.5). HYPOTHERMIA scores 0.4,
+        #       so on its own it does NOT; it becomes one only with another finding that lifts the score to 0.5 or more
+        #       (for example a raised respiratory rate, +0.15). See test_hypothermia_scoring.py, and
         #   (2) a confirmed dangerous clinical syndrome from the behavioral adapter
         #       (septic shock / respiratory distress / hypovolemic shock).
         # Dwell exists to damp noise-driven thrashing on borderline multi-engine
