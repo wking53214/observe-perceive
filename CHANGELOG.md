@@ -12,6 +12,11 @@
   builds the FORTRESS adapter before the production check (it used to be built after). New
   `test_fortress_adapter_audit_key.py` and two new tests in `test_production_profile.py`; no pre-existing test edited.
 
+- **Three hand-off documents (docs only).** `docs/race/COUNSEL_BRIEF_ERASURE.md` (decision D14: the conflict between tamper-evident chains and erasure, what each
+  store holds, four designs with their costs, and seven questions for counsel), `docs/race/CLINICAL_OWNER_ROLE.md` (decision D15: what the clinical owner
+  decides, signs and should refuse to sign, with the document that puts each decision to them) and `docs/race/REAL_DATA_REPLAY_CHECKLIST.md` (handling rules and
+  steps for the first replay of real readings and a pilot's desk log). No code, no tests; decision rows D14 and D15 note the status.
+
 - **Ticket-log burden report (new tool, no behaviour change).** `ticket_burden.py` reads an escalation desk's hash-chained log read-only and reports tickets
   by kind, reason and regime; per day and per patient-day with a ticket; time to first dispatch and to acknowledgement (acknowledged tickets only,
   beside the unacknowledged share); acknowledged, exhausted and open tickets and the age of the oldest open one; tickets needing more than one tier,
