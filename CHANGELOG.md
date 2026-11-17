@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **GEMS pin moved to the same commit on GEMS main's rewritten history (CI repair).** Every CI install began failing with `git checkout -q f70da70: pathspec did not match`: the
+  pinned GEMS commit is no longer reachable from any branch on GitHub (GEMS now has only `main`, whose history was rewritten; the old branch that also held the commit is gone).
+  The same commit on the new history is `f7d40fc7c0a6b38b5a2d7073ee59a5686db65d8e` ("Tighten HUMAN_AUTHORIZATION to a HUMAN-origin allowlist (#13)"). The two trees differ by one
+  file only, an 8445-line notes document under `docs/`; no code differs. `pyproject.toml` and the README now pin the full SHA. No code or test changed.
+
 - **fortress-kernel pin moved off the published audit key.** The `fortress` extra pinned fortress-kernel 4105ccb5, which signed every
   audit record with the published default key `fortress-key`, so anyone could forge records that verify. It now pins fortress-kernel
   Main at f5d15b28a2a842a37c38f30dcde6ee3f47f361b7 (c361569 removed the default; records also carry `key_id` and
