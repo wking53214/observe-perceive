@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **fortress-kernel pin moved off the published audit key.** The `fortress` extra pinned fortress-kernel 4105ccb5, which signed every
+  audit record with the published default key `fortress-key`, so anyone could forge records that verify. It now pins fortress-kernel
+  Main at f5d15b28a2a842a37c38f30dcde6ee3f47f361b7 (c361569 removed the default; records also carry `key_id` and
+  `signature_algorithm`). `FortressPerceiveAdapter` takes `audit_key=`, else reads `FORTRESS_AUDIT_KEY`, and installs that key on the
+  kernel's ledger before anything is recorded; with neither, fortress-kernel signs with a random per-process key (records verify only
+  in that process). `profile="production"` with `fortress_controller=` now refuses to start unless the FORTRESS ledger has a configured
+  key of at least 32 bytes that is not the published `fortress-key`; a whitespace-only `audit_key=` counts as none. The orchestrator
+  builds the FORTRESS adapter before the production check (it used to be built after). New
+  `test_fortress_adapter_audit_key.py` and two new tests in `test_production_profile.py`; no pre-existing test edited.
+
 - **Three hand-off documents (docs only).** `docs/race/COUNSEL_BRIEF_ERASURE.md` (decision D14: the conflict between tamper-evident chains and erasure, what each
   store holds, four designs with their costs, and seven questions for counsel), `docs/race/CLINICAL_OWNER_ROLE.md` (decision D15: what the clinical owner
   decides, signs and should refuse to sign, with the document that puts each decision to them) and `docs/race/REAL_DATA_REPLAY_CHECKLIST.md` (handling rules and

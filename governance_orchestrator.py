@@ -63,7 +63,9 @@ class GovernanceOrchestrator:
                 fortress-kernel in the chain between PERCEIVE and the
                 Conservation Kernel. None (the default) leaves it out
                 entirely, so the chain behaves as it did before and a missing
-                fortress-kernel checkout is never a hard failure.
+                fortress-kernel checkout is never a hard failure. FORTRESS's
+                audit ledger signs with the key in FORTRESS_AUDIT_KEY; profile
+                "production" refuses to start without one.
             require_declared_scope: refuse to execute a request that declares
                 no gateway scope at all. Defaults False, matching the advisory
                 pattern PolicyEnforcementConfig uses in PERCEIVE: the check
@@ -224,6 +226,13 @@ class GovernanceOrchestrator:
         # The ClinicalSettings the deployment attests it runs (the production profile requires it and checks the engine against
         # it); its digest is recorded in every handoff.
         self.clinical_settings = clinical_settings
+        # fortress-kernel is opt-in. Imported only when asked for, so the rest of the
+        # chain does not acquire a hard dependency on a sibling checkout. Built before
+        # the production check, which needs to see the key its audit ledger signs with.
+        self.fortress_adapter = None
+        if fortress_controller:
+            from fortress_perceive_adapter import FortressPerceiveAdapter
+            self.fortress_adapter = FortressPerceiveAdapter(controller_mode=fortress_controller)
         if profile == "production":
             # Fail closed at construction: an orchestrator that cannot prove its wiring never starts.
             from production_profile import ProductionProfileError, production_problems
@@ -231,7 +240,8 @@ class GovernanceOrchestrator:
                 conservation_kernel=conservation_kernel, root_admission=root_admission,
                 observe_engine=observe_engine, receipts=receipts, execution_ledger=self.execution_ledger,
                 alert_human=alert_human, escalations=escalations, source_signers=source_signers,
-                guard_executor=guard_executor, sweep_runner=sweep_runner, clinical_settings=clinical_settings)
+                guard_executor=guard_executor, sweep_runner=sweep_runner, clinical_settings=clinical_settings,
+                fortress_adapter=self.fortress_adapter)
             if problems:
                 raise ProductionProfileError(problems)
 
@@ -245,13 +255,6 @@ class GovernanceOrchestrator:
         self.perceive_adapter = PerceiveConservationAdapter(conservation_kernel, root_admission) if conservation_kernel else None
         self.conservation_adapter = ConservationGSA815Adapter()
         self.gsa815_adapter = GSA815ObserveAdapter()
-
-        # fortress-kernel is opt-in. Imported only when asked for, so the rest of the
-        # chain does not acquire a hard dependency on a sibling checkout.
-        self.fortress_adapter = None
-        if fortress_controller:
-            from fortress_perceive_adapter import FortressPerceiveAdapter
-            self.fortress_adapter = FortressPerceiveAdapter(controller_mode=fortress_controller)
 
     def _verify_on_the_way_out(self, result: dict, forensic_proof) -> dict:
         """Recompute the whole chain before handing the record over.

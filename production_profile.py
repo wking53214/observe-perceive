@@ -10,7 +10,9 @@ checking IDENTITY and BEHAVIOUR, not shape:
     callable, or a second `RootAdmission` the kernel does not hold, is refused.
   * The roster really refuses: a canary request that must be refused is put to it at startup. A roster that
     approves it (or a guard that opens for it) is refused. The canary registers nothing.
-  * The audit is durable and signed: receipts and the execution ledger have a path and a signer.
+  * The audit is durable and signed: receipts and the execution ledger have a path and a signer. When FORTRESS is in
+    the chain, its audit ledger signs with a configured key (FORTRESS_AUDIT_KEY), not a random per-process one, of at
+    least 32 bytes and not the published 'fortress-key'.
   * OBSERVE is configured, runs the clinical settings the deployment attests (their digest is recorded in every handoff), and
     keeps a bounded ledger with an archive. Patient identifiers are not written to logs. Event-time source keys are registered.
   * The executor is guarded.
@@ -25,11 +27,17 @@ controls that are wired.
 """
 from __future__ import annotations
 
+import hmac
 from typing import Any, List, Optional, Tuple
 
 __all__ = ["PRODUCTION_PROFILE", "ProductionProfileError", "REQUIRED_CNS", "production_problems"]
 
 PRODUCTION_PROFILE = "production"
+
+#: The key fortress-kernel before c361569 signed every audit record with. It is published, so it is refused, never used.
+_PUBLISHED_FORTRESS_KEY = b"fortress-key"
+#: The shortest FORTRESS audit key production accepts: the HMAC-SHA256 output length. RFC 2104 discourages shorter keys.
+_FORTRESS_KEY_MIN_BYTES = 32
 
 #: The lowest CNS release the production path accepts (the tag v4.0.0, which is what this repository pins).
 #: DecisionGuard, which root admission needs, arrived in v2.2.0. Raising it is a policy change made in review.
@@ -132,7 +140,7 @@ def _data_protection_problems(observe_engine: Any, clinical_settings: Any) -> Li
 def production_problems(*, conservation_kernel: Any, root_admission: Any, observe_engine: Any, receipts: Any,
                         execution_ledger: Any, alert_human: Any, source_signers: Any,
                         guard_executor: bool, escalations: Any = None, sweep_runner: Any = None,
-                        clinical_settings: Any = None) -> List[str]:
+                        clinical_settings: Any = None, fortress_adapter: Any = None) -> List[str]:
     """Every reason this wiring is not a production wiring; empty if it is."""
     problems: List[str] = []
 
@@ -176,6 +184,25 @@ def production_problems(*, conservation_kernel: Any, root_admission: Any, observ
         problems.append("the execution ledger is in memory: a replay after a restart would not be a replay")
     elif getattr(execution_ledger, "signer", None) is None:
         problems.append("the execution ledger is unsigned")
+    if fortress_adapter is not None:
+        fortress_audit = getattr(getattr(fortress_adapter, "fortress", None), "audit", None)
+        if getattr(fortress_audit, "ephemeral_key", None) is not False:
+            problems.append("FORTRESS is in the chain but its audit ledger has no configured key (set "
+                            "FORTRESS_AUDIT_KEY): its records are signed with a random per-process key (or, on a "
+                            "fortress-kernel older than c361569, the published key 'fortress-key') and cannot be "
+                            "verified outside this process")
+        else:
+            # The key is read only to compare it; no message carries it.
+            key = getattr(fortress_audit, "audit_key", None)
+            key = (key.encode() if isinstance(key, str) else key if isinstance(key, bytes) else b"").strip()
+            if hmac.compare_digest(key, _PUBLISHED_FORTRESS_KEY):
+                problems.append("FORTRESS is in the chain but its audit ledger signs with the published key "
+                                "'fortress-key' (set FORTRESS_AUDIT_KEY to a secret): anyone can forge records "
+                                "that verify")
+            elif len(key) < _FORTRESS_KEY_MIN_BYTES:
+                problems.append(f"FORTRESS is in the chain but its audit key (FORTRESS_AUDIT_KEY) is blank or shorter "
+                                f"than {_FORTRESS_KEY_MIN_BYTES} bytes: a short key can be guessed, and then records "
+                                "can be forged")
     if escalations is None:
         problems.append("no escalation desk: a bare alert_human callable proves only that a function returned, not "
                         "that a person was told, took responsibility, or was followed up")
