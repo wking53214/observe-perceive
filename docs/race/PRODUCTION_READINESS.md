@@ -1,6 +1,6 @@
 # Production readiness: scorecard, roadmap, open decisions and unknowns
 
-Status date: 2026-11-15, `main` after #86 is merged (this document assumes #85 and #86 merge; both have green CI). Evidence classes:
+Written 2026-11-15 after #86. Brought up to date on 2026-11-19 at `main` `bbbf8d9` from the CHANGELOG and `ADVERSARIAL_REGISTER.md` (INSPECTED): evidence and decision statuses changed, one rating changed (row 7, 0 to 1); no other rating and no recommendation was changed. Evidence classes:
 **EXECUTED**, **INSPECTED**, **PROPOSED**. Companion documents (all in `docs/race/`): `CLINICAL_SAFETY_AND_VALIDATION.md`,
 `CHANGE_CONTROL_AND_VALIDATION.md`, `DATA_PRIVACY_AND_RESEARCH.md`, `ADVERSARIAL_REGISTER.md`.
 
@@ -20,17 +20,17 @@ Nothing is above 2 and most clinical rows are 0 or 1. A reader should not averag
 
 | # | Area | Rating | Evidence | What holds it back |
 |---|---|---|---|---|
-| 1 | Escalation reaches a person | 2 | #74, #78, #81; settings, desk tiers, signed acknowledgements, sweep runner, watchdog; 1492 tests | never run against a real pager, real latency, or a soak test (unknown); a CRITICAL is BLOCKED (and paged) unless the integration supplies `physician_approved`, by design (D3) |
+| 1 | Escalation reaches a person | 2 | #74, #78, #81; settings, desk tiers, signed acknowledgements, sweep runner, watchdog; test counts in row 11 | never run against a real pager, real latency, or a soak test (unknown); a CRITICAL is BLOCKED (and paged) unless the integration supplies `physician_approved`, by design (D3) |
 | 2 | Failure handling | 2 | #80 transactional evaluate; crash told per profile (#86); faulted channels never read as stable | advisory still acts on no assessment (D12) |
-| 3 | Decision integrity and audit | 2 | #83, #86: attempt id, patient binding, reading digest, assessment bound and verified against OBSERVE's ledger; receipts verify from file | PERCEIVE audit hash excludes the snapshot (C4); the caller's identity is not covered (C14); the request commitment is unkeyed |
-| 4 | Clinician control and change control | 1 | #84 settings with digest and weakening flags | constants outside `PARAMETER_SET` (C3); no release process; no clinical owner named |
+| 3 | Decision integrity and audit | 2 | #83, #86: attempt id, patient binding, reading digest, assessment bound and verified against OBSERVE's ledger; receipts verify from file | the caller's identity is not covered (C14); the request commitment is unkeyed |
+| 4 | Clinician control and change control | 1 | #84 settings with digest and weakening flags | the clinical constants have no stated source (C3 is closed for the version stamp: every decision records `logic_version`, PR 17); no release process; no clinical owner named |
 | 5 | Clinical detection quality | 0 | the pinned detection record is the engine's own admission: 3 missed scenarios, 4 unsafe fault cases (C1); nine probe rows (C17) | no validation study exists |
 | 6 | Clinical rule approval | 0 | 33 register rows, none approved | needs the clinical owner |
-| 7 | Alarm burden | 0 | none measured; no metric function (only `open_tickets()`) | needs a report over the ticket log and a unit pilot |
-| 8 | Privacy and data protection | 1 | HIPAA CSV exporter pseudonymises; salt required; files 0600 | raw ids in logs, ledgers, tickets (EXECUTED); no encryption at rest, retention or erasure path; 48-bit pseudonym |
+| 7 | Alarm burden | 1 | two read-only tools: `ticket_burden.py` (reads a desk's ticket log) and `alarm_burden.py` (replays a CSV of readings); 37 tests; `ALARM_BURDEN.md` | nothing measured on real data; needs a unit pilot and a de-identified replay |
+| 8 | Privacy and data protection | 1 | HIPAA CSV exporter pseudonymises; salt required; files 0600 | raw ids remain in ledgers, tickets, alert payloads and exports (EXECUTED; log lines now carry a keyed tag, PR 18); no encryption at rest, retention or erasure path; 48-bit pseudonym |
 | 9 | Security of the control plane | 1 | optionally signed tickets, acknowledgements and receipts (the signing scheme is the Conservation Kernel's `signing` package, which is not in this repository, so I did not verify it is HMAC); one-writer lock | no authentication of callers (C14); keys and salt custody are the deployer's |
-| 10 | Operations | 1 | sweep runner with watchdog; settings from a file | OBSERVE ledger is memory-only and unbounded (C7); no deployment, monitoring, backup, or capacity evidence; per-patient state capped at 10000 |
-| 11 | Test evidence | 2 | 1492 passing tests on the #86 branch (1449 on `main` before #85 and #86), future-clock pass, ruff, mutation checks per PR, independent reviews | two test files I could not run locally (CI runs them); tests are engineering regression, not clinical |
+| 10 | Operations | 1 | sweep runner with watchdog; settings from a file | the OBSERVE ledger is in memory and unbounded by default; it can be bounded with an owner-only archive and the production profile requires that (C7, PR 18); no deployment, monitoring, backup, or capacity evidence; per-patient state capped at 10000 |
+| 11 | Test evidence | 2 | README record, EXECUTED 2026-11-17 at `b4f4c62`: 1,751 passed with CNS (none skipped, 5 expected failures) and 1,485 passed, 122 skipped without it; not re-run at `bbbf8d9` (earlier versions of this row said 1492), future-clock pass, ruff, mutation checks per PR, independent reviews | two test files I could not run locally (CI runs them); tests are engineering regression, not clinical |
 | 12 | Regulatory and quality system | 0 | not assessed | whether this is a regulated medical device is a decision for regulatory counsel; I assumed nothing |
 | 13 | Documentation and training | 1 | design notes and PR documents exist per change; this set | no runbooks, no clinician-facing guide, no training |
 
@@ -39,12 +39,12 @@ Nothing is above 2 and most clinical rows are 0 or 1. A reader should not averag
 **Phase 0: decisions only (no code).** Name the clinical owner. Answer D1 to D8 below. Decide whether this is evaluated in silent mode first.
 
 **Phase 1: make it safe to evaluate (engineering, small PRs, each with a table of what changed).**
-1. Put every clinical constant into `PARAMETER_SET`, record the source revision (C3).
-2. Alarm-burden report from the ticket log (read-only) (scorecard 7).
-3. Include the request snapshot in PERCEIVE's chain hash (C4).
-4. Require clinical settings in the production profile (C11); a bounded or rotating OBSERVE ledger sink (C7).
-5. Log redaction and a pseudonym in log lines (C12); pseudonym length and collision check; HMAC construction.
-6. Fixtures for the nine probe rows and the three missed scenarios, marked as what they are.
+1. Put every clinical constant into `PARAMETER_SET`, record the source revision (C3). **Partly done (PR 17):** a `logic_version` digest of the scoring code is recorded; a stated source for each constant is not.
+2. Alarm-burden report from the ticket log (read-only) (scorecard 7). **Done:** `ticket_burden.py` and `alarm_burden.py`.
+3. Include the request snapshot in PERCEIVE's chain hash (C4). **Done (PR 17).**
+4. Require clinical settings in the production profile (C11); a bounded or rotating OBSERVE ledger sink (C7). **Done (PR 18).**
+5. Log redaction and a pseudonym in log lines (C12); pseudonym length and collision check; HMAC construction. **Partly done (PR 18):** log lines carry a keyed tag; the 48-bit export pseudonym is unchanged.
+6. Fixtures for the nine probe rows and the three missed scenarios, marked as what they are. **In place:** `test_single_channel_behaviour.py` and `test_detection_record.py` (INSPECTED, not re-run).
 
 **Phase 2: clinical.** The validation plan (`CLINICAL_SAFETY_AND_VALIDATION.md` section 2): event definitions, de-identified replay, silent mode, sign-off per register row. Age bands 3 to 18 as an output of this phase, not a guess before it.
 
@@ -54,12 +54,12 @@ Nothing is above 2 and most clinical rows are 0 or 1. A reader should not averag
 
 | ID | Decision | Options | Recommendation |
 |---|---|---|---|
-| D1 | Hard-rule confirmation window | A keep 3 (waits for one repeat); B set 1 (every SpO2 < 88 holds WARNING at once) | **B for a first evaluation unit**, because a lone SpO2 < 88 is a possible emergency and the cost is some probe-off pages; keep 3 only if the unit's burden says otherwise. A clinical call. |
-| D2 | Heart rate alone counts as corroboration of a hard rule | A yes (today); B no, require RR or temperature | **B**: heart rate usually shares the probe with SpO2, so it is weak corroboration. |
+| D1 | Hard-rule confirmation window | A keep 3 (waits for one repeat); B set 1 (every SpO2 < 88 holds WARNING at once) | **B for a first evaluation unit**, because a lone SpO2 < 88 is a possible emergency and the cost is some probe-off pages; keep 3 only if the unit's burden says otherwise. A clinical call. **Status: Done on the clinician's instruction: the window now defaults to 1 (CHANGELOG, "Four policy defaults changed").** |
+| D2 | Heart rate alone counts as corroboration of a hard rule | A yes (today); B no, require RR or temperature | **B**: heart rate usually shares the probe with SpO2, so it is weak corroboration. **Status: Done on the clinician's instruction: `heart_rate_corroborates` defaults to false (same entry).** |
 | D3 | A CRITICAL is BLOCKED unless the integration supplies `physician_approved` (by design: a patient-safety override needs a physician). Keep that, or change the policy | A keep, and the integration supplies approval; B change the policy | **A, plus page either way (true since #78)**: it is a conscious clinical-governance rule, documented in the register (C5). Answered: "page, and decide the block as policy". |
-| D4 | (Corrected.) Is a CRITICAL exempt from the escalation count | It already is on the CRITICAL path: `emergency_override` has no rate gate by design, and the count is advisory by default and never read from the manifest. The remaining gap is a CRITICAL arriving as `escalate_patient` | **Exempt it there too** (answered yes). My original framing, that a count could refuse a CRITICAL, was wrong. |
+| D4 | (Corrected.) Is a CRITICAL exempt from the escalation count | It already is on the CRITICAL path: `emergency_override` has no rate gate by design, and the count is advisory by default and never read from the manifest. The remaining gap is a CRITICAL arriving as `escalate_patient` | **Exempt it there too** (answered yes). My original framing, that a count could refuse a CRITICAL, was wrong. **Status: Done: an OBSERVE-found CRITICAL is exempt from the escalation count (same entry; active for orchestrator requests since OBSERVE runs first).** |
 | D5 | Classify the patient id in the ticket log | A T2 identifier; B T1 | **A** (`DATA_PRIVACY_AND_RESEARCH.md`). |
-| D6 | A failed `STATE_EVICTED` write fails another patient's evaluation | A best-effort (log and continue); B fail | **A**: one patient's eviction record must not block another's assessment. |
+| D6 | A failed `STATE_EVICTED` write fails another patient's evaluation | A best-effort (log and continue); B fail | **A**: one patient's eviction record must not block another's assessment. **Status: Done: a failed eviction write is logged and held in `degraded_events` (same entry).** |
 | D7 | Adults and older adolescents | A keep the floor (WARNING plus finding); B build an adult cassette; C raise `max_age_months` per unit | **A now, B only if the hospital will monitor adults here** (a clinical cassette needs its own sign-off). |
 | D8 | The nine single-channel rows | A accept as designed; B add single-channel WARNING rules for specific danger signs; C more engines or history | **Clinical owner decides row by row**; I would expect B for the severe rows (HR 45 or 200, SpO2 below the age norm, T 34.5, RR 70), but I am not the clinician. **Status: the review sheet is prepared (`CLINICIAN_REVIEW_SHEET.md`) and each row is pinned by `test_single_channel_behaviour.py`; waiting for the clinical owner's marks.** |
 | D9 | Constants into the version stamp | Answered yes, and done in PR 17 as `logic_version` (a digest of the scoring code's behaviour, not a list of constants) | Done. |
@@ -74,6 +74,6 @@ Nothing is above 2 and most clinical rows are 0 or 1. A reader should not averag
 
 - Whether any deployment exists, with which profile, settings, pager and persistence.
 - Real alarm burden, real acknowledgement times, real false alarm rate: no data.
-- Whether OBSERVE state survives a restart in practice (the ledger is memory-only; per-patient tracked state is too).
+- Whether OBSERVE state survives a restart in practice (by default the ledger is memory-only; the archive holds only entries rotated out, and per-patient tracked state is memory-only too).
 - The regulatory status and the hospital's risk-management process.
 - Whether the two test files that only CI runs (`test_cns_governed_decision_demo.py`, `test_gems_governance_adapter.py`) cover anything this document depends on.
