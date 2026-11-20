@@ -182,6 +182,12 @@ class GovernanceOrchestrator:
         if escalations is not None and not callable(getattr(escalations, "raise_and_dispatch", None)):
             raise ValueError(f"escalations must be an EscalationDesk, not {type(escalations).__name__}")
         self.escalations = escalations
+        # A strict orchestrator must be able to tell a person about a CRITICAL reading, as production must: an escalation
+        # desk is the only channel for one (alert_human is called only for a stage that failed). Advisory may run
+        # without one, and then says so on every CRITICAL record (see _no_channel_notice).
+        if profile == "strict" and escalations is None:
+            raise ValueError("the strict profile needs an escalation desk (escalations=...): without one nobody is told "
+                             "of a CRITICAL reading (use profile='advisory' to run without a desk)")
         self.sweep_runner = sweep_runner
         # One id per call to `orchestrate_request`, whatever the artifact: `request_id` is the artifact's id, so a refused
         # attempt and its retry share it. The attempt id tells them apart on the result, the receipt and every alert and
@@ -650,6 +656,24 @@ class GovernanceOrchestrator:
             logger.critical(f"[Orchestrator] CLINICAL NOTIFICATION FAILED: {safe_error(exc, getattr(vitals_snapshot, 'patient_id', None))}")
             return {"reason": None, "status": "failed", "ticket": None}
 
+    def _no_channel_notice(self, verdict, vitals_snapshot):
+        """With no escalation desk, a CRITICAL escalation event reaches no one. Say so loudly and put it on the record,
+        so a caller can see it. Returns {reason, status, ticket} or None. Never raises, never changes the outcome. The
+        reading still proceeds: a CRITICAL reading does not stop the action."""
+        try:
+            if verdict is None or not getattr(verdict, "escalation_required", False):
+                return None
+            if getattr(getattr(verdict, "regime", None), "value", None) != "critical":
+                return None
+            logger.critical(
+                f"[Orchestrator] CRITICAL READING, NO ONE TOLD: {patient_tag(getattr(vitals_snapshot, 'patient_id', None))} "
+                "is CRITICAL and this orchestrator has no escalation desk. The caller must put this record in front of a "
+                "clinician.")
+            return {"reason": "critical_regime", "status": "no_channel", "ticket": None}
+        except Exception as exc:  # noqa: BLE001 - never alter the outcome
+            logger.critical(f"[Orchestrator] CLINICAL NOTIFICATION FAILED: {safe_error(exc, None)}")
+            return {"reason": None, "status": "failed", "ticket": None}
+
     def _notify_clinical(self, result: dict, vitals_snapshot) -> None:
         verdict = result.get("observe_verdict") or getattr(self._seen, "verdict", None)
         note = self._clinical_notice(verdict, vitals_snapshot, result.get("governance_request"), result.get("status"))
@@ -690,9 +714,16 @@ class GovernanceOrchestrator:
             # already reported is spent (the next reading of this patient is not an event), so tell a person first.
             if self.escalations is not None:
                 self._clinical_notice(getattr(self._seen, "verdict", None), vitals_snapshot, None, "raised")
+            else:
+                self._no_channel_notice(getattr(self._seen, "verdict", None), vitals_snapshot)
             raise
         if self.escalations is not None:
             self._notify_clinical(result, vitals_snapshot)      # before the receipt, so the receipt records it
+        else:
+            note = self._no_channel_notice(result.get("observe_verdict") or getattr(self._seen, "verdict", None),
+                                           vitals_snapshot)
+            if note is not None:
+                result["clinical_notification"] = note
         if self.receipts is not None:
             try:
                 result["receipt"] = self.receipts.append(result)

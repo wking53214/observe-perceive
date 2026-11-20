@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A CRITICAL reading is never silent (Task A).** `profile="strict"` now refuses to start without an escalation desk (`escalations=...`), as `profile="production"` already did: a CRITICAL reading reaches a person only through a desk (`alert_human` is called only when a stage fails). Advisory, the default, still runs without a desk, but a CRITICAL escalation event then logs `CRITICAL READING, NO ONE TOLD` and the record gains `clinical_notification` with status `no_channel` (reason `critical_regime`). A CRITICAL reading still does not stop the action. Tests: strict orchestrators in the suite now get a desk (`make_test_desk` in `conftest.py`, and a printing desk in `vertical_slice.py`); the old "strict with no alert channel says no_channel" test became "strict refuses to start without a desk"; the "without a desk adds nothing" test now covers a CRITICAL reading (marked) and a stable one (nothing added). Production behaviour is unchanged. Not changed: the clinician's review of the thresholds, and whether a failed page in strict mode should also require the sweep runner (still an open owner question).
+
 - **Register wording and a clinical gaps briefing (docs only).** `ADVERSARIAL_REGISTER.md`: rows that were decided or built now say so (C8 fixed in #89, C9 and C10 decided to keep as documented,
   C15 notes the changed defaults, C16 notes the counting tools exist, the C6 note and the pull-request note at the top are brought up to date). New `docs/race/CLINICAL_GAPS_BRIEFING.md`:
   seven clinical gaps in plain language, each with the one decision it needs from the clinical owner and a suggested order. No code, tests or numbers invented.

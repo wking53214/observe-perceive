@@ -8,7 +8,7 @@ import datetime as dt
 
 import pytest
 
-from conftest import ChainArtifact, importorskip_cns, make_perceive, make_vitals
+from conftest import ChainArtifact, importorskip_cns, make_perceive, make_test_desk, make_vitals
 
 importorskip_cns("cns.gate")
 importorskip_cns("cns_composition.decision_guard")
@@ -47,7 +47,7 @@ def strict(observe_engine, alerts=None):
     kernel = ConservationKernel(root_guard=admission)
     return GovernanceOrchestrator(make_perceive(), kernel, observe_engine, profile="strict",
                                   source_signers=[SOURCE], root_admission=admission,
-                                  alert_human=None if alerts is None else alerts.append)
+                                  escalations=make_test_desk(alerts))
 
 
 def run_strict(orchestrator, artifact_id, vitals, patient, extra=None):
@@ -109,14 +109,17 @@ def test_op2_strict_observe_crash_is_a_refusal_and_raises_the_human_alert():
     assert result["refused_by"] == "observe" and result["stage_refused"] is False
     assert "OBSERVE engine crashed" in result["stage_error"]
     assert "executed" not in order
-    assert result["human_alert"] == "delivered"
+    assert result["human_alert"] == "dispatched"        # the desk's channel returned; no delivery receipt
     assert [a["stage"] for a in alerts] == ["observe"]
 
 
-def test_op2_strict_with_no_alert_channel_still_refuses_and_says_no_channel():
-    result, order = run_strict(strict(Exploding()), "p5-op2b", make_vitals(), "P001")
-    assert result["status"] == "REJECTED" and "executed" not in order
-    assert result["human_alert"] == "no_channel"
+def test_strict_refuses_to_start_without_an_escalation_desk():
+    """A CRITICAL reading reaches a person only through a desk, so strict will not run without one (as production)."""
+    admission = RootAdmission()
+    with pytest.raises(ValueError, match="escalation desk"):
+        GovernanceOrchestrator(make_perceive(), ConservationKernel(root_guard=admission), ObserveClinicalEngine(),
+                               profile="strict", source_signers=[SOURCE], root_admission=admission,
+                               alert_human=lambda alert: None)
 
 
 # ---- OP-3: a verdict with no evidence is not acceptable -------------------------------------------------------------

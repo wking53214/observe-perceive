@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from conftest import importorskip_cns
+from conftest import importorskip_cns, make_test_desk
 
 importorskip_cns("cns.gate")
 importorskip_cns("cns_composition.decision_guard")
@@ -142,7 +142,7 @@ def test_a_correct_wiring_executes_a_governed_action_end_to_end(tmp_path):
 
 def test_strict_accepts_a_bare_lambda_guard_and_production_refuses_it(tmp_path):
     strict = GovernanceOrchestrator(perceive(), ConservationKernel(root_guard=lambda a: True),
-                                    ObserveClinicalEngine(), profile="strict")
+                                    ObserveClinicalEngine(), profile="strict", escalations=make_test_desk())
     assert strict.profile == "strict"
     msg = refused(tmp_path, conservation_kernel=ConservationKernel(root_guard=lambda a: True))
     assert "not the RootAdmission given to the orchestrator" in msg

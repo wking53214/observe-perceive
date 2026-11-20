@@ -94,3 +94,14 @@ def run_chain(orchestrator, artifact_id, operation="escalate", func=None, vitals
         vitals_snapshot=make_vitals() if vitals else None, context=ctx,
     )
     return result, ran
+
+
+def make_test_desk(alerts=None):
+    """A minimal escalation desk for tests that build a strict orchestrator (strict refuses to start without one).
+    Everything the desk dispatches is appended to `alerts` (a list) when one is given."""
+    from conservation_kernel import HmacSigner
+    from human_escalation import EscalationDesk, EscalationLog, NotificationPolicy, Tier
+    sink = alerts if alerts is not None else []
+    key = HmacSigner(b"test-strict-desk-responder-key-0123456789", key_id="nurse")
+    return EscalationDesk(NotificationPolicy((Tier("charge", sink.append, ("nurse",), 60.0, 5.0),)), EscalationLog(),
+                          responder_keys={"nurse": key})

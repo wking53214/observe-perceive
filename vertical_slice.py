@@ -40,6 +40,7 @@ from conservation_kernel import ConservationKernel, HmacSigner
 from execution_guard import ExecutionLedger, ExecutionRefusal, authorize_execution, guarded
 from governance_orchestrator import GovernanceOrchestrator
 from governance_record import ReceiptLog, from_record, verify_record
+from human_escalation import EscalationDesk, EscalationLog, NotificationPolicy, Tier
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
 from root_admission import RootAdmission, require_root_admission
@@ -51,6 +52,15 @@ from sentinel_perceive_adapter import SentinelPerceiveAdapter
 # keys in a demo; a deployment supplies its own Signer and never commits it.
 DEPLOYER = HmacSigner(b"demo-deployer-key-0123456789abcdef", key_id="deployer-demo")
 SOURCE = HmacSigner(b"demo-feed-icu-3-key-0123456789abcd", key_id="feed-icu-3")
+RESPONDER = HmacSigner(b"demo-responder-key-0123456789abcdefgh", key_id="demo-nurse")
+
+
+def _demo_desk() -> EscalationDesk:
+    """The strict profile refuses to run without an escalation desk. This one only prints what it would send; a real
+    deployment puts a pager, a dashboard or a phone behind the channel."""
+    return EscalationDesk(NotificationPolicy((Tier("charge", lambda page: print(f"  [DEMO PAGE] {page.get('kind')}"),
+                                                   ("demo-nurse",), 60.0, 5.0),)),
+                          EscalationLog(), responder_keys={"demo-nurse": RESPONDER})
 
 
 class _Status:
@@ -124,7 +134,7 @@ def run_action(workdir: Path, *, artifact_id: str = "feed-icu-3-0042", execution
         _perceive(paths.perceive), kernel, ObserveClinicalEngine(),
         profile="strict",                     # sealed scope, vitals, attested event time, advised violations enforced
         source_signers=[SOURCE],              # whose event-time attestations count
-        execution_ledger=ledger, receipts=receipts, root_admission=admission,
+        execution_ledger=ledger, receipts=receipts, root_admission=admission, escalations=_demo_desk(),
     )
 
     # EXECUTE: the actuator. It will not act on anything the ledger did not issue.
@@ -271,7 +281,8 @@ def attack_after_restart(workdir: Path, explained: Dict[str, Any]) -> Dict[str, 
     admission = RootAdmission()
     orchestrator = GovernanceOrchestrator(_perceive(paths.perceive), ConservationKernel(root_guard=admission), ObserveClinicalEngine(),
                                           profile="strict", source_signers=[SOURCE], execution_ledger=ledger,
-                                          receipts=ReceiptLog(paths.receipts, signer=DEPLOYER), root_admission=admission)
+                                          receipts=ReceiptLog(paths.receipts, signer=DEPLOYER), root_admission=admission,
+                                          escalations=_demo_desk())
     from gateway_admission_adapter import GatewayAdmissionAdapter, GatewayEpistemicStatus
     artifact = FeedArtifact("feed-icu-3-0042", "escalate P001: sustained tachycardia, SpO2 91", _EVENT_TIME)
     sealed = GatewayAdmissionAdapter.seal(artifact_id=artifact.artifact_id, payload={"content": artifact.content},

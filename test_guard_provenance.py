@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import run_chain
+from conftest import make_test_desk, run_chain
 from conservation_kernel import ConservationKernel
 from execution_guard import ExecutionLedger, guarded
 from governance_orchestrator import GovernanceOrchestrator
@@ -70,7 +70,8 @@ def test_strict_profile_refuses_a_kernel_with_no_root_guard(perceive):
 
 def test_strict_profile_accepts_a_kernel_that_has_a_root_guard(perceive):
     kernel = ConservationKernel(root_guard=lambda artifact: False)
-    orchestrator = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), profile="strict")
+    orchestrator = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), profile="strict",
+                                          escalations=make_test_desk())
     assert orchestrator.profile == "strict"
 
 

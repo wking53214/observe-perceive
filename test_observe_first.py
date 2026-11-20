@@ -11,7 +11,7 @@ Findings measured on `main` before this change (docs/race/IDENTITY_BINDING_DESIG
 import pytest
 from datetime import datetime, timezone
 
-from conftest import ChainArtifact
+from conftest import ChainArtifact, make_test_desk
 from governance_chain import verify_result
 from observe_consolidated import ObserveClinicalEngine
 from test_identity_binding import CRIT, make_desk, orch, run, vit
@@ -423,7 +423,7 @@ def test_in_strict_a_reading_is_assessed_even_when_the_request_is_then_refused_f
     from governance_orchestrator import GovernanceOrchestrator
     engine = Counting()
     strict_o = GovernanceOrchestrator(perceive, ConservationKernel(root_guard=lambda artifact: True), engine,
-                                      profile="strict", source_signers=[])
+                                      profile="strict", source_signers=[], escalations=make_test_desk())
     unattested, ran = run_chain(strict_o, "st-att", vitals=True, context={"gateway_scope": "EXECUTE"})
     assert unattested["status"] == "REJECTED" and unattested["refused_by"] == "source_attestation" and ran == []
     assert len(engine.calls) == 1 and unattested["observe_verdict"] is not None
