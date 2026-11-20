@@ -8,7 +8,7 @@ import of it fail), so the result does not depend on what the environment
 happens to contain: the module imports, using the pipeline says what is
 missing, and the packaging adds no runtime dependency.
 
-The connected half needs ``cns.gate`` (``pip install 'observe-perceive[cns]'``)
+The connected half needs ``cns.gate`` (``pip install 'observe-perceive[cns] @ git+https://github.com/wking53214/observe-perceive.git@main'``)
 and skips without it. Its fake gates declare a position and return what they
 are told, so every rule R1 to R8 is exercised without any library behind it,
 and one test drives the real DIT connector (``pip install 'dit[cns]'``).
@@ -47,7 +47,7 @@ MODULE_PATH = HERE / "cns_governed_decision.py"
 PYPROJECT = HERE / "pyproject.toml"
 
 CNS_PIN = "v4.0.0"
-HINT = "pip install 'observe-perceive[cns]'"
+HINT = "pip install 'observe-perceive[cns] @ git+https://github.com/wking53214/observe-perceive.git@main'"
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +109,7 @@ def test_using_the_pipeline_with_cns_blocked_says_what_is_missing():
                     build()
                 except m.CnsNotInstalled as exc:
                     assert isinstance(exc, ImportError)
-                    assert "pip install 'observe-perceive[cns]'" in str(exc), str(exc)
+                    assert "pip install 'observe-perceive[cns] @ git+https://github.com/wking53214/observe-perceive.git@main'" in str(exc), str(exc)
                     assert "cns.gate" in str(exc)
                     assert isinstance(exc.__cause__, ImportError)
                 else:

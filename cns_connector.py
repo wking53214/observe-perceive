@@ -48,7 +48,7 @@ __all__ = [
     "cns_available",
 ]
 
-INSTALL_HINT = "pip install 'observe-perceive[cns]'"
+INSTALL_HINT = "pip install 'observe-perceive[cns] @ git+https://github.com/wking53214/observe-perceive.git@main'"
 
 _ALPHA = "alpha"
 _OMEGA = "omega"

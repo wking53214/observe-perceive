@@ -60,7 +60,7 @@ Choices the rules leave open, stated here so they are not discovered later
 
 This is tamper-evidence, not tamper-proofing, exactly as in ``cns.gate``: the
 digest detects a record edited after the fact, not an adversary who
-recomputes it. Install CNS with the extra: ``pip install 'observe-perceive[cns]'``.
+recomputes it. Install CNS with the extra: ``pip install 'observe-perceive[cns] @ git+https://github.com/wking53214/observe-perceive.git@main'``.
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ __all__ = [
     "cns_available",
 ]
 
-INSTALL_HINT = "pip install 'observe-perceive[cns]'"
+INSTALL_HINT = "pip install 'observe-perceive[cns] @ git+https://github.com/wking53214/observe-perceive.git@main'"
 
 #: Every synthetic verdict's ``subject`` starts with this, so a reader of the
 #: record can tell a verdict this layer made from one a gate issued.
