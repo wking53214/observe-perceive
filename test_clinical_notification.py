@@ -299,9 +299,18 @@ def test_the_orchestrator_never_lets_notification_change_the_outcome(perceive, k
     assert result["clinical_notification"]["status"] == "failed"
 
 
-def test_without_a_desk_the_orchestrator_adds_nothing(perceive, kernel):
+def test_without_a_desk_a_critical_reading_says_no_channel_and_is_still_not_stopped(perceive, kernel, caplog):
     orch = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine())
-    result, _ = orchestrate(orch, "n1", vitals(pid="N", **CRITICAL))
+    with caplog.at_level("CRITICAL"):
+        result, _ = orchestrate(orch, "n1", vitals(pid="N", **CRITICAL))
+    assert result["clinical_notification"] == {"reason": "critical_regime", "status": "no_channel", "ticket": None}
+    assert result["status"] == "APPROVED_AND_EXECUTED"                  # a CRITICAL reading does not stop the action
+    assert any("NO ONE TOLD" in r.getMessage() for r in caplog.records)
+
+
+def test_without_a_desk_a_stable_reading_adds_nothing(perceive, kernel):
+    orch = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine())
+    result, _ = orchestrate(orch, "n1s", vitals(pid="N", hr=110, o2=98.0, rr=28, temp=37.0))
     assert "clinical_notification" not in result
 
 

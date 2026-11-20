@@ -157,7 +157,9 @@ def test_strict_refuses_it_too_before_the_action_runs_and_tells_a_person():
     result, order = run_strict(strict(ObserveClinicalEngine(), alerts), "id-strict", vit("PATIENT-B", **CRIT), "PATIENT-A")
     assert result["status"] == "REJECTED" and result["refused_by"] == "identity"
     assert "executed" not in order                                         # the action never ran
-    assert [a["stage"] for a in alerts] == ["identity"] and alerts[0]["patient_id"] == "PATIENT-B"
+    # the desk also pages the CRITICAL reading itself (no "stage" key); the stage alert is the one about identity
+    stage_alerts = [a for a in alerts if "stage" in a]
+    assert [a["stage"] for a in stage_alerts] == ["identity"] and stage_alerts[0]["patient_id"] == "PATIENT-B"
 
 
 def test_a_subject_id_that_is_an_entity_is_not_compared_with_the_vitals_patient():
