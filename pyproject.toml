@@ -45,7 +45,7 @@ chain = [
   "governance-gateway @ git+https://github.com/wking53214/Governance_Gateway@c507be7279c4488f98404514fcea2c900c53168e",
 ]
 # Opt-in strict stage; numpy comes in through its own metadata.
-# Pinned to fortress-kernel Main at f5d15b2 (2026-11-13). The earlier pin,
+# Pinned to fortress-kernel main at f5d15b2 (2026-11-13). The earlier pin,
 # 4105ccb5, signed every audit record with the published default key
 # "fortress-key", so anyone could forge records that verify; fortress-kernel
 # c361569 removed that default. The key now comes from the adapter's audit_key
