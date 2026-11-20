@@ -39,7 +39,7 @@ _PUBLISHED_FORTRESS_KEY = b"fortress-key"
 #: The shortest FORTRESS audit key production accepts: the HMAC-SHA256 output length. RFC 2104 discourages shorter keys.
 _FORTRESS_KEY_MIN_BYTES = 32
 
-#: The lowest CNS release the production path accepts (the tag v4.0.0, which is what this repository pins).
+#: The lowest CNS release the production path accepts (the tag v4.0.0; this repository pins v4.1.0).
 #: DecisionGuard, which root admission needs, arrived in v2.2.0. Raising it is a policy change made in review.
 REQUIRED_CNS: Tuple[int, int, int] = (4, 0, 0)
 

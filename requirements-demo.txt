@@ -11,7 +11,7 @@
 # The libraries are installed from exact commits, so a later push to a branch
 # cannot change what gets installed.
 #
-# CNS comes from the one explicit line below, the tag v4.0.0 (commit eabe6c7).
+# CNS comes from the one explicit line below, the tag v4.1.0 (commit c84ef8c).
 # None of the libraries is installed with its [cns] extra. Each of these commits
 # has a [cns] extra that pins an older CNS (Governance Gateway, CCC, DIT and the
 # Conservation Kernel pin v2.2.0), and pip cannot install two
@@ -24,7 +24,7 @@
 # Kernel in particular cannot follow its main branch yet: every commit that
 # pins CNS v2.3.0 also makes an evidence guard mandatory when a kernel is built.
 
-cns @ git+https://github.com/wking53214/CNS.git@v4.0.0
+cns @ git+https://github.com/wking53214/CNS.git@v4.1.0
 governance-gateway @ git+https://github.com/wking53214/governance_gateway.git@ad8b644ca2edffc2b2de5e30e54f0157c288d925
 cognitive-continuity-constitution @ git+https://github.com/wking53214/ccc.git@98065733ee1afa22dc80db3c8dcfd0e1a3094909
 dit @ git+https://github.com/wking53214/dit.git@c801374757411f0975a71d1b794f2711d680985e
