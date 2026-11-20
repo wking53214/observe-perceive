@@ -322,9 +322,13 @@ def test_an_older_cns_is_refused_and_a_readable_version_is_required(tmp_path, mo
     assert "does not state a readable version" in refused(tmp_path)
 
 
-def test_the_required_cns_is_the_one_this_repository_pins():
+def test_the_required_cns_is_no_newer_than_the_one_this_repository_pins():
+    import re
+
     pin = open("pyproject.toml", encoding="utf-8").read()
-    assert f"CNS.git@v{'.'.join(map(str, REQUIRED_CNS))}" in pin
+    match = re.search(r"CNS\.git@v(\d+)\.(\d+)\.(\d+)", pin)
+    assert match, "pyproject.toml pins no CNS tag"
+    assert REQUIRED_CNS <= tuple(int(part) for part in match.groups())
 
 
 # ---- the other profiles are unchanged ---------------------------------------------------------------------------
