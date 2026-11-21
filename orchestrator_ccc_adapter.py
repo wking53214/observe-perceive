@@ -36,6 +36,7 @@ adapter can reach it, and nothing should.
 
 from __future__ import annotations
 
+import inspect
 import os
 import sys
 from dataclasses import dataclass
@@ -92,10 +93,21 @@ PRIVATE_SOURCE_MARKERS = (
 )
 
 
-def make_ccc_system(persistence_path: Optional[str] = None):
+def make_ccc_system(persistence_path: Optional[str] = None, write_permission=None, human_verifier=None):
     """A CCCSystem configured the way this repo records into it: CCCb's text
     matcher attached and this project's private sources stated. Both are
-    required by current CCC before it records a machine finding."""
+    required by current CCC before it records a machine finding.
+
+    Newer CCC also refuses to be built without a write check. This package
+    states no authority over what may be recorded, so with no `write_permission`
+    given it builds the system with `allow_unguarded_writes=True`, the visible
+    record of that choice. A deployer who wants a decision made elsewhere passes
+    their own `write_permission`. An older CCC has neither parameter and is
+    built as before.
+
+    The same holds for `human_verifier`: everything recorded here is machine
+    originated, so no human-only operation is used, and with none given the
+    system is built with `allow_unverified_humans=True`."""
     if CCCSystem is None:
         raise ImportError(
             "CCC not found. Clone it beside this repo (../CCC) or install it."
@@ -105,11 +117,26 @@ def make_ccc_system(persistence_path: Optional[str] = None):
             "CCCb not found. CCC records machine findings only with a text "
             "matcher attached; clone CCCb beside this repo (../CCCb) or install it."
         )
-    return CCCSystem(
-        persistence_path=persistence_path,
-        text_matcher=TextMatcher(),
-        private_source_markers=PRIVATE_SOURCE_MARKERS,
-    )
+    kwargs: Dict[str, Any] = {
+        "persistence_path": persistence_path,
+        "text_matcher": TextMatcher(),
+        "private_source_markers": PRIVATE_SOURCE_MARKERS,
+    }
+    params = inspect.signature(CCCSystem.__init__).parameters
+    if "write_permission" in params:
+        if write_permission is not None:
+            kwargs["write_permission"] = write_permission
+        else:
+            kwargs["allow_unguarded_writes"] = True
+        if human_verifier is not None:
+            kwargs["human_verifier"] = human_verifier
+        else:
+            kwargs["allow_unverified_humans"] = True
+    elif write_permission is not None or human_verifier is not None:
+        raise ImportError(
+            "This CCC predates write_permission and human_verifier; install a CCC that has them to use one."
+        )
+    return CCCSystem(**kwargs)
 
 
 @dataclass(frozen=True)

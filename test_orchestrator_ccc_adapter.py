@@ -264,3 +264,21 @@ def test_default_adapter_system_has_the_matcher_and_private_sources():
     adapter = OrchestratorCCCAdapter()
     assert adapter.ccc.text_matcher is not None
     assert adapter.ccc.private_source_markers
+
+
+def test_make_ccc_system_states_its_unguarded_choice_and_accepts_a_deployers_check():
+    """With no write check given the system is built unguarded on purpose; a given check is honoured."""
+    import inspect
+
+    import orchestrator_ccc_adapter as adapter
+
+    if "write_permission" not in inspect.signature(adapter.CCCSystem.__init__).parameters:
+        assert adapter.make_ccc_system() is not None
+        with pytest.raises(ImportError):
+            adapter.make_ccc_system(write_permission=lambda request: True)
+        return
+    assert adapter.make_ccc_system() is not None
+    calls = []
+    system = adapter.make_ccc_system(write_permission=lambda request: calls.append(request) or True,
+                                     human_verifier=lambda *a, **k: True)
+    assert system.write_permission is not None
