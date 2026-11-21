@@ -73,6 +73,6 @@ py-modules = [
   "human_escalation", "log_redaction", "logic_stamp",
   "approval_governance_adapter", "kalman_trajectory", "observe_consolidated",
   "orchestrator_ccc_adapter", "perceive_conservation_adapter", "production_profile",
-  "pediatric_cassette", "perceive_consolidated", "reserve_control", "root_admission", "sentinel_perceive_adapter",
+  "pediatric_cassette", "perceive_consolidated", "reconciler", "reserve_control", "root_admission", "sentinel_perceive_adapter",
   "tie_governance_adapter", "vertical_slice",
 ]
