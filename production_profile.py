@@ -17,6 +17,8 @@ checking IDENTITY and BEHAVIOUR, not shape:
     keeps a bounded ledger with an archive. Patient identifiers are not written to logs. Event-time source keys are registered.
   * The kernel's evidence guard honours the contract below, or the orchestrator does not start.
   * The executor is guarded.
+  * Whoever acknowledges a page still may: the desk checks an ActorRegistry authority, every responder holds the role
+    now, and the desk's key for each is the one the registry bound (actor_registry.py).
   * Someone can be told AND followed up: an EscalationDesk with a valid policy, a key for every responder, and a
     durable signed log (human_escalation.py), swept by a running SweepRunner bound to that same desk whose watchdog
     alarms through a channel of its own (escalation_runner.py). It cannot prove the alarm channel reaches a person, or that
@@ -41,7 +43,7 @@ import hmac
 from typing import Any, List, Optional, Tuple
 
 __all__ = ["PRODUCTION_PROFILE", "ProductionProfileError", "REQUIRED_CNS", "evidence_guard_problems",
-           "production_problems"]
+           "production_problems", "responder_authority_problems"]
 
 PRODUCTION_PROFILE = "production"
 
@@ -139,6 +141,34 @@ def evidence_guard_problems(conservation_kernel: Any) -> List[str]:
         return ["the evidence guard did not refuse (answer exactly False to) a record from an unvouched actor that "
                 f"declares itself independent verification (it answered {answer!r})"]
     return []
+
+
+def responder_authority_problems(desk: Any) -> List[str]:
+    """Why this desk's acknowledgements are not held to a live, signed role record; empty if they are.
+
+    A key on file says who signed an acknowledgement. Production also asks whether that person still may: the desk
+    must check an `ActorRegistry` authority, every responder on its policy must hold the role now, and the key the
+    desk would check must be the key the registry bound to them."""
+    from actor_registry import RegistryAuthority
+    authority = getattr(desk, "authority", None)
+    if authority is None:
+        return ["the escalation desk has no live authority: a responder whose role was revoked could still "
+                "acknowledge (pass authority=ActorRegistry.authority(role))"]
+    if not isinstance(authority, RegistryAuthority):
+        return [f"the escalation desk's authority is a {type(authority).__name__}, not an ActorRegistry authority"]
+    problems: List[str] = []
+    responders = sorted({r for tier in getattr(desk.policy, "tiers", ()) for r in tier.responders})
+    for responder in responders:
+        why = authority.registry.why_not(responder, authority.role)
+        if why is not None:
+            problems.append(f"responder {responder!r} does not hold {authority.role!r} in the actor registry: {why}")
+            continue
+        desk_key = getattr(desk.responder_keys.get(responder), "key_id", None)
+        bound = authority.registry.key_id_of(responder)
+        if desk_key != bound:
+            problems.append(f"responder {responder!r} signs acknowledgements with key {desk_key!r} on the desk, but "
+                            f"the actor registry bound them to {bound!r}")
+    return problems
 
 
 def _data_protection_problems(observe_engine: Any, clinical_settings: Any) -> List[str]:
@@ -270,6 +300,7 @@ def production_problems(*, conservation_kernel: Any, root_admission: Any, observ
             problems.append(f"escalations is a {type(escalations).__name__}, not an EscalationDesk")
         else:
             problems.extend(f"escalation desk: {p}" for p in escalations.problems())
+            problems.extend(responder_authority_problems(escalations))
     if alert_human is not None:
         problems.append("alert_human is given beside the production escalation desk: use the desk alone")
     problems.extend(sweep_runner_problems(sweep_runner, escalations))

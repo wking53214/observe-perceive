@@ -42,11 +42,24 @@ RESPONDER = HmacSigner(b"production-profile-responder-key-0123456789", key_id="n
 _LOGS = itertools.count()
 
 
+REGISTRAR = HmacSigner(b"production-profile-registrar-key-0123456789", key_id="registrar")
+
+
+def responder_registry():
+    """An actor registry in which nurse-1 holds `responder`, bound to the key the desk checks (Step 6)."""
+    from actor_registry import ActorRegistry, sign_registry_action
+    reg = ActorRegistry(roots={"registrar": "registrar"}, keys={"registrar": REGISTRAR, "nurse-1": RESPONDER})
+    body = {"actor_id": "nurse-1", "role": "responder", "key_id": "nurse-1", "expires_at": None}
+    reg.grant("nurse-1", "responder", "nurse-1", by="registrar",
+              signature=sign_registry_action(REGISTRAR, reg.head, "grant", "registrar", body))
+    return reg
+
+
 def desk(tmp_path, **override):
     """A valid desk. Each gets its own log file: one writer per log is enforced."""
     parts = dict(policy=NotificationPolicy(tiers=(Tier("charge", lambda payload: None, ("nurse-1",), 120.0, 5.0),)),
                  log=EscalationLog(tmp_path / f"escalations-{next(_LOGS)}.jsonl", signer=DEPLOYER),
-                 responder_keys={"nurse-1": RESPONDER})
+                 responder_keys={"nurse-1": RESPONDER}, authority=responder_registry().authority("responder"))
     parts.update(override)
     return EscalationDesk(**parts)
 
@@ -501,3 +514,30 @@ def test_a_deployers_guard_that_refuses_unvouched_actors_is_accepted(tmp_path):
     admission = RootAdmission()
     kernel = ConservationKernel(root_guard=admission, evidence_guard=lambda r: r.provided_by.actor_id in vouched)
     assert build(tmp_path, conservation_kernel=kernel, root_admission=admission).profile == "production"
+
+
+# ---- whoever acknowledges must still hold the role (Step 6) -------------------------------------------------------
+
+def test_a_desk_with_no_live_authority_is_refused(tmp_path):
+    assert "no live authority" in refused(tmp_path, escalations=desk(tmp_path, authority=None))
+
+
+def test_a_lookalike_authority_is_refused(tmp_path):
+    msg = refused(tmp_path, escalations=desk(tmp_path, authority=lambda actor: True))
+    assert "not an ActorRegistry authority" in msg
+
+
+def test_a_responder_who_does_not_hold_the_role_is_refused(tmp_path):
+    from actor_registry import sign_registry_action
+    reg = responder_registry()
+    body = {"actor_id": "nurse-1", "role": "responder", "reason": "suspended"}
+    reg.revoke("nurse-1", "responder", by="registrar", reason="suspended",
+               signature=sign_registry_action(REGISTRAR, reg.head, "revoke", "registrar", body))
+    msg = refused(tmp_path, escalations=desk(tmp_path, authority=reg.authority("responder")))
+    assert "'nurse-1' does not hold 'responder'" in msg and "revoked" in msg
+
+
+def test_a_desk_key_other_than_the_registry_bound_key_is_refused(tmp_path):
+    other = HmacSigner(b"production-profile-other-nurse-key-012345678", key_id="nurse-1-old")
+    msg = refused(tmp_path, escalations=desk(tmp_path, responder_keys={"nurse-1": other}))
+    assert "key 'nurse-1-old' on the desk" in msg and "bound them to 'nurse-1'" in msg

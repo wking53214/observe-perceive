@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
-__all__ = ["ADMIN", "ActorRegistry", "RegistryError", "registry_action_digest", "sign_registry_action"]
+__all__ = ["ADMIN", "ActorRegistry", "RegistryAuthority", "RegistryError", "registry_action_digest", "sign_registry_action"]
 
 #: The role that may grant and revoke. Held by the roots without a grant; may be granted, never delegated.
 ADMIN = "registry:admin"
@@ -101,6 +101,18 @@ class _Holding:
     revoked_at: Optional[datetime] = None
 
 
+class RegistryAuthority:
+    """`authority(actor_id) -> bool` backed by a registry and a role. Identifiable, so a production check can tell it
+    from any other callable and ask the registry about every responder."""
+
+    def __init__(self, registry: "ActorRegistry", role: str):
+        self.registry = registry
+        self.role = role
+
+    def __call__(self, actor_id: str) -> bool:
+        return self.registry.holds(actor_id, self.role)
+
+
 class ActorRegistry:
     """The signed, replayable record of who holds which role, and since and until when."""
 
@@ -154,9 +166,9 @@ class ActorRegistry:
     def holds(self, actor_id: str, role: str, at: Any = None) -> bool:
         return self.why_not(actor_id, role, at) is None
 
-    def authority(self, role: str) -> Callable[[str], bool]:
+    def authority(self, role: str) -> "RegistryAuthority":
         """A check another component can call: does this actor hold `role` right now?"""
-        return lambda actor_id: self.holds(actor_id, role)
+        return RegistryAuthority(self, role)
 
     def key_id_of(self, actor_id: str) -> Optional[str]:
         with self._lock:
