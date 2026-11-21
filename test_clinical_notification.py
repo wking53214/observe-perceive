@@ -441,7 +441,7 @@ def test_a_deferred_escalation_event_still_reaches_a_person_per_the_settings():
 
 
 def test_an_escalation_event_survives_a_raise_out_of_the_strict_pipeline():
-    from conftest import make_perceive
+    from conftest import make_perceive, make_test_runner
     from conservation_kernel import ConservationKernel
     from root_admission import RootAdmission
     from test_audit_p5_fixes import Attested, JUSTIFIED, SOURCE, sealed
@@ -449,7 +449,7 @@ def test_an_escalation_event_survives_a_raise_out_of_the_strict_pipeline():
     admission = RootAdmission()
     orch = GovernanceOrchestrator(make_perceive(), ConservationKernel(root_guard=admission), ObserveClinicalEngine(),
                                   profile="strict", source_signers=[SOURCE], root_admission=admission, escalations=desk,
-                                  raise_on_execution_error=True)
+                                  sweep_runner=make_test_runner(desk), raise_on_execution_error=True)
 
     def crash(ctx):
         raise RuntimeError("pump driver crashed")

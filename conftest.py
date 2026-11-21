@@ -105,3 +105,29 @@ def make_test_desk(alerts=None):
     key = HmacSigner(b"test-strict-desk-responder-key-0123456789", key_id="nurse")
     return EscalationDesk(NotificationPolicy((Tier("charge", sink.append, ("nurse",), 60.0, 5.0),)), EscalationLog(),
                           responder_keys={"nurse": key})
+
+
+_TEST_RUNNERS: list = []
+
+
+@pytest.fixture(autouse=True)
+def _stop_test_runners():
+    yield
+    while _TEST_RUNNERS:
+        _TEST_RUNNERS.pop().stop(timeout=2)
+
+
+def make_test_runner(desk):
+    """A started sweep runner bound to `desk`, with intervals long enough that it never fires during a test.
+    It is stopped when the test ends."""
+    from escalation_runner import SweepRunner
+    runner = SweepRunner(desk, sweep_interval_s=3600, watch_interval_s=3600, max_silence_s=7200, alarm_timeout_s=5,
+                         max_tickets_per_sweep=10, alarm=lambda payload: None).start()
+    _TEST_RUNNERS.append(runner)
+    return runner
+
+
+def strict_wiring(alerts=None):
+    """The desk and the running sweep runner a strict orchestrator needs, as keyword arguments."""
+    desk = make_test_desk(alerts)
+    return {"escalations": desk, "sweep_runner": make_test_runner(desk)}

@@ -8,7 +8,7 @@ import datetime as dt
 
 import pytest
 
-from conftest import ChainArtifact, importorskip_cns, make_perceive, make_test_desk, make_vitals
+from conftest import ChainArtifact, importorskip_cns, make_perceive, strict_wiring, make_vitals
 
 importorskip_cns("cns.gate")
 importorskip_cns("cns_composition.decision_guard")
@@ -47,7 +47,7 @@ def strict(observe_engine, alerts=None):
     kernel = ConservationKernel(root_guard=admission)
     return GovernanceOrchestrator(make_perceive(), kernel, observe_engine, profile="strict",
                                   source_signers=[SOURCE], root_admission=admission,
-                                  escalations=make_test_desk(alerts))
+                                  **strict_wiring(alerts))
 
 
 def run_strict(orchestrator, artifact_id, vitals, patient, extra=None):
