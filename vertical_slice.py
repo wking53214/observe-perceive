@@ -200,7 +200,8 @@ def explain(workdir: Path, effect_line: Dict[str, Any]) -> Dict[str, Any]:
     ledger = ExecutionLedger(paths.executions, signer=DEPLOYER)   # same for the execution ledger
     # Restores the saved roots (they were admitted when first registered; a restore does not ask the guard again),
     # re-verifies every transformation and checks the signature. The guard is closed, so nothing new can register.
-    kernel = ConservationKernel.load(paths.kernel, signer=DEPLOYER, root_guard=RootAdmission())
+    kernel = ConservationKernel.load(paths.kernel, signer=DEPLOYER, root_guard=RootAdmission(),
+                                    evidence_guard=refuse_all_evidence)
     perceive = _perceive(paths.perceive)                       # PERCEIVE's own ledger, reopened
 
     execution_id = effect_line["execution_id"]
