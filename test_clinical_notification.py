@@ -17,6 +17,7 @@ from human_escalation import EscalationDesk, EscalationLog, NotificationPolicy, 
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
 
 from conservation_kernel import HmacSigner
+from root_admission import refuse_all_evidence
 
 RESPONDER = HmacSigner(b"clinical-notification-responder-key-01", key_id="nurse")
 S = ClinicalNotificationSettings
@@ -447,7 +448,7 @@ def test_an_escalation_event_survives_a_raise_out_of_the_strict_pipeline():
     from test_audit_p5_fixes import Attested, JUSTIFIED, SOURCE, sealed
     desk, pager = make_desk()
     admission = RootAdmission()
-    orch = GovernanceOrchestrator(make_perceive(), ConservationKernel(root_guard=admission), ObserveClinicalEngine(),
+    orch = GovernanceOrchestrator(make_perceive(), ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence), ObserveClinicalEngine(),
                                   profile="strict", source_signers=[SOURCE], root_admission=admission, escalations=desk,
                                   sweep_runner=make_test_runner(desk), raise_on_execution_error=True)
 

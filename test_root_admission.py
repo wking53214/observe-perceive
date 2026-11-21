@@ -19,12 +19,12 @@ from perceive_consolidated import PerceiveGovernanceKernel, PolicyEnforcementCon
 importorskip_cns("cns_composition.decision_guard", "root admission needs the CNS release with DecisionGuard")
 importorskip_cns("conservation_kernel.cns_connector", "root admission needs the kernel's CNS connector")
 
-from root_admission import REQUIRED_SEATS, RequestGate, RootAdmission, RootNotAdmitted, Ruling, RulingGate  # noqa: E402
+from root_admission import REQUIRED_SEATS, RequestGate, RootAdmission, RootNotAdmitted, Ruling, RulingGate, refuse_all_evidence  # noqa: E402
 
 
 def _guarded(perceive=None):
     admission = RootAdmission()
-    kernel = ConservationKernel(root_guard=admission)
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence)
     orchestrator = GovernanceOrchestrator(perceive or make_perceive(), kernel, ObserveClinicalEngine(),
                                           root_admission=admission)
     return orchestrator, kernel, admission
@@ -62,7 +62,7 @@ def test_the_same_kernel_refuses_a_root_written_to_it_directly():
 
 def test_a_kernel_with_a_guard_but_an_orchestrator_without_admission_refuses_every_root():
     admission = RootAdmission()
-    kernel = ConservationKernel(root_guard=admission)
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence)
     orchestrator = GovernanceOrchestrator(make_perceive(), kernel, ObserveClinicalEngine())  # no root_admission
     result, ran = run_chain(orchestrator, "adm-3")
     assert result["status"] == "REJECTED" and not ran
@@ -104,7 +104,7 @@ def test_the_guard_is_closed_before_any_request():
 
 def test_an_approval_opened_on_one_thread_is_closed_on_another():
     admission = RootAdmission()
-    kernel = ConservationKernel(root_guard=admission)
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence)
     root = _fresh_root("adm-7")
     ruling = Ruling(decision=_decision("req-7", about=root), request_id="req-7", artifact_id=root.artifact_id,
                     artifact_hash=root.content_digest)
@@ -126,7 +126,7 @@ def _fresh_root(artifact_id="fresh-1", content="escalate P001"):
 
 def test_a_ruling_about_another_request_is_refused():
     admission = RootAdmission()
-    kernel = ConservationKernel(root_guard=admission)
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence)
     root = _fresh_root()
     ruling = Ruling(decision=_decision("req-A", about=root), request_id="req-B", artifact_id=root.artifact_id,
                     artifact_hash=root.content_digest)
@@ -137,7 +137,7 @@ def test_a_ruling_about_another_request_is_refused():
 
 def test_a_ruling_with_no_audit_record_is_refused():
     admission = RootAdmission()
-    kernel = ConservationKernel(root_guard=admission)
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence)
     root = _fresh_root()
     ruling = Ruling(decision=_decision("req-1", audit="", about=root), request_id="req-1", artifact_id=root.artifact_id,
                     artifact_hash=root.content_digest)
@@ -148,7 +148,7 @@ def test_a_ruling_with_no_audit_record_is_refused():
 def test_a_ruling_about_another_document_is_refused_by_the_agreement_seat():
     """Every seat passes on its own; they judged different documents."""
     admission = RootAdmission()
-    kernel = ConservationKernel(root_guard=admission)
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence)
     root = _fresh_root("doc-1", "true content")
     other = _fresh_root("doc-1", "inflated content")
     ruling = Ruling(decision=_decision(about=other), request_id="req-1", artifact_id=other.artifact_id,
@@ -159,7 +159,7 @@ def test_a_ruling_about_another_document_is_refused_by_the_agreement_seat():
 
 def test_a_kernel_with_no_guard_is_refused_by_the_roster():
     admission = RootAdmission()
-    kernel = ConservationKernel(allow_unguarded_roots=True)
+    kernel = ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence)
     root = _fresh_root()
     ruling = Ruling(decision=_decision(), request_id="req-1", artifact_id=root.artifact_id,
                     artifact_hash=root.content_digest)
@@ -176,7 +176,7 @@ def test_the_perceive_gates_fail_closed_on_the_wrong_candidate(gate):
 
 def test_a_request_that_names_no_request_id_is_refused():
     admission = RootAdmission()
-    kernel = ConservationKernel(root_guard=admission)
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence)
     root = _fresh_root()
     ruling = Ruling(decision=_decision(), request_id="", artifact_id=root.artifact_id,
                     artifact_hash=root.content_digest)

@@ -22,13 +22,14 @@ checks that it is explained by the decision id alone.
 """
 from conftest import make_perceive, run_chain
 from conservation_kernel import ConservationKernel
+from root_admission import refuse_all_evidence
 from governance_chain import verify_result
 from governance_orchestrator import GovernanceOrchestrator
 from observe_consolidated import ObserveClinicalEngine
 
 
 def _fresh():
-    return GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine())
+    return GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence), ObserveClinicalEngine())
 
 
 def test_canonical_scenario_replays_to_the_same_request_commitment_and_execution_id():

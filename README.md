@@ -1,6 +1,6 @@
 # observe-perceive
 
-**Hub of the governed action stack.** Version `1.3.0`. Python ≥ 3.11. Hard dependency: [`Conservation_Kernel`](https://github.com/wking53214/Conservation_Kernel) `@4e7c0d9`. Optional extras: Gateway, CCC, GEMS (pinned to `f7d40fc`; see the GEMS pin row in section 4), fortress-kernel.
+**Hub of the governed action stack.** Version `1.3.0`. Python ≥ 3.11. Hard dependency: [`Conservation_Kernel`](https://github.com/wking53214/Conservation_Kernel) `@22764a4`. Optional extras: Gateway, CCC, GEMS (pinned to `f7d40fc`; see the GEMS pin row in section 4), fortress-kernel.
 
 Pediatric sepsis monitoring is the **reference domain**, not the product boundary.
 
@@ -118,7 +118,7 @@ From `CLAUDE_ARCHITECTURE_STATE.md` and `docs/audit/COMMERCIAL_RED_TEAM_2026-09-
 | No actor registry / grant lifecycle | Architecture epic, missing. |
 | sentinel_os / GSA-815 | Never imported. Diagrams that show them as chain stages are conceptual. |
 | Optional stages | CCC/fortress/Gateway/GEMS skipped if absent. A clone without extras is a shorter chain. |
-| Root guard | `root_admission.RootAdmission` makes the kernel register a root only after a CNS roster approves that document (needs the `cns` extra). The two examples (`demo_why.py`, `vertical_slice.py`) build the kernel with this guard, so they need the `cns` extra and stop at the start, naming the install command, without it. Test fixtures for other components still build the kernel with `allow_unguarded_roots=True`. The approval proof is process-local, so it does not stop hostile code in the same process or mean anything to another process. |
+| Root guard | `root_admission.RootAdmission` makes the kernel register a root only after a CNS roster approves that document (needs the `cns` extra). The two examples (`demo_why.py`, `vertical_slice.py`) build the kernel with this guard, so they need the `cns` extra and stop at the start, naming the install command, without it. Test fixtures for other components still build the kernel with `allow_unguarded_roots=True`. Every kernel this repository builds also passes `root_admission.refuse_all_evidence` as its evidence guard, because the kernel (since the pin moved to `22764a4`) refuses to start without one; this package adds no evidence itself, so the guard accepts none, and a deployer who wants evidence passes their own. The approval proof is process-local, so it does not stop hostile code in the same process or mean anything to another process. |
 
 Reported (architecture state, not re-run): 610 passed / 5 skipped with all packs. That figure is out of date. EXECUTED 2026-11-17 at `b4f4c62`, Python 3.13, in a fresh environment with no sibling checkouts beside the repo: `pip install -r requirements.txt` (which is `pip install -e ".[test,chain,fortress]"`) then `pytest` gives 1,485 passed, 122 skipped, 5 expected failures (xfail) and none failed; every skip needs CNS. With `requirements-demo.txt` installed as well and `OBSERVE_PERCEIVE_REQUIRE_CNS=1`, which is how CI's `cns` job runs, 1,751 passed, none skipped, 5 expected failures. The five expected failures are the missed or late detections in the Pediatric misses row. The suite also passed on a clock 120 days ahead, lint was clean, and `demo_why.py`, `vertical_slice.py` and the CNS demo ran to the end. Two modules that a run on 2026-11-15 could not run (`test_gems_governance_adapter.py` and `test_herald_ccc_adapter.py`) pass here: 38 passed. Those errors came from a shared environment, not from this repo: the adapters look for a sibling checkout before the installed package, and `pytest.ini` puts the parent folder on the import path, so a checkout beside the repo is used in place of the pin, and that run also had a newer CCC installed than the one pinned here (REPORTED by that run). Not run: GitHub CI, Python 3.11 and 3.12 (CI's versions). `pip install -e ".[test,chain,fortress]" && pytest`.
 
@@ -145,7 +145,7 @@ Duck-typed sentinel artifact with event time → orchestrator result dict + rece
                     ├── GEMS @f7d40fc (opt; pinned, see pyproject)
                     └── fortress-kernel (opt, extra `fortress`)
 observe-perceive ───┤
-                    ├── Conservation_Kernel @4e7c0d9   HARD
+                    ├── Conservation_Kernel @22764a4   HARD
                     ├── observe_consolidated + perceive_consolidated  (in-tree)
                     └── execution_guard ledger (JSONL)
                          │

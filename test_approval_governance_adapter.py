@@ -19,6 +19,7 @@ from typing import Optional
 import pytest
 
 from conservation_kernel import ConservationKernel
+from root_admission import refuse_all_evidence
 from governance_contracts import GovernanceApproval, GovernanceRequestType
 from governance_orchestrator import GovernanceOrchestrator
 from approval_governance_adapter import ApprovalGovernanceAdapter
@@ -64,7 +65,7 @@ def orchestrator():
         created_at=datetime.now(timezone.utc),
         policies={},
     ))
-    return GovernanceOrchestrator(kernel, ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine())
+    return GovernanceOrchestrator(kernel, ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence), ObserveClinicalEngine())
 
 
 # ---------------------------------------------------------------------------

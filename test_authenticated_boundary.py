@@ -15,6 +15,7 @@ import pytest
 
 from conftest import ChainArtifact, strict_wiring, run_chain
 from conservation_kernel import ConservationKernel, HmacSigner
+from root_admission import refuse_all_evidence
 from execution_guard import ExecutionLedger, ExecutionRefusal, LedgerAuthenticityError, LedgerIntegrityError
 from governance_chain import verify_result
 from governance_orchestrator import GovernanceOrchestrator
@@ -101,14 +102,14 @@ def test_two_ledger_objects_on_one_file_see_one_ledger(perceive, tmp_path):
     def capture(ctx):
         captured["ctx"] = ctx
         return {"status": "done"}
-    result, _ = run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True), execution_ledger=a, guard_executor=False), "p1", func=capture, vitals=False)
+    result, _ = run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence), execution_ledger=a, guard_executor=False), "p1", func=capture, vitals=False)
     assert result["status"] == "APPROVED_AND_EXECUTED"
     assert b.issued("exec-p1") is not None and b.consumed("exec-p1") is not None      # b re-read the file
     with pytest.raises(ExecutionRefusal, match="already consumed"):
         b.consume(captured["ctx"], consumer="process-b")
     # The same artifact governed by the second process: its own kernel has
     # never seen it, so only the shared ledger can say it is a replay.
-    second, ran = run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True), execution_ledger=b), "p1", vitals=False,
+    second, ran = run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence), execution_ledger=b), "p1", vitals=False,
                             context={"execution_id": "exec-p1-b"})
     assert second["status"] == "REJECTED" and second["refused_by"] == "execution_ledger" and ran == []
     assert "already issued an execution" in second["reason"]
@@ -120,8 +121,8 @@ def test_a_file_edited_between_two_refreshes_is_refused(perceive, kernel, tmp_pa
     a = ExecutionLedger(path)
     run_chain(_orch(perceive, kernel, execution_ledger=a), "p2", vitals=False)
     b = ExecutionLedger(path)
-    run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True), execution_ledger=b, one_per_artifact=False) if False else
-              _orch(perceive, ConservationKernel(allow_unguarded_roots=True), execution_ledger=ExecutionLedger(path, one_per_artifact=False)), "p3", vitals=False)
+    run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence), execution_ledger=b, one_per_artifact=False) if False else
+              _orch(perceive, ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence), execution_ledger=ExecutionLedger(path, one_per_artifact=False)), "p3", vitals=False)
     lines = path.read_text().splitlines()
     lines[-1] = lines[-1].replace('"consumer": "orchestrator"', '"consumer": "intruder"')
     path.write_text("\n".join(lines) + "\n")
@@ -131,8 +132,8 @@ def test_a_file_edited_between_two_refreshes_is_refused(perceive, kernel, tmp_pa
 
 def test_per_artifact_rule_can_be_turned_off(perceive, tmp_path):
     path = tmp_path / "loose.jsonl"
-    run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True), execution_ledger=ExecutionLedger(path, one_per_artifact=False)), "p4", vitals=False)
-    again, ran = run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True), execution_ledger=ExecutionLedger(path, one_per_artifact=False)), "p4",
+    run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence), execution_ledger=ExecutionLedger(path, one_per_artifact=False)), "p4", vitals=False)
+    again, ran = run_chain(_orch(perceive, ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence), execution_ledger=ExecutionLedger(path, one_per_artifact=False)), "p4",
                            vitals=False, context={"execution_id": "exec-p4-b"})
     assert again["status"] == "APPROVED_AND_EXECUTED" and len(ran) == 1
 
@@ -234,7 +235,7 @@ def test_a_claimed_event_time_is_not_attested_and_not_an_anomaly_by_itself(orche
 # ---------------------------------------------------------------- R5: strict profile
 
 def test_strict_refuses_what_advisory_records(perceive, kernel, tmp_path):
-    strict = _orch(perceive, ConservationKernel(root_guard=lambda artifact: True), profile="strict", source_signers=[SOURCE],
+    strict = _orch(perceive, ConservationKernel(root_guard=lambda artifact: True, evidence_guard=refuse_all_evidence), profile="strict", source_signers=[SOURCE],
                   **strict_wiring())
     assert strict.require_declared_scope and strict.require_vitals and strict.require_attested_event_time and strict.enforce_advisory_violations
     unattested, ran = run_chain(strict, "st1", vitals=True, context={"gateway_scope": "EXECUTE"})
@@ -247,7 +248,7 @@ def test_strict_refuses_what_advisory_records(perceive, kernel, tmp_path):
 def test_strict_executes_when_everything_is_in_place(perceive, kernel):
     from gateway_admission_adapter import GatewayAdmissionAdapter
     gw = pytest.importorskip("governance_gateway.models")
-    strict = _orch(perceive, ConservationKernel(root_guard=lambda artifact: True), profile="strict", source_signers=[SOURCE],
+    strict = _orch(perceive, ConservationKernel(root_guard=lambda artifact: True, evidence_guard=refuse_all_evidence), profile="strict", source_signers=[SOURCE],
                   **strict_wiring())
     sealed = GatewayAdmissionAdapter.seal(artifact_id="st4", payload={"content": "escalate P001"}, provenance={"source": "SENTINEL"},
                                           epistemic_status=gw.EpistemicStatus.INFERENCE, authority_actor="CHARGE_NURSE",
@@ -268,7 +269,7 @@ def test_strict_executes_when_everything_is_in_place(perceive, kernel):
 
 
 def test_strict_enforces_violations_perceive_only_advised(perceive, kernel, monkeypatch):
-    strict = _orch(perceive, ConservationKernel(root_guard=lambda artifact: True), profile="strict", source_signers=[SOURCE],
+    strict = _orch(perceive, ConservationKernel(root_guard=lambda artifact: True, evidence_guard=refuse_all_evidence), profile="strict", source_signers=[SOURCE],
                   **strict_wiring())
     original = strict.sentinel_adapter.evaluate_through_perceive
     def advising(p, request):

@@ -23,7 +23,7 @@ from clinical_settings import ClinicalSettings  # noqa: E402
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot  # noqa: E402
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest  # noqa: E402
 from production_profile import ProductionProfileError, REQUIRED_CNS, production_problems  # noqa: E402
-from root_admission import RootAdmission  # noqa: E402
+from root_admission import RootAdmission, refuse_all_evidence  # noqa: E402
 from sentinel_perceive_adapter import SentinelPerceiveAdapter  # noqa: E402
 
 DEPLOYER = HmacSigner(b"production-profile-deployer-key-0123456789", key_id="deployer")
@@ -76,7 +76,7 @@ def wiring(tmp_path, **override):
     admission = RootAdmission()
     escalations = override.get("escalations", desk(tmp_path))
     parts = dict(
-        perceive=perceive(), conservation_kernel=ConservationKernel(root_guard=admission),
+        perceive=perceive(), conservation_kernel=ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence),
         observe_engine=ObserveClinicalEngine(ledger_max_entries=1000, ledger_archive_path=tmp_path / "observe.archive.jsonl"),
         clinical_settings=ClinicalSettings(), root_admission=admission, profile="production",
         receipts=ReceiptLog(tmp_path / "receipts.jsonl", signer=DEPLOYER),
@@ -141,7 +141,7 @@ def test_a_correct_wiring_executes_a_governed_action_end_to_end(tmp_path):
 # ---- strict needs a running sweep runner bound to its desk (Task A) ----------------------------------------------
 
 def _strict(**wiring):
-    return GovernanceOrchestrator(perceive(), ConservationKernel(root_guard=lambda a: True), ObserveClinicalEngine(),
+    return GovernanceOrchestrator(perceive(), ConservationKernel(root_guard=lambda a: True, evidence_guard=refuse_all_evidence), ObserveClinicalEngine(),
                                   profile="strict", **wiring)
 
 
@@ -164,17 +164,17 @@ def test_strict_refuses_a_sweep_runner_that_is_not_running():
 
 
 def test_advisory_still_runs_without_a_desk_or_a_sweep_runner():
-    orch = GovernanceOrchestrator(perceive(), ConservationKernel(root_guard=lambda a: True), ObserveClinicalEngine())
+    orch = GovernanceOrchestrator(perceive(), ConservationKernel(root_guard=lambda a: True, evidence_guard=refuse_all_evidence), ObserveClinicalEngine())
     assert orch.profile == "advisory"
 
 
 # ---- the wiring the strict profile accepts, and production refuses -----------------------------------------------
 
 def test_strict_accepts_a_bare_lambda_guard_and_production_refuses_it(tmp_path):
-    strict = GovernanceOrchestrator(perceive(), ConservationKernel(root_guard=lambda a: True),
+    strict = GovernanceOrchestrator(perceive(), ConservationKernel(root_guard=lambda a: True, evidence_guard=refuse_all_evidence),
                                     ObserveClinicalEngine(), profile="strict", **strict_wiring())
     assert strict.profile == "strict"
-    msg = refused(tmp_path, conservation_kernel=ConservationKernel(root_guard=lambda a: True))
+    msg = refused(tmp_path, conservation_kernel=ConservationKernel(root_guard=lambda a: True, evidence_guard=refuse_all_evidence))
     assert "not the RootAdmission given to the orchestrator" in msg
 
 
@@ -194,7 +194,7 @@ def test_a_lookalike_callable_in_place_of_the_roster_is_refused(tmp_path):
             pass
 
     look = Lookalike()
-    msg = refused(tmp_path, conservation_kernel=ConservationKernel(root_guard=look), root_admission=look)
+    msg = refused(tmp_path, conservation_kernel=ConservationKernel(root_guard=look, evidence_guard=refuse_all_evidence), root_admission=look)
     assert "not a RootAdmission" in msg
 
 
@@ -202,7 +202,7 @@ def test_no_rootadmission_and_no_root_guard_are_refused(tmp_path):
     assert "no RootAdmission was given" in refused(tmp_path, root_admission=None)
     # An unguarded kernel is refused earlier still, by the strict check the production profile includes.
     with pytest.raises(ValueError, match="root guard"):
-        build(tmp_path, conservation_kernel=ConservationKernel(allow_unguarded_roots=True))
+        build(tmp_path, conservation_kernel=ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence))
 
 
 def test_a_roster_that_approves_the_canary_is_refused_and_leaves_nothing_registered(tmp_path):
@@ -212,7 +212,7 @@ def test_a_roster_that_approves_the_canary_is_refused_and_leaves_nothing_registe
             return None
 
     admission = Approves()
-    kernel = ConservationKernel(root_guard=admission)
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence)
     before = len(kernel.ledger.snapshot()["artifacts"]) if hasattr(kernel.ledger, "snapshot") else None
     msg = refused(tmp_path, conservation_kernel=kernel, root_admission=admission)
     assert "ADMITTED the startup canary" in msg
@@ -233,7 +233,7 @@ def test_a_guard_that_stays_open_after_a_refused_canary_is_refused(tmp_path):
             pass
 
     admission = LeavesOpen()
-    msg = refused(tmp_path, conservation_kernel=ConservationKernel(root_guard=admission), root_admission=admission)
+    msg = refused(tmp_path, conservation_kernel=ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence), root_admission=admission)
     assert "stayed open after the startup canary" in msg
 
 
@@ -243,7 +243,7 @@ def test_a_roster_that_crashes_on_the_canary_is_refused(tmp_path):
             raise RuntimeError("roster is down")
 
     admission = Crashes()
-    msg = refused(tmp_path, conservation_kernel=ConservationKernel(root_guard=admission), root_admission=admission)
+    msg = refused(tmp_path, conservation_kernel=ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence), root_admission=admission)
     assert "crashed on the startup canary" in msg
 
 
@@ -364,7 +364,7 @@ def test_the_required_cns_is_no_newer_than_the_one_this_repository_pins():
 # ---- the other profiles are unchanged ---------------------------------------------------------------------------
 
 def test_advisory_and_strict_still_start_without_the_production_checks():
-    assert GovernanceOrchestrator(perceive(), ConservationKernel(allow_unguarded_roots=True)).profile == "advisory"
+    assert GovernanceOrchestrator(perceive(), ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence)).profile == "advisory"
     with pytest.raises(ValueError):
         GovernanceOrchestrator(perceive(), profile="nonsense")
 
@@ -417,7 +417,7 @@ def test_the_settings_digest_is_in_every_handoff_and_absent_when_none_was_given(
     result = production.orchestrate_request(ChainArtifact("pp-1"), "escalate", lambda c: {}, vitals_snapshot=None,
                                             context={"execution_id": "pp-e1"})
     assert result["handoff"]["clinical_settings_digest"] == ClinicalSettings().digest()
-    advisory = GovernanceOrchestrator(perceive(), ConservationKernel(allow_unguarded_roots=True))
+    advisory = GovernanceOrchestrator(perceive(), ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence))
     plain = advisory.orchestrate_request(ChainArtifact("pp-2"), "escalate", lambda c: {}, vitals_snapshot=None,
                                          context={"execution_id": "pp-e2"})
     assert "clinical_settings_digest" not in plain["handoff"]

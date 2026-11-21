@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 import pytest
 
 from conservation_kernel import ConservationKernel
+from root_admission import refuse_all_evidence
 from governance_contracts import GovernanceApproval
 from governance_orchestrator import GovernanceOrchestrator
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
@@ -64,7 +65,7 @@ def _kernel(with_manifest=True, enforcement=None):
 def _orchestrator(conservation=ConservationKernel, perceive=None, **kw):
     return GovernanceOrchestrator(
         perceive or _kernel(),
-        conservation(allow_unguarded_roots=True) if conservation else None,
+        conservation(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence) if conservation else None,
         ObserveClinicalEngine(),
         **kw,
     )

@@ -420,9 +420,10 @@ def test_in_strict_a_reading_is_assessed_even_when_the_request_is_then_refused_f
     before its attestation can be judged. The reading is the caller's argument, not the artifact's claim."""
     from conftest import run_chain
     from conservation_kernel import ConservationKernel
+    from root_admission import refuse_all_evidence
     from governance_orchestrator import GovernanceOrchestrator
     engine = Counting()
-    strict_o = GovernanceOrchestrator(perceive, ConservationKernel(root_guard=lambda artifact: True), engine,
+    strict_o = GovernanceOrchestrator(perceive, ConservationKernel(root_guard=lambda artifact: True, evidence_guard=refuse_all_evidence), engine,
                                       profile="strict", source_signers=[], **strict_wiring())
     unattested, ran = run_chain(strict_o, "st-att", vitals=True, context={"gateway_scope": "EXECUTE"})
     assert unattested["status"] == "REJECTED" and unattested["refused_by"] == "source_attestation" and ran == []

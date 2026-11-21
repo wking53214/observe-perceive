@@ -52,6 +52,7 @@ from typing import Any, Optional
 __all__ = [
     "REQUIRED_SEATS",
     "RootAdmission",
+    "refuse_all_evidence",
     "RootNotAdmitted",
     "Ruling",
     "RequestGate",
@@ -61,6 +62,18 @@ __all__ = [
     "SEAT_RULING",
     "require_root_admission",
 ]
+
+def refuse_all_evidence(record) -> bool:
+    """The evidence guard observe-perceive builds its kernels with: it accepts no evidence at all.
+
+    The Conservation Kernel will not start without an evidence guard unless the caller says
+    `allow_unguarded_evidence=True`, because without one any caller could add a record that declares itself
+    independent verification and have it counted. This package adds no evidence to the kernels it builds, so the
+    honest guard is one that says no to every record. A deployer who wants evidence accepted passes their own
+    guard to the kernel instead; nothing here stops that.
+    """
+    return False
+
 
 SEAT_REQUEST = "PERCEIVE:perceive_request"
 SEAT_RULING = "PERCEIVE:perceive_ruling"

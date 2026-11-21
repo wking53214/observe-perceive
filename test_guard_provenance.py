@@ -12,6 +12,7 @@ import pytest
 
 from conftest import strict_wiring, run_chain
 from conservation_kernel import ConservationKernel
+from root_admission import refuse_all_evidence
 from execution_guard import ExecutionLedger, guarded
 from governance_orchestrator import GovernanceOrchestrator
 from observe_consolidated import ObserveClinicalEngine
@@ -64,19 +65,19 @@ def test_an_executor_guarded_against_another_ledger_does_not_run(orchestrator):
 
 def test_strict_profile_refuses_a_kernel_with_no_root_guard(perceive):
     with pytest.raises(ValueError, match="root guard"):
-        GovernanceOrchestrator(perceive, ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine(),
+        GovernanceOrchestrator(perceive, ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence), ObserveClinicalEngine(),
                                profile="strict")
 
 
 def test_strict_profile_accepts_a_kernel_that_has_a_root_guard(perceive):
-    kernel = ConservationKernel(root_guard=lambda artifact: False)
+    kernel = ConservationKernel(root_guard=lambda artifact: False, evidence_guard=refuse_all_evidence)
     orchestrator = GovernanceOrchestrator(perceive, kernel, ObserveClinicalEngine(), profile="strict",
                                           **strict_wiring())
     assert orchestrator.profile == "strict"
 
 
 def test_advisory_profile_still_accepts_an_unguarded_kernel(perceive):
-    orchestrator = GovernanceOrchestrator(perceive, ConservationKernel(allow_unguarded_roots=True),
+    orchestrator = GovernanceOrchestrator(perceive, ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence),
                                           ObserveClinicalEngine(), profile="advisory")
     assert orchestrator.profile == "advisory"
 
@@ -85,7 +86,7 @@ def test_strict_profile_refuses_to_switch_the_pre_action_guard_off(perceive):
     # Strict is the protected profile, and its pre-action authorization is the executor guard. Turning that
     # off would leave only the after-the-fact consume, so strict refuses it at construction.
     with pytest.raises(ValueError, match="guard_executor"):
-        GovernanceOrchestrator(perceive, ConservationKernel(root_guard=lambda artifact: True), ObserveClinicalEngine(),
+        GovernanceOrchestrator(perceive, ConservationKernel(root_guard=lambda artifact: True, evidence_guard=refuse_all_evidence), ObserveClinicalEngine(),
                                profile="strict", guard_executor=False)
 
 

@@ -28,4 +28,4 @@ cns @ git+https://github.com/wking53214/CNS.git@v4.1.0
 governance-gateway @ git+https://github.com/wking53214/governance_gateway.git@ad8b644ca2edffc2b2de5e30e54f0157c288d925
 cognitive-continuity-constitution @ git+https://github.com/wking53214/ccc.git@98065733ee1afa22dc80db3c8dcfd0e1a3094909
 dit @ git+https://github.com/wking53214/dit.git@c801374757411f0975a71d1b794f2711d680985e
-conservation-kernel @ git+https://github.com/wking53214/conservation_kernel.git@4e7c0d9fbf6a40fd1f9a81896a7e2db00a63c47a
+conservation-kernel @ git+https://github.com/wking53214/conservation_kernel.git@22764a439b8bcba9d9fcb2595ba249b44992d613
