@@ -188,6 +188,15 @@ class GovernanceOrchestrator:
         if profile == "strict" and escalations is None:
             raise ValueError("the strict profile needs an escalation desk (escalations=...): without one nobody is told "
                              "of a CRITICAL reading (use profile='advisory' to run without a desk)")
+        # A page nobody answers must move to the next tier, and somebody must be told if that stops: that is the sweep
+        # runner's whole job, so strict needs a running one bound to the same desk, as production does.
+        if profile == "strict":
+            from production_profile import sweep_runner_problems
+            runner_problems = sweep_runner_problems(sweep_runner, escalations)
+            if runner_problems:
+                raise ValueError("the strict profile needs a running sweep runner bound to the escalation desk "
+                                 "(sweep_runner=...): " + "; ".join(runner_problems) + " (use profile='advisory' to run "
+                                 "without one)")
         self.sweep_runner = sweep_runner
         # One id per call to `orchestrate_request`, whatever the artifact: `request_id` is the artifact's id, so a refused
         # attempt and its retry share it. The attempt id tells them apart on the result, the receipt and every alert and

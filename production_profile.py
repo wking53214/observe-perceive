@@ -137,6 +137,26 @@ def _data_protection_problems(observe_engine: Any, clinical_settings: Any) -> Li
     return problems
 
 
+def sweep_runner_problems(sweep_runner: Any, escalations: Any) -> list:
+    """Why this sweep runner cannot back this escalation desk; empty if it can. Strict and production both ask."""
+    problems: list = []
+    if sweep_runner is None:
+        problems.append("no sweep runner: nothing calls EscalationDesk.sweep(), so a page nobody answers would never "
+                        "move to the next tier and nobody would be told that it had stopped")
+    else:
+        from escalation_runner import SweepRunner
+        if not isinstance(sweep_runner, SweepRunner):
+            problems.append(f"sweep_runner is a {type(sweep_runner).__name__}, not a SweepRunner")
+        else:
+            problems.extend(f"sweep runner: {p}" for p in sweep_runner.problems())
+            if escalations is not None and sweep_runner.desk is not escalations:
+                problems.append("the sweep runner is bound to a different desk from the orchestrator's: the desk that "
+                                "pages would never be swept")
+            if not sweep_runner.running:
+                problems.append("the sweep runner is not running: start it before building the orchestrator")
+    return problems
+
+
 def production_problems(*, conservation_kernel: Any, root_admission: Any, observe_engine: Any, receipts: Any,
                         execution_ledger: Any, alert_human: Any, source_signers: Any,
                         guard_executor: bool, escalations: Any = None, sweep_runner: Any = None,
@@ -214,20 +234,7 @@ def production_problems(*, conservation_kernel: Any, root_admission: Any, observ
             problems.extend(f"escalation desk: {p}" for p in escalations.problems())
     if alert_human is not None:
         problems.append("alert_human is given beside the production escalation desk: use the desk alone")
-    if sweep_runner is None:
-        problems.append("no sweep runner: nothing calls EscalationDesk.sweep(), so a page nobody answers would never "
-                        "move to the next tier and nobody would be told that it had stopped")
-    else:
-        from escalation_runner import SweepRunner
-        if not isinstance(sweep_runner, SweepRunner):
-            problems.append(f"sweep_runner is a {type(sweep_runner).__name__}, not a SweepRunner")
-        else:
-            problems.extend(f"sweep runner: {p}" for p in sweep_runner.problems())
-            if escalations is not None and sweep_runner.desk is not escalations:
-                problems.append("the sweep runner is bound to a different desk from the orchestrator's: the desk that "
-                                "pages would never be swept")
-            if not sweep_runner.running:
-                problems.append("the sweep runner is not running: start it before building the orchestrator")
+    problems.extend(sweep_runner_problems(sweep_runner, escalations))
     if observe_engine is None:
         problems.append("no OBSERVE engine is configured")
     problems.extend(_data_protection_problems(observe_engine, clinical_settings))

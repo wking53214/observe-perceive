@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from conftest import importorskip_cns, make_test_desk
+from conftest import importorskip_cns, make_test_desk, strict_wiring
 
 importorskip_cns("cns.gate")
 importorskip_cns("cns_composition.decision_guard")
@@ -138,11 +138,41 @@ def test_a_correct_wiring_executes_a_governed_action_end_to_end(tmp_path):
     assert result["audit_chain_valid"] is True and result["handoff"]["profile"] == "production"
 
 
+# ---- strict needs a running sweep runner bound to its desk (Task A) ----------------------------------------------
+
+def _strict(**wiring):
+    return GovernanceOrchestrator(perceive(), ConservationKernel(root_guard=lambda a: True), ObserveClinicalEngine(),
+                                  profile="strict", **wiring)
+
+
+def test_strict_refuses_a_desk_with_no_sweep_runner():
+    with pytest.raises(ValueError, match="needs a running sweep runner"):
+        _strict(escalations=make_test_desk())
+
+
+def test_strict_refuses_a_sweep_runner_bound_to_another_desk():
+    with pytest.raises(ValueError, match="different desk"):
+        _strict(escalations=make_test_desk(), sweep_runner=runner_for(make_test_desk()))
+
+
+def test_strict_refuses_a_sweep_runner_that_is_not_running():
+    d = make_test_desk()
+    stopped = runner_for(d)
+    stopped.stop(timeout=2)
+    with pytest.raises(ValueError, match="not running"):
+        _strict(escalations=d, sweep_runner=stopped)
+
+
+def test_advisory_still_runs_without_a_desk_or_a_sweep_runner():
+    orch = GovernanceOrchestrator(perceive(), ConservationKernel(root_guard=lambda a: True), ObserveClinicalEngine())
+    assert orch.profile == "advisory"
+
+
 # ---- the wiring the strict profile accepts, and production refuses -----------------------------------------------
 
 def test_strict_accepts_a_bare_lambda_guard_and_production_refuses_it(tmp_path):
     strict = GovernanceOrchestrator(perceive(), ConservationKernel(root_guard=lambda a: True),
-                                    ObserveClinicalEngine(), profile="strict", escalations=make_test_desk())
+                                    ObserveClinicalEngine(), profile="strict", **strict_wiring())
     assert strict.profile == "strict"
     msg = refused(tmp_path, conservation_kernel=ConservationKernel(root_guard=lambda a: True))
     assert "not the RootAdmission given to the orchestrator" in msg

@@ -56,11 +56,21 @@ RESPONDER = HmacSigner(b"demo-responder-key-0123456789abcdefgh", key_id="demo-nu
 
 
 def _demo_desk() -> EscalationDesk:
-    """The strict profile refuses to run without an escalation desk. This one only prints what it would send; a real
+    """The strict profile refuses to run without an escalation desk and a sweep runner. This desk only prints what it would send; a real
     deployment puts a pager, a dashboard or a phone behind the channel."""
     return EscalationDesk(NotificationPolicy((Tier("charge", lambda page: print(f"  [DEMO PAGE] {page.get('kind')}"),
                                                    ("demo-nurse",), 60.0, 5.0),)),
                           EscalationLog(), responder_keys={"demo-nurse": RESPONDER})
+
+
+def _demo_wiring() -> Dict[str, Any]:
+    """The desk and the running sweep runner the strict profile needs. The runner's threads are daemons and its intervals
+    are long, so it never fires during the demo and does not keep the process alive."""
+    from escalation_runner import SweepRunner
+    desk = _demo_desk()
+    runner = SweepRunner(desk, sweep_interval_s=3600, watch_interval_s=3600, max_silence_s=7200, alarm_timeout_s=5,
+                         max_tickets_per_sweep=10, alarm=lambda payload: None).start()
+    return {"escalations": desk, "sweep_runner": runner}
 
 
 class _Status:
@@ -134,7 +144,7 @@ def run_action(workdir: Path, *, artifact_id: str = "feed-icu-3-0042", execution
         _perceive(paths.perceive), kernel, ObserveClinicalEngine(),
         profile="strict",                     # sealed scope, vitals, attested event time, advised violations enforced
         source_signers=[SOURCE],              # whose event-time attestations count
-        execution_ledger=ledger, receipts=receipts, root_admission=admission, escalations=_demo_desk(),
+        execution_ledger=ledger, receipts=receipts, root_admission=admission, **_demo_wiring(),
     )
 
     # EXECUTE: the actuator. It will not act on anything the ledger did not issue.
@@ -282,7 +292,7 @@ def attack_after_restart(workdir: Path, explained: Dict[str, Any]) -> Dict[str, 
     orchestrator = GovernanceOrchestrator(_perceive(paths.perceive), ConservationKernel(root_guard=admission), ObserveClinicalEngine(),
                                           profile="strict", source_signers=[SOURCE], execution_ledger=ledger,
                                           receipts=ReceiptLog(paths.receipts, signer=DEPLOYER), root_admission=admission,
-                                          escalations=_demo_desk())
+                                          **_demo_wiring())
     from gateway_admission_adapter import GatewayAdmissionAdapter, GatewayEpistemicStatus
     artifact = FeedArtifact("feed-icu-3-0042", "escalate P001: sustained tachycardia, SpO2 91", _EVENT_TIME)
     sealed = GatewayAdmissionAdapter.seal(artifact_id=artifact.artifact_id, payload={"content": artifact.content},
