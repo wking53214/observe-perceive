@@ -466,3 +466,38 @@ def test_fortress_with_a_configured_audit_key_starts(tmp_path, monkeypatch):
     monkeypatch.setenv("FORTRESS_AUDIT_KEY", secrets.token_hex(32))   # generated per run, never written down
     o = build(tmp_path, fortress_controller="energy")
     assert o.fortress_adapter is not None and o.fortress_adapter.fortress.audit.ephemeral_key is False
+
+
+# ---- the evidence guard contract ---------------------------------------------------------------------------------
+
+def test_a_kernel_with_no_evidence_guard_is_refused(tmp_path):
+    admission = RootAdmission()
+    kernel = ConservationKernel(root_guard=admission, allow_unguarded_evidence=True)
+    assert "no evidence guard" in refused(tmp_path, conservation_kernel=kernel, root_admission=admission)
+
+
+@pytest.mark.parametrize("guard,expected", [
+    (lambda record: True, "did not refuse"),
+    (lambda record: record.independent, "did not refuse"),
+    (lambda record: 1, "did not refuse"),
+    (lambda record: None, "did not refuse"),
+])
+def test_a_guard_that_believes_a_records_own_claim_is_refused(tmp_path, guard, expected):
+    admission = RootAdmission()
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=guard)
+    assert expected in refused(tmp_path, conservation_kernel=kernel, root_admission=admission)
+
+
+def test_a_guard_that_crashes_on_the_canary_is_refused(tmp_path):
+    def crashes(record):
+        raise RuntimeError("boom")
+    admission = RootAdmission()
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=crashes)
+    assert "evidence guard crashed on the startup canary" in refused(tmp_path, conservation_kernel=kernel, root_admission=admission)
+
+
+def test_a_deployers_guard_that_refuses_unvouched_actors_is_accepted(tmp_path):
+    vouched = {"reviewer-1"}
+    admission = RootAdmission()
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=lambda r: r.provided_by.actor_id in vouched)
+    assert build(tmp_path, conservation_kernel=kernel, root_admission=admission).profile == "production"
