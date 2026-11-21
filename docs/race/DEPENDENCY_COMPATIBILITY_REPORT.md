@@ -1,5 +1,7 @@
 # Dependency compatibility report: CNS v2.3.0
 
+> **Update 2026-11-21 (kernel pin).** This report is a record of the CNS v2.3.0 check and is otherwise unchanged. Since then Conservation Kernel main has moved 85 commits past the pinned `4e7c0d9` (INSPECTED with the GitHub compare API). One of those changes matters for any pin move: a kernel is now refused at build time unless it has an `evidence_guard`, or the caller passes `allow_unguarded_evidence=True` to say that is deliberate (the kernel's CHANGELOG and README). With the kernel at its main (`22764a4`), about 400 tests in this repository fail at set-up, because this repository builds kernels with a root guard but no evidence guard (EXECUTED locally, 2026-11-21; 16 further tests already fail locally without the kernel change because they need sibling repositories). The pin therefore stays at `4e7c0d9` until the choice between a real evidence guard and an explicit opt-out is made.
+
 Evidence classes: EXECUTED (run), INSPECTED (read in source or CI), DOCUMENTED (stated in prose), UNKNOWN.
 
 ## What failed
