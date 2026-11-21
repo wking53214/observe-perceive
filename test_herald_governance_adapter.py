@@ -13,6 +13,7 @@ from typing import List, Optional
 import pytest
 
 from conservation_kernel import ConservationKernel
+from root_admission import refuse_all_evidence
 from governance_orchestrator import GovernanceOrchestrator
 from herald_governance_adapter import HeraldGovernanceAdapter
 from observe_consolidated import ObserveClinicalEngine
@@ -71,7 +72,7 @@ def orchestrator():
         manifest_id="herald-seam-manifest", version="1.0.0",
         created_at=datetime.now(timezone.utc), policies={},
     ))
-    return GovernanceOrchestrator(kernel, ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine())
+    return GovernanceOrchestrator(kernel, ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence), ObserveClinicalEngine())
 
 
 # ---------------------------------------------------------------------------

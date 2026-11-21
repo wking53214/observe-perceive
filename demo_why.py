@@ -47,7 +47,7 @@ from governance_contracts import GovernanceApproval
 from governance_orchestrator import GovernanceOrchestrator
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
-from root_admission import RootAdmission, require_root_admission
+from root_admission import RootAdmission, require_root_admission, refuse_all_evidence
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -111,7 +111,7 @@ def run_scenario(quiet: bool = False):
     require_root_admission()
     admission = RootAdmission()
     orchestrator = GovernanceOrchestrator(
-        _perceive(), ConservationKernel(root_guard=admission), ObserveClinicalEngine(),
+        _perceive(), ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence), ObserveClinicalEngine(),
         root_admission=admission,
     )
 

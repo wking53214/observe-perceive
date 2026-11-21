@@ -14,6 +14,7 @@ from governance_contracts import GovernanceApproval
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
 from observe_consolidated import ObserveClinicalEngine
 from conservation_kernel import ConservationKernel
+from root_admission import refuse_all_evidence
 
 try:
     import fortress_perceive_adapter  # noqa: F401
@@ -60,7 +61,7 @@ def perceive():
 def _orchestrator(perceive, controller=None):
     return GovernanceOrchestrator(
         perceive,
-        ConservationKernel(allow_unguarded_roots=True),
+        ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence),
         ObserveClinicalEngine(),
         fortress_controller=controller,
     )

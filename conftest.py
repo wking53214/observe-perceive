@@ -14,7 +14,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from conservation_kernel import ConservationKernel
+from conservation_kernel import ConservationKernel, EvidenceRegistry
+from root_admission import refuse_all_evidence
 from governance_orchestrator import GovernanceOrchestrator
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
@@ -74,7 +75,10 @@ def perceive():
 
 @pytest.fixture
 def kernel():
-    return ConservationKernel(allow_unguarded_roots=True)
+    # The kernel now refuses an authorization from a registry that cannot tell a human from an actor that
+    # labels itself one, so the tests that add one name their reviewer here.
+    registry = EvidenceRegistry(trusted_humans={"reviewer-1"}, evidence_guard=refuse_all_evidence)
+    return ConservationKernel(registry=registry, allow_unguarded_roots=True)
 
 
 @pytest.fixture

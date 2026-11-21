@@ -19,7 +19,7 @@ from gateway_admission_adapter import GatewayAdmissionAdapter  # noqa: E402
 from governance_orchestrator import GovernanceOrchestrator  # noqa: E402
 from observe_consolidated import ObserveClinicalEngine, RiskOutput  # noqa: E402
 from pediatric_cassette import PediatricCassette  # noqa: E402
-from root_admission import RootAdmission  # noqa: E402
+from root_admission import RootAdmission, refuse_all_evidence  # noqa: E402
 from sentinel_perceive_adapter import SentinelPerceiveAdapter  # noqa: E402
 
 SOURCE = HmacSigner(b"audit-p5-source-key-0123456789abcdefgh", key_id="audit-p5-src")
@@ -44,7 +44,7 @@ def sealed(artifact_id, content="escalate P001"):
 
 def strict(observe_engine, alerts=None):
     admission = RootAdmission()
-    kernel = ConservationKernel(root_guard=admission)
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence)
     return GovernanceOrchestrator(make_perceive(), kernel, observe_engine, profile="strict",
                                   source_signers=[SOURCE], root_admission=admission,
                                   **strict_wiring(alerts))
@@ -117,7 +117,7 @@ def test_strict_refuses_to_start_without_an_escalation_desk():
     """A CRITICAL reading reaches a person only through a desk, so strict will not run without one (as production)."""
     admission = RootAdmission()
     with pytest.raises(ValueError, match="escalation desk"):
-        GovernanceOrchestrator(make_perceive(), ConservationKernel(root_guard=admission), ObserveClinicalEngine(),
+        GovernanceOrchestrator(make_perceive(), ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence), ObserveClinicalEngine(),
                                profile="strict", source_signers=[SOURCE], root_admission=admission,
                                alert_human=lambda alert: None)
 
@@ -166,7 +166,7 @@ def test_op4_a_decision_for_content_a_is_not_admitted_for_content_b_with_the_sam
     a, b = _request("escalate P001"), _request("DISCHARGE P001, stop all monitoring")
     decision_a = SentinelPerceiveAdapter.evaluate_through_perceive(make_perceive(), a)
     admission = RootAdmission()
-    kernel = ConservationKernel(root_guard=admission)
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence)
     adapter = PerceiveConservationAdapter(kernel, admission)
     with pytest.raises(ConservationRefusal):
         adapter.verify_perceive_decision(decision_a, b.artifact_id, b.artifact_content, b.artifact_hash, request=b)
@@ -186,7 +186,7 @@ def test_op4_root_admission_refuses_a_ruling_whose_decision_judged_other_content
     root_b = Artifact(artifact_id="same-id", content=b.artifact_content, propositions=(),
                       producer=Actor(actor_id="Sentinel", kind=ActorKind.SYSTEM))
     admission = RootAdmission()
-    kernel = ConservationKernel(root_guard=admission)
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence)
     ruling = Ruling(decision=decision_a, request_id=b.request_id, artifact_id="same-id", artifact_hash=b.artifact_hash)
     with pytest.raises(RootNotAdmitted):
         admission.admit(kernel, ruling, root_b)
@@ -197,7 +197,7 @@ def test_op4_an_unguarded_kernel_also_refuses_a_decision_about_other_content():
     from perceive_conservation_adapter import ConservationRefusal, PerceiveConservationAdapter
     a, b = _request("escalate P001"), _request("DISCHARGE P001")
     decision_a = SentinelPerceiveAdapter.evaluate_through_perceive(make_perceive(), a)
-    adapter = PerceiveConservationAdapter(ConservationKernel(allow_unguarded_roots=True))
+    adapter = PerceiveConservationAdapter(ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence))
     with pytest.raises(ConservationRefusal, match="judged"):
         adapter.verify_perceive_decision(decision_a, b.artifact_id, b.artifact_content, b.artifact_hash, request=b)
 
@@ -213,7 +213,7 @@ def test_op4_root_admission_refuses_a_decision_that_names_no_document():
                                   policy_version="1", perceive_audit_hash="abc")
     admission = RootAdmission()
     with pytest.raises(RootNotAdmitted):
-        admission.admit(ConservationKernel(root_guard=admission),
+        admission.admit(ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence),
                         Ruling(decision=decision, request_id="r1", artifact_id=root.artifact_id,
                                artifact_hash=root.content_digest), root)
 

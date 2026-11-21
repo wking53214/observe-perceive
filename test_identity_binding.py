@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from conftest import ChainArtifact, make_perceive
 from conservation_kernel import ConservationKernel, HmacSigner
+from root_admission import refuse_all_evidence
 from governance_chain import observation_digest, verify_result
 from governance_orchestrator import GovernanceOrchestrator
 from governance_record import ReceiptLog
@@ -27,7 +28,7 @@ def vit(pid="P1", hr=100, o2=98.0, rr=24, t=37.0, ts=T0, **ctx):
 
 
 def orch(**kw):
-    return GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True),
+    return GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence),
                                   kw.pop("engine", ObserveClinicalEngine()), **kw)
 
 

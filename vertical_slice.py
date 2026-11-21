@@ -43,7 +43,7 @@ from governance_record import ReceiptLog, from_record, verify_record
 from human_escalation import EscalationDesk, EscalationLog, NotificationPolicy, Tier
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
-from root_admission import RootAdmission, require_root_admission
+from root_admission import RootAdmission, require_root_admission, refuse_all_evidence
 from sentinel_perceive_adapter import SentinelPerceiveAdapter
 
 # 1.3.0: the durable boundary is signed. These keys stand in for the two a
@@ -137,7 +137,7 @@ def run_action(workdir: Path, *, artifact_id: str = "feed-icu-3-0042", execution
     paths.workdir.mkdir(parents=True, exist_ok=True)
     require_root_admission()
     admission = RootAdmission()                 # the kernel registers a root only after a CNS roster approves it
-    kernel = ConservationKernel(root_guard=admission)
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence)
     ledger = ExecutionLedger(paths.executions, signer=DEPLOYER)
     receipts = ReceiptLog(paths.receipts, signer=DEPLOYER)
     orchestrator = GovernanceOrchestrator(
@@ -289,7 +289,7 @@ def attack_after_restart(workdir: Path, explained: Dict[str, Any]) -> Dict[str, 
         outcomes["forged_context"] = f"refused: {e}"
     # 3. the whole request again, same execution id, new process
     admission = RootAdmission()
-    orchestrator = GovernanceOrchestrator(_perceive(paths.perceive), ConservationKernel(root_guard=admission), ObserveClinicalEngine(),
+    orchestrator = GovernanceOrchestrator(_perceive(paths.perceive), ConservationKernel(root_guard=admission, evidence_guard=refuse_all_evidence), ObserveClinicalEngine(),
                                           profile="strict", source_signers=[SOURCE], execution_ledger=ledger,
                                           receipts=ReceiptLog(paths.receipts, signer=DEPLOYER), root_admission=admission,
                                           **_demo_wiring())

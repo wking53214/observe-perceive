@@ -11,6 +11,7 @@ import pytest
 
 from conftest import run_chain
 from conservation_kernel import ConservationKernel
+from root_admission import refuse_all_evidence
 from execution_guard import ExecutionLedger
 from governance_orchestrator import GovernanceOrchestrator
 from governance_record import ReceiptLog
@@ -146,7 +147,7 @@ def test_an_alert_failure_on_a_crashed_executor_is_recorded_and_changes_nothing_
     from conftest import make_perceive
     with caplog.at_level(logging.CRITICAL, logger="GovernanceOrchestrator"):
         failed, _ = run_chain(
-            GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True),
+            GovernanceOrchestrator(make_perceive(), ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence),
                                    ObserveClinicalEngine(), alert_human=_broken_pager),
             "x2", func=_crashing_executor)
     assert failed["human_alert"] == "failed"
@@ -177,7 +178,7 @@ def test_a_crashed_executor_record_differs_only_by_the_alert_field():
 
     def record(alert_human):
         orchestrator = GovernanceOrchestrator(
-            make_perceive(), ConservationKernel(allow_unguarded_roots=True),
+            make_perceive(), ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence),
             ObserveClinicalEngine(), alert_human=alert_human)
         result, _ = run_chain(orchestrator, "x5", func=_crashing_executor)
         handoff = dict(result["handoff"])
@@ -226,7 +227,7 @@ def test_a_lost_receipt_changes_nothing_but_the_alert_field(monkeypatch, tmp_pat
 
     def record(alert_human):
         orchestrator = GovernanceOrchestrator(
-            make_perceive(), ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine(),
+            make_perceive(), ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence), ObserveClinicalEngine(),
             receipts=_broken_receipts(tmp_path, monkeypatch), alert_human=alert_human)
         result, ran = run_chain(orchestrator, "r2")
         return result, ran
@@ -323,7 +324,7 @@ def test_record_shapes_are_identical_with_or_without_a_channel():
     def shape(alert_human):
         # Fresh kernels per run: PERCEIVE and the Conservation Kernel both remember earlier requests.
         orchestrator = GovernanceOrchestrator(
-            make_perceive(), ConservationKernel(allow_unguarded_roots=True),
+            make_perceive(), ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence),
             ObserveClinicalEngine(), alert_human=alert_human,
         )
         result, _ = run_chain(orchestrator, "s1")

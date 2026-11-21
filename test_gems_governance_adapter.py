@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import pytest
 
 from conservation_kernel import ConservationKernel
+from root_admission import refuse_all_evidence
 from governance_orchestrator import GovernanceOrchestrator
 from observe_consolidated import ObserveClinicalEngine
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
@@ -80,7 +81,7 @@ def orchestrator():
         manifest_id="gems-seam-manifest", version="1.0.0",
         created_at=datetime.now(timezone.utc), policies={},
     ))
-    return GovernanceOrchestrator(kernel, ConservationKernel(allow_unguarded_roots=True), ObserveClinicalEngine())
+    return GovernanceOrchestrator(kernel, ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence), ObserveClinicalEngine())
 
 
 # ---------------------------------------------------------------------------

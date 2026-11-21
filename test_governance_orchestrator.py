@@ -15,6 +15,7 @@ from governance_contracts import GovernanceApproval
 from perceive_consolidated import PerceiveGovernanceKernel, PolicyManifest
 from observe_consolidated import ObserveClinicalEngine, VitalsSnapshot
 from conservation_kernel import ConservationKernel
+from root_admission import refuse_all_evidence
 
 
 @pytest.fixture
@@ -32,7 +33,7 @@ def perceive():
 
 @pytest.fixture
 def conservation_kernel():
-    return ConservationKernel(allow_unguarded_roots=True)
+    return ConservationKernel(allow_unguarded_roots=True, evidence_guard=refuse_all_evidence)
 
 
 @pytest.fixture
