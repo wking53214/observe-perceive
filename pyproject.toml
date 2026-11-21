@@ -63,7 +63,7 @@ test = ["pytest>=8", "hypothesis", "freezegun"]
 [tool.setuptools]
 # Flat layout: every module sits at the repository root.
 py-modules = [
-  "adversarial_sensor_faults", "capacity_planning", "cassette",
+  "actor_registry", "adversarial_sensor_faults", "capacity_planning", "cassette",
   "clinical_governance_system", "clinical_notification", "clinical_settings", "cns_connector", "escalation_runner", "cns_governed_decision", "compliance_exporters",
   "conservation_gsa815_adapter", "demo_why", "deterioration_simulator",
   "execution_guard",
