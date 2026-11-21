@@ -3,6 +3,7 @@
 Needs CNS (the roster is CNS's). In CI's `cns` job a missing CNS is an error; elsewhere these skip.
 """
 import itertools
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -37,6 +38,7 @@ def perceive():
 
 
 RESPONDER = HmacSigner(b"production-profile-responder-key-0123456789", key_id="nurse-1")
+HEARTBEAT_KEY = HmacSigner(b"production-profile-heartbeat-key-0123456789", key_id="heartbeat")
 
 
 _LOGS = itertools.count()
@@ -76,8 +78,12 @@ def _stop_runners():
 
 def runner_for(escalations, **override):
     """A started sweep runner bound to `escalations`, with intervals long enough that it never fires during a test."""
+    import tempfile
+    from heartbeat import HeartbeatWriter
     parts = dict(sweep_interval_s=3600, watch_interval_s=3600, max_silence_s=7200, alarm_timeout_s=5,
-                 max_tickets_per_sweep=10, alarm=lambda payload: None)
+                 max_tickets_per_sweep=10, alarm=lambda payload: None,
+                 heartbeat=HeartbeatWriter(Path(tempfile.mkdtemp()) / "heartbeat.json", HEARTBEAT_KEY,
+                                           label="production-test"))
     parts.update(override)
     runner = SweepRunner(escalations, **parts).start()
     _RUNNERS.append(runner)
@@ -541,3 +547,17 @@ def test_a_desk_key_other_than_the_registry_bound_key_is_refused(tmp_path):
     other = HmacSigner(b"production-profile-other-nurse-key-012345678", key_id="nurse-1-old")
     msg = refused(tmp_path, escalations=desk(tmp_path, responder_keys={"nurse-1": other}))
     assert "key 'nurse-1-old' on the desk" in msg and "bound them to 'nurse-1'" in msg
+
+
+# ---- something outside the process can notice it stop (Step 7) ---------------------------------------------------
+
+def test_a_sweep_runner_without_a_heartbeat_is_refused(tmp_path):
+    escalations = desk(tmp_path)
+    msg = refused(tmp_path, escalations=escalations, sweep_runner=runner_for(escalations, heartbeat=None))
+    assert "writes no heartbeat" in msg
+
+
+def test_a_lookalike_heartbeat_is_refused(tmp_path):
+    escalations = desk(tmp_path)
+    msg = refused(tmp_path, escalations=escalations, sweep_runner=runner_for(escalations, heartbeat=lambda s: None))
+    assert "writes no heartbeat" in msg

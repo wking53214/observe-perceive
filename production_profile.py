@@ -21,8 +21,9 @@ checking IDENTITY and BEHAVIOUR, not shape:
     now, and the desk's key for each is the one the registry bound (actor_registry.py).
   * Someone can be told AND followed up: an EscalationDesk with a valid policy, a key for every responder, and a
     durable signed log (human_escalation.py), swept by a running SweepRunner bound to that same desk whose watchdog
-    alarms through a channel of its own (escalation_runner.py). It cannot prove the alarm channel reaches a person, or that
-    the process stays up; see docs/race/ESCALATION_SWEEP_RUNNER.md.
+    alarms through a channel of its own (escalation_runner.py), and writes a signed heartbeat that a separate process
+    checks (heartbeat.py), so a dead or hung process is noticed from outside. It cannot prove that anything runs that
+    check, or that any alarm channel reaches a person; see docs/race/ESCALATION_SWEEP_RUNNER.md.
 
 EVIDENCE GUARD CONTRACT (what production asks of a deployer-supplied guard, `evidence_guard_problems`):
 the guard is a callable that takes one evidence record and answers exactly True (accept) or exactly False (refuse).
@@ -304,6 +305,11 @@ def production_problems(*, conservation_kernel: Any, root_admission: Any, observ
     if alert_human is not None:
         problems.append("alert_human is given beside the production escalation desk: use the desk alone")
     problems.extend(sweep_runner_problems(sweep_runner, escalations))
+    if sweep_runner is not None:
+        from heartbeat import HeartbeatWriter
+        if not isinstance(getattr(sweep_runner, "heartbeat", None), HeartbeatWriter):
+            problems.append("the sweep runner writes no heartbeat (heartbeat=HeartbeatWriter(...)): if this process "
+                            "dies or hangs, its watchdog dies with it and nothing outside can notice")
     if observe_engine is None:
         problems.append("no OBSERVE engine is configured")
     problems.extend(_data_protection_problems(observe_engine, clinical_settings))
