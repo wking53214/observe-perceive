@@ -97,7 +97,7 @@ Sibling checkout first, installed package second; tests skip when neither is pre
 ## 3. What It Does NOT Do / Non-Goals
 
 - Does **not** import α, ζ, β, δ, GSA-815, or sentinel_os on the orchestrator path.
-- Does **not** own human identity or the authority to grant. It **provides** a signed role registry (`actor_registry.py`: grant, delegate, revoke, with every change signed by the actor making it), which the `production` profile requires the escalation desk to check at acknowledgement. Who holds each key, and proof that a key belongs to the person it names, stay with the deployer.
+- Does **not** own human identity or the authority to grant. It **provides** a signed role registry (`actor_registry.py`: grant, delegate, revoke, with every change signed by the actor making it), which the `production` profile requires the escalation desk to check at acknowledgement. Who holds each key, and proof that a key belongs to the person it names, stay with the deployer; `docs/KEY_CUSTODY.md` maps every key, who checks it and what its theft allows.
 - Does **not** provide KMS/HSM as a service (optional signer if you pass a key).
 - Does **not** ship a deployable SaaS. Library + demo (`demo_why.py`).
 - Does **not** claim FDA-cleared clinical detection. `fda_510k_checklist.py` is a checklist, not a submission.
