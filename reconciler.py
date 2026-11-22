@@ -25,17 +25,39 @@ The effect log must come from a source the caller of the guarded action cannot w
 system's own record. If whoever bypasses the guard can also edit or omit effects, these joins find nothing. That is
 the deployer's to establish; this module cannot. It refuses a ledger whose hash chain does not verify, because joins
 over a forged ledger prove nothing. The policy numbers (clock skew, abandonment age) have no default.
+
+RUNNING IT ON A SCHEDULE
+
+  python -m reconciler run --ledger PATH --effects PATH --state PATH --clock-skew S --abandoned-after S
+                           --key-env VAR --key-id ID
+
+reads the signed ledger (checking every signature) and the effect log (one JSON object per line), prints each NEW
+violation that needs a person as one JSON line, records it in the state file, and exits:
+
+  0  nothing new needs a person
+  2  something does: new violations (printed), or a ledger that does not verify, or an effect log that is missing or
+     malformed. Not being able to see what happened is itself an alarm.
+  3  misconfigured: an argument or the key is missing or invalid.
+
+What was already raised is kept in `--state`, written in one step, so a second run does not page the same violation
+again. A violation is marked raised when it is printed: the scheduler must treat a failure to deliver exit-2 output as
+its own alarm, or that violation will not be printed again. The ledger key is read from the named environment
+variable; there is no default key.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
+import sys
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
-__all__ = ["KINDS", "QUERIES", "Reconciliation", "ReconciliationRefused", "Violation", "escalate", "reconcile"]
+__all__ = ["KINDS", "QUERIES", "Reconciliation", "ReconciliationRefused", "Violation", "escalate", "load_raised", "main",
+           "reconcile", "save_raised"]
 
 #: kind -> who must see it. "page" goes to a person through the escalation desk; "record" is reported only.
 KINDS: Dict[str, str] = {
@@ -216,3 +238,110 @@ def escalate(result: Reconciliation, desk, *, already_raised: Set[str]) -> List[
         already_raised.add(v.violation_id)
         raised.append((v.violation_id, ticket_id))
     return raised
+
+
+# ---- running it on a schedule ---------------------------------------------------------------------------------------
+
+def load_raised(path) -> Set[str]:
+    """The violation ids already raised, from a state file written by `save_raised`. A missing file is an empty set."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        return set()
+    if not isinstance(data, dict) or not isinstance(data.get("raised"), list):
+        raise ReconciliationRefused(f"{path} is not a reconciler state file")
+    return {str(v) for v in data["raised"]}
+
+
+def save_raised(path, raised: Set[str]) -> None:
+    """Replace the state file in one step, so a crash leaves the old state or the new one, never half of either."""
+    directory = os.path.dirname(os.path.abspath(path))
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".reconciler-state.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump({"raised": sorted(raised)}, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _read_effects(path) -> List[Dict[str, Any]]:
+    effects = []
+    with open(path, encoding="utf-8") as fh:
+        for n, line in enumerate(fh, 1):
+            if not line.strip():
+                continue
+            try:
+                effects.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise ReconciliationRefused(f"effect log line {n} is not JSON") from exc
+    return effects
+
+
+def main(argv: Optional[list] = None, *, now: Optional[datetime] = None) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(prog="python -m reconciler", description="Reconcile a ledger against effects.")
+    sub = parser.add_subparsers(dest="command", required=True)
+    run = sub.add_parser("run")
+    run.add_argument("--ledger", required=True)
+    run.add_argument("--effects", required=True)
+    run.add_argument("--state", required=True)
+    run.add_argument("--clock-skew", type=float, required=True, help="seconds; there is no default")
+    run.add_argument("--abandoned-after", type=float, required=True, help="seconds; there is no default")
+    run.add_argument("--key-env", required=True, help="environment variable holding the ledger key")
+    run.add_argument("--key-id", required=True)
+    args = parser.parse_args(argv)
+
+    key = os.environ.get(args.key_env, "")
+    if not key.strip():
+        print(f"MISCONFIGURED: environment variable {args.key_env} is empty or unset", file=sys.stderr)
+        return 3
+    from conservation_kernel import HmacSigner
+    try:
+        signer = HmacSigner(key.encode("utf-8"), key_id=args.key_id)
+        raised = load_raised(args.state)
+    except (ValueError, OSError) as exc:
+        print(f"MISCONFIGURED: {exc}", file=sys.stderr)
+        return 3
+    when = now or datetime.now().astimezone()
+    try:
+        from execution_guard import ExecutionLedger
+        if not os.path.exists(args.ledger):
+            raise ReconciliationRefused(f"no ledger at {args.ledger}")
+        ledger = ExecutionLedger(args.ledger, signer=signer)
+        result = reconcile(ledger, _read_effects(args.effects), now=when, clock_skew_s=args.clock_skew,
+                           abandoned_after_s=args.abandoned_after)
+    except FileNotFoundError:
+        print(json.dumps({"alarm": "effect_log_missing", "detail": f"no effect log at {args.effects}: what happened "
+                                                                    "cannot be seen"}))
+        return 2
+    except ReconciliationRefused as exc:
+        print(json.dumps({"alarm": "refused", "detail": str(exc)}))
+        return 2
+    except Exception as exc:  # noqa: BLE001 - a ledger that cannot be read or verified is an alarm, not a crash
+        print(json.dumps({"alarm": "ledger_unreadable", "detail": f"{type(exc).__name__}: {exc}"}))
+        return 2
+
+    new = [v for v in result.violations if v.severity == "page" and v.violation_id not in raised]
+    for v in new:
+        print(json.dumps({"kind": v.kind, "violation_id": v.violation_id, "execution_id": v.execution_id,
+                          "effect_id": v.effect_id, "detail": v.detail}, sort_keys=True))
+    if new:
+        try:
+            save_raised(args.state, raised | {v.violation_id for v in new})
+        except OSError as exc:
+            print(json.dumps({"alarm": "state_unwritable", "detail": f"{type(exc).__name__}: {exc}; the same "
+                                                                     "violations will be printed again next run"}))
+        return 2
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

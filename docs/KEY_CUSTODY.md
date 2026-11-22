@@ -21,7 +21,7 @@ verify-only slots with no change to this package.
 
 | Key | Signs | Checks | Slot kind | If stolen |
 |---|---|---|---|---|
-| Execution ledger (`ExecutionLedger(signer=)`) | the orchestrator, on issue and consume | the orchestrator on reload; `reconcile()` on read | **sign and verify** | Forge `issued` and `consumed` entries. That can pair a bypass effect with a fake slip and **hide it from the reconciler**. The most valuable key here. |
+| Execution ledger (`ExecutionLedger(signer=)`) | the orchestrator, on issue and consume | the orchestrator on reload; `reconcile()` on read, which only verifies; **the `python -m reconciler run` CLI builds an `HmacSigner`**, so a scheduled reconciler holds this secret | **sign and verify** (reading alone can use a verify-only key) | Forge `issued` and `consumed` entries. That can pair a bypass effect with a fake slip and **hide it from the reconciler**. The most valuable key here. |
 | Receipts (`ReceiptLog(signer=)`) | the orchestrator, per result | the log on reload | sign and verify | Forge or rewrite receipts of what was decided. |
 | Escalation log (`EscalationLog(signer=)`) | the desk, per ticket event | the desk on reload | sign and verify | Forge ticket history. Where what was already paged is read back from this log (as `test_operational_chain.py` does), a forged `opened` entry makes a real violation look already paged, so it is never paged. |
 | Responder keys (`EscalationDesk(responder_keys=)`) | each responder, on their own device | the desk, at acknowledgement | **verify only** | With HMAC, whoever holds the desk's copy can acknowledge as that responder. Verify-only keys remove that. |
