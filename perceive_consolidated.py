@@ -17,6 +17,7 @@ Single-file deployment.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import hmac
 import json
@@ -26,7 +27,7 @@ import os
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from governance_contracts import compute_state_commitment
 
@@ -312,6 +313,38 @@ class PolicyGates:
     })
 
     @staticmethod
+    def request_shape_problems(request: PolicyRequest) -> List[str]:
+        """What is wrong with the SHAPE of a request, whatever its words say (ported from the standalone PERCEIVE
+        repository's event-shape gate, adapted to a request). Each was approved before this check: an escalation about
+        no subject, a time with no zone or that was only text, a context naming another patient, a content digest with
+        no document. Three more (a non-text actor, a context that is not a mapping) were refused only because a gate
+        crashed on them. Not checked: how far a time lies from now, because evaluation is a pure function of the
+        request (WS2a) and a wall-clock bound would make the same request rule differently on a re-run."""
+        problems: List[str] = []
+        for name in ("request_id", "request_type", "actor_id", "subject_id"):
+            value = getattr(request, name, None)
+            if value is not None and not isinstance(value, str):
+                problems.append(f"{name} must be text, not {type(value).__name__}")
+        if not (isinstance(request.subject_id, str) and request.subject_id.strip()):
+            problems.append("Missing subject_id: a request must be about someone or something")
+        context = request.context
+        if not isinstance(context, Mapping):
+            problems.append(f"context must be a mapping, not {type(context).__name__}")
+            context = {}
+        stamp = request.timestamp
+        if stamp is not None:
+            if not isinstance(stamp, datetime):
+                problems.append(f"timestamp must be a datetime, not {type(stamp).__name__}")
+            elif stamp.tzinfo is None or stamp.tzinfo.utcoffset(stamp) is None:
+                problems.append("timestamp has no time zone, so its rate-limit window cannot be placed")
+        patient = context.get("patient_id")
+        if patient is not None and isinstance(request.subject_id, str) and patient != request.subject_id:
+            problems.append("context patient_id names a different patient from subject_id")
+        if getattr(request, "artifact_hash", "") and not getattr(request, "artifact_id", ""):
+            problems.append("artifact_hash is given without the artifact_id it is the digest of")
+        return problems
+
+    @staticmethod
     def boundary_gate(request: PolicyRequest) -> PolicyOutput:
         """Validates inbound requests are well-formed and of known type."""
         violations = []
@@ -331,6 +364,7 @@ class PolicyGates:
         # the safer failure but still a gap.
         if request.request_type not in PolicyGates.VALID_REQUEST_TYPES:
             violations.append(f"Unknown request_type: {request.request_type}")
+        violations.extend(PolicyGates.request_shape_problems(request))
 
         approved = len(violations) == 0
         return PolicyOutput(
@@ -542,9 +576,11 @@ class EventStore:
         return event
 
     def replay(self, up_to_index: Optional[int] = None) -> List[Event]:
+        """Copies of the events, so a caller cannot rewrite the history it was given (ported from the standalone
+        PERCEIVE repository's read-only snapshots). The events were returned live before, request snapshots and all."""
         if up_to_index is None:
-            return list(self.events)
-        return list(self.events[:up_to_index + 1])
+            return copy.deepcopy(self.events)
+        return copy.deepcopy(self.events[:up_to_index + 1])
 
 
 # ============================================================================
@@ -560,7 +596,8 @@ class ManifestRegistry:
 
     def register_manifest(self, manifest: PolicyManifest) -> None:
         manifest.manifest_hash = self._compute_hash(manifest)
-        self.manifests[manifest.version] = manifest
+        # Stored as a copy, so the caller's object can no longer change what was registered under this hash.
+        self.manifests[manifest.version] = copy.deepcopy(manifest)
         self.current_version = manifest.version
         logger.info(f"Registered manifest v{manifest.version}")
 
@@ -581,7 +618,9 @@ class ManifestRegistry:
     def get_manifest(self, version: Optional[str] = None) -> Optional[PolicyManifest]:
         if version is None:
             version = self.current_version
-        return self.manifests.get(version)
+        # A copy: the live manifest returned before let a caller change a registered policy, so the stored content
+        # no longer matched the manifest_hash every audit entry cites.
+        return copy.deepcopy(self.manifests.get(version))
 
     def get_current_manifest(self) -> Optional[PolicyManifest]:
         return self.get_manifest(self.current_version)
