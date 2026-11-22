@@ -15,11 +15,24 @@ checking IDENTITY and BEHAVIOUR, not shape:
     least 32 bytes and not the published 'fortress-key'.
   * OBSERVE is configured, runs the clinical settings the deployment attests (their digest is recorded in every handoff), and
     keeps a bounded ledger with an archive. Patient identifiers are not written to logs. Event-time source keys are registered.
+  * The kernel's evidence guard honours the contract below, or the orchestrator does not start.
   * The executor is guarded.
+  * Whoever acknowledges a page still may: the desk checks an ActorRegistry authority, every responder holds the role
+    now, and the desk's key for each is the one the registry bound (actor_registry.py).
   * Someone can be told AND followed up: an EscalationDesk with a valid policy, a key for every responder, and a
     durable signed log (human_escalation.py), swept by a running SweepRunner bound to that same desk whose watchdog
-    alarms through a channel of its own (escalation_runner.py). It cannot prove the alarm channel reaches a person, or that
-    the process stays up; see docs/race/ESCALATION_SWEEP_RUNNER.md.
+    alarms through a channel of its own (escalation_runner.py), and writes a signed heartbeat that a separate process
+    checks (heartbeat.py), so a dead or hung process is noticed from outside. It cannot prove that anything runs that
+    check, or that any alarm channel reaches a person; see docs/race/ESCALATION_SWEEP_RUNNER.md.
+
+EVIDENCE GUARD CONTRACT (what production asks of a deployer-supplied guard, `evidence_guard_problems`):
+the guard is a callable that takes one evidence record and answers exactly True (accept) or exactly False (refuse).
+The kernel must hold one (not the `allow_unguarded_evidence` opt-out). At startup a canary record is put to it: a
+record from an actor nobody has vouched for that declares itself independent verification. The guard must answer
+exactly False, must not raise, and must not change the record. `refuse_all_evidence` meets this; a guard that
+believes a record's own claim of independence does not. This proves the guard refuses self-declared evidence; it
+does not prove the guard accepts the right evidence, and it cannot show who the guard trusts. That stays the
+deployer's responsibility.
 
 Every problem is reported together, so an operator fixes the wiring once. Nothing here is a clinical rule, a
 privacy rule or an authorization: it is a check that the controls the deployment claims to have are the
@@ -30,7 +43,8 @@ from __future__ import annotations
 import hmac
 from typing import Any, List, Optional, Tuple
 
-__all__ = ["PRODUCTION_PROFILE", "ProductionProfileError", "REQUIRED_CNS", "production_problems"]
+__all__ = ["PRODUCTION_PROFILE", "ProductionProfileError", "REQUIRED_CNS", "evidence_guard_problems",
+           "production_problems", "responder_authority_problems"]
 
 PRODUCTION_PROFILE = "production"
 
@@ -104,6 +118,58 @@ def _canary_problem(kernel: Any, root_admission: Any) -> Optional[str]:
     except Exception as exc:  # noqa: BLE001
         return f"the root guard raised when asked about the canary: {type(exc).__name__}: {exc}"
     return None
+
+
+def evidence_guard_problems(conservation_kernel: Any) -> List[str]:
+    """Why the kernel's evidence guard does not meet the contract in this module's docstring; empty if it does."""
+    registry = getattr(conservation_kernel, "_registry", None)
+    guard = getattr(registry, "evidence_guard", None)
+    if guard is None:
+        return ["the Conservation Kernel has no evidence guard: any caller could add a record that declares itself "
+                "independent verification and have it counted"]
+    if not callable(guard):
+        return [f"the kernel's evidence guard is a {type(guard).__name__}, not a callable"]
+    from conservation_kernel import Actor, EvidenceKind, EvidenceRecord
+    canary = EvidenceRecord(evidence_id="production-profile-evidence-canary", subject_id="production-profile-canary",
+                            kind=EvidenceKind.INDEPENDENT_VERIFICATION,
+                            provided_by=Actor.external("production-profile-unvouched"), independent=True,
+                            detail={"note": "declares itself independent verification"}, created_at="2000-01-01T00:00:00Z")
+    try:
+        answer = guard(canary)
+    except Exception as exc:  # noqa: BLE001 - a guard that crashes on a canary is not one to run on
+        return [f"the evidence guard crashed on the startup canary: {type(exc).__name__}: {exc}"]
+    if answer is not False:
+        return ["the evidence guard did not refuse (answer exactly False to) a record from an unvouched actor that "
+                f"declares itself independent verification (it answered {answer!r})"]
+    return []
+
+
+def responder_authority_problems(desk: Any) -> List[str]:
+    """Why this desk's acknowledgements are not held to a live, signed role record; empty if they are.
+
+    A key on file says who signed an acknowledgement. Production also asks whether that person still may: the desk
+    must check an `ActorRegistry` authority, every responder on its policy must hold the role now, and the key the
+    desk would check must be the key the registry bound to them."""
+    from actor_registry import RegistryAuthority
+    authority = getattr(desk, "authority", None)
+    if authority is None:
+        return ["the escalation desk has no live authority: a responder whose role was revoked could still "
+                "acknowledge (pass authority=ActorRegistry.authority(role))"]
+    if not isinstance(authority, RegistryAuthority):
+        return [f"the escalation desk's authority is a {type(authority).__name__}, not an ActorRegistry authority"]
+    problems: List[str] = []
+    responders = sorted({r for tier in getattr(desk.policy, "tiers", ()) for r in tier.responders})
+    for responder in responders:
+        why = authority.registry.why_not(responder, authority.role)
+        if why is not None:
+            problems.append(f"responder {responder!r} does not hold {authority.role!r} in the actor registry: {why}")
+            continue
+        desk_key = getattr(desk.responder_keys.get(responder), "key_id", None)
+        bound = authority.registry.key_id_of(responder)
+        if desk_key != bound:
+            problems.append(f"responder {responder!r} signs acknowledgements with key {desk_key!r} on the desk, but "
+                            f"the actor registry bound them to {bound!r}")
+    return problems
 
 
 def _data_protection_problems(observe_engine: Any, clinical_settings: Any) -> List[str]:
@@ -194,6 +260,9 @@ def production_problems(*, conservation_kernel: Any, root_admission: Any, observ
         if canary:
             problems.append(canary)
 
+    if conservation_kernel is not None:
+        problems.extend(evidence_guard_problems(conservation_kernel))
+
     if not guard_executor:
         problems.append("guard_executor is off: the executor guard is the pre-action authorization")
     if receipts is None:
@@ -232,9 +301,15 @@ def production_problems(*, conservation_kernel: Any, root_admission: Any, observ
             problems.append(f"escalations is a {type(escalations).__name__}, not an EscalationDesk")
         else:
             problems.extend(f"escalation desk: {p}" for p in escalations.problems())
+            problems.extend(responder_authority_problems(escalations))
     if alert_human is not None:
         problems.append("alert_human is given beside the production escalation desk: use the desk alone")
     problems.extend(sweep_runner_problems(sweep_runner, escalations))
+    if sweep_runner is not None:
+        from heartbeat import HeartbeatWriter
+        if not isinstance(getattr(sweep_runner, "heartbeat", None), HeartbeatWriter):
+            problems.append("the sweep runner writes no heartbeat (heartbeat=HeartbeatWriter(...)): if this process "
+                            "dies or hangs, its watchdog dies with it and nothing outside can notice")
     if observe_engine is None:
         problems.append("no OBSERVE engine is configured")
     problems.extend(_data_protection_problems(observe_engine, clinical_settings))

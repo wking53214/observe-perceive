@@ -3,6 +3,7 @@
 Needs CNS (the roster is CNS's). In CI's `cns` job a missing CNS is an error; elsewhere these skip.
 """
 import itertools
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -37,16 +38,30 @@ def perceive():
 
 
 RESPONDER = HmacSigner(b"production-profile-responder-key-0123456789", key_id="nurse-1")
+HEARTBEAT_KEY = HmacSigner(b"production-profile-heartbeat-key-0123456789", key_id="heartbeat")
 
 
 _LOGS = itertools.count()
+
+
+REGISTRAR = HmacSigner(b"production-profile-registrar-key-0123456789", key_id="registrar")
+
+
+def responder_registry():
+    """An actor registry in which nurse-1 holds `responder`, bound to the key the desk checks (Step 6)."""
+    from actor_registry import ActorRegistry, sign_registry_action
+    reg = ActorRegistry(roots={"registrar": "registrar"}, keys={"registrar": REGISTRAR, "nurse-1": RESPONDER})
+    body = {"actor_id": "nurse-1", "role": "responder", "key_id": "nurse-1", "expires_at": None}
+    reg.grant("nurse-1", "responder", "nurse-1", by="registrar",
+              signature=sign_registry_action(REGISTRAR, reg.head, "grant", "registrar", body))
+    return reg
 
 
 def desk(tmp_path, **override):
     """A valid desk. Each gets its own log file: one writer per log is enforced."""
     parts = dict(policy=NotificationPolicy(tiers=(Tier("charge", lambda payload: None, ("nurse-1",), 120.0, 5.0),)),
                  log=EscalationLog(tmp_path / f"escalations-{next(_LOGS)}.jsonl", signer=DEPLOYER),
-                 responder_keys={"nurse-1": RESPONDER})
+                 responder_keys={"nurse-1": RESPONDER}, authority=responder_registry().authority("responder"))
     parts.update(override)
     return EscalationDesk(**parts)
 
@@ -63,8 +78,12 @@ def _stop_runners():
 
 def runner_for(escalations, **override):
     """A started sweep runner bound to `escalations`, with intervals long enough that it never fires during a test."""
+    import tempfile
+    from heartbeat import HeartbeatWriter
     parts = dict(sweep_interval_s=3600, watch_interval_s=3600, max_silence_s=7200, alarm_timeout_s=5,
-                 max_tickets_per_sweep=10, alarm=lambda payload: None)
+                 max_tickets_per_sweep=10, alarm=lambda payload: None,
+                 heartbeat=HeartbeatWriter(Path(tempfile.mkdtemp()) / "heartbeat.json", HEARTBEAT_KEY,
+                                           label="production-test"))
     parts.update(override)
     runner = SweepRunner(escalations, **parts).start()
     _RUNNERS.append(runner)
@@ -466,3 +485,79 @@ def test_fortress_with_a_configured_audit_key_starts(tmp_path, monkeypatch):
     monkeypatch.setenv("FORTRESS_AUDIT_KEY", secrets.token_hex(32))   # generated per run, never written down
     o = build(tmp_path, fortress_controller="energy")
     assert o.fortress_adapter is not None and o.fortress_adapter.fortress.audit.ephemeral_key is False
+
+
+# ---- the evidence guard contract ---------------------------------------------------------------------------------
+
+def test_a_kernel_with_no_evidence_guard_is_refused(tmp_path):
+    admission = RootAdmission()
+    kernel = ConservationKernel(root_guard=admission, allow_unguarded_evidence=True)
+    assert "no evidence guard" in refused(tmp_path, conservation_kernel=kernel, root_admission=admission)
+
+
+@pytest.mark.parametrize("guard,expected", [
+    (lambda record: True, "did not refuse"),
+    (lambda record: record.independent, "did not refuse"),
+    (lambda record: 1, "did not refuse"),
+    (lambda record: None, "did not refuse"),
+])
+def test_a_guard_that_believes_a_records_own_claim_is_refused(tmp_path, guard, expected):
+    admission = RootAdmission()
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=guard)
+    assert expected in refused(tmp_path, conservation_kernel=kernel, root_admission=admission)
+
+
+def test_a_guard_that_crashes_on_the_canary_is_refused(tmp_path):
+    def crashes(record):
+        raise RuntimeError("boom")
+    admission = RootAdmission()
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=crashes)
+    assert "evidence guard crashed on the startup canary" in refused(tmp_path, conservation_kernel=kernel, root_admission=admission)
+
+
+def test_a_deployers_guard_that_refuses_unvouched_actors_is_accepted(tmp_path):
+    vouched = {"reviewer-1"}
+    admission = RootAdmission()
+    kernel = ConservationKernel(root_guard=admission, evidence_guard=lambda r: r.provided_by.actor_id in vouched)
+    assert build(tmp_path, conservation_kernel=kernel, root_admission=admission).profile == "production"
+
+
+# ---- whoever acknowledges must still hold the role (Step 6) -------------------------------------------------------
+
+def test_a_desk_with_no_live_authority_is_refused(tmp_path):
+    assert "no live authority" in refused(tmp_path, escalations=desk(tmp_path, authority=None))
+
+
+def test_a_lookalike_authority_is_refused(tmp_path):
+    msg = refused(tmp_path, escalations=desk(tmp_path, authority=lambda actor: True))
+    assert "not an ActorRegistry authority" in msg
+
+
+def test_a_responder_who_does_not_hold_the_role_is_refused(tmp_path):
+    from actor_registry import sign_registry_action
+    reg = responder_registry()
+    body = {"actor_id": "nurse-1", "role": "responder", "reason": "suspended"}
+    reg.revoke("nurse-1", "responder", by="registrar", reason="suspended",
+               signature=sign_registry_action(REGISTRAR, reg.head, "revoke", "registrar", body))
+    msg = refused(tmp_path, escalations=desk(tmp_path, authority=reg.authority("responder")))
+    assert "'nurse-1' does not hold 'responder'" in msg and "revoked" in msg
+
+
+def test_a_desk_key_other_than_the_registry_bound_key_is_refused(tmp_path):
+    other = HmacSigner(b"production-profile-other-nurse-key-012345678", key_id="nurse-1-old")
+    msg = refused(tmp_path, escalations=desk(tmp_path, responder_keys={"nurse-1": other}))
+    assert "key 'nurse-1-old' on the desk" in msg and "bound them to 'nurse-1'" in msg
+
+
+# ---- something outside the process can notice it stop (Step 7) ---------------------------------------------------
+
+def test_a_sweep_runner_without_a_heartbeat_is_refused(tmp_path):
+    escalations = desk(tmp_path)
+    msg = refused(tmp_path, escalations=escalations, sweep_runner=runner_for(escalations, heartbeat=None))
+    assert "writes no heartbeat" in msg
+
+
+def test_a_lookalike_heartbeat_is_refused(tmp_path):
+    escalations = desk(tmp_path)
+    msg = refused(tmp_path, escalations=escalations, sweep_runner=runner_for(escalations, heartbeat=lambda s: None))
+    assert "writes no heartbeat" in msg

@@ -75,7 +75,7 @@ orchestrator.
 - **It cannot watch itself.** If the watchdog thread dies, nothing notices. `status()["running"]` and the profile check at start-up
   say so, and an external liveness check on the process is the deployer's. This is why the watchdog checks the sweeper but nothing
   checks the watchdog.
-- **It lives in the process.** If the process dies, so do both threads. A separate supervisor is needed for that and is not here.
+- **It lives in the process.** If the process dies, so do both threads. Since Step 7 the runner can write a signed heartbeat after every watchdog pass (`heartbeat.HeartbeatWriter`, required by the production profile), and `python -m heartbeat check` run from somewhere else (cron, a systemd timer, a liveness probe, another host) alarms when the beats stop, go stale, fail their signature, or report an unhealthy runner. Silence is the alarm. What is still not here: proof that anything runs that check, and proof that its alarm reaches a person; those belong to the scheduler and the deployer's paging.
 - **Wall clock.** The desk's deadlines use the wall clock; the runner's own timings use a monotonic clock.
 - **The numbers.** The intervals are not provided. A reasonable starting point is a sweep interval well under the shortest tier
   deadline (otherwise escalation is only as prompt as the sweep), a silence limit a few sweeps long, and an alarm timeout shorter

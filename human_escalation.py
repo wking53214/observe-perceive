@@ -337,10 +337,13 @@ class EscalationDesk:
     """Opens tickets, dispatches them tier by tier, checks acknowledgements, and escalates what goes unanswered."""
 
     def __init__(self, policy: NotificationPolicy, log: EscalationLog, *, responder_keys: Mapping[str, Any],
-                 clock: Callable[[], datetime] = _now):
+                 clock: Callable[[], datetime] = _now, authority: Optional[Callable[[str], Any]] = None):
         self.policy = policy
         self.log = log
         self.responder_keys = dict(responder_keys)
+        #: Optional live check that a responder may act now, e.g. `ActorRegistry.authority("responder")`. A key on
+        #: file says who signed; this says whether they still may. None keeps the fixed responder map alone.
+        self.authority = authority
         self._clock = clock
         self._lock = threading.RLock()
         self._tickets: Dict[str, _Ticket] = {}
@@ -536,6 +539,13 @@ class EscalationDesk:
             allowed = {r for tier in self.policy.tiers if tier.name in t.reached for r in tier.responders}
             if actor_id not in allowed:
                 raise AcknowledgementError(f"{actor_id!r} is not a responder on any tier that reached this ticket")
+            if self.authority is not None:
+                try:
+                    allowed_now = self.authority(actor_id)
+                except Exception as exc:  # noqa: BLE001 - an authority that cannot answer is a refusal
+                    raise AcknowledgementError(f"the authority check failed for {actor_id!r}: {exc}") from exc
+                if allowed_now is not True:
+                    raise AcknowledgementError(f"{actor_id!r} does not currently hold the authority to acknowledge")
             signer = self.responder_keys.get(actor_id)
             if signer is None:
                 raise AcknowledgementError(f"{actor_id!r} has no registered key")

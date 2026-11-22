@@ -44,8 +44,12 @@ def _positive_int(value: Any) -> bool:
 class SweepRunner:
     def __init__(self, desk: Any, *, sweep_interval_s: float, watch_interval_s: float, max_silence_s: float,
                  alarm_timeout_s: float, max_tickets_per_sweep: int, alarm: Callable[[Dict[str, Any]], Any],
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic,
+                 heartbeat: Optional[Callable[[Dict[str, Any]], Any]] = None) -> None:
         self.desk = desk
+        #: Called with `status()` after every watchdog pass, so something OUTSIDE this process can notice when the
+        #: beats stop (heartbeat.HeartbeatWriter and check_heartbeat). None writes nothing, as before.
+        self.heartbeat = heartbeat
         self.sweep_interval_s = sweep_interval_s
         self.watch_interval_s = watch_interval_s
         self.max_silence_s = max_silence_s
@@ -272,7 +276,13 @@ class SweepRunner:
                     self._merge({"kind": "log_failures", "total": seen["failures"],
                                  "detail": "the escalation log could not be written; pages still went out"})
                     self._logged_failures = seen["failures"]
-        return self._deliver_pending()
+        delivered = self._deliver_pending()
+        if self.heartbeat is not None:
+            try:
+                self.heartbeat(self.status())
+            except Exception as exc:  # noqa: BLE001 - a missed beat is silence, which the outside checker sees
+                logger.critical("[SweepRunner] the heartbeat could not be written: %s: %s", type(exc).__name__, exc)
+        return delivered
 
     def _deliver_pending(self) -> List[Dict[str, Any]]:
         """Deliver what is pending on ONE delivery thread. If the last one is still stuck in the channel, do nothing: the
