@@ -52,6 +52,7 @@ from perceive_consolidated import PolicyGates, PolicyRequest, PolicyVerdict
 __all__ = [
     "CnsNotInstalled",
     "HandoffBindingGate",
+    "confirmed_evidence",
     "ObservationHandoff",
     "ObserveCnsGate",
     "PerceiveCnsGate",
@@ -122,6 +123,35 @@ def _plain(value: Any, non_finite: bool = False) -> Any:
     return value
 
 
+def confirmed_evidence(cassette: Any, data: Any) -> tuple:
+    """(contributed, silent, problem) for one recorded assessment: re-run each engine the record says was selected on
+    the recorded reading, through `cassette`, and sort them into engines that gave evidence and engines that abstained or
+    cannot be re-run. `problem` is set when a recorded output is not what its engine gives on the recorded reading.
+
+    Ported from OBSERVE's own cns_connector, where this check already lives. A verdict's `active_engines` lists the
+    engines that were SELECTED, including ones that ran and abstained, so it is not evidence: with a cassette whose
+    selected engines all abstain, the engine reports STABLE at risk 0 with a non-empty `active_engines`."""
+    from observe_consolidated import VitalsSnapshot as _Vitals
+    import copy as _copy
+    selected = list(data.get("selected_engines") or [])
+    recorded = {o.get("engine"): o for o in (data.get("outputs") or [])}
+    reading = _Vitals(**_copy.deepcopy(data["vitals"]))
+    engines = cassette.engines()
+    contributed, silent = [], []
+    for name in selected:
+        run = engines.get(name)
+        if run is None:                                   # not re-runnable, so its evidence cannot be confirmed
+            silent.append(name)
+            continue
+        out = run(reading)
+        rec = recorded.get(name)
+        if rec is None or (out.risk_score, out.confidence, list(out.triggered_rules)) != (
+                rec.get("risk"), rec.get("confidence"), list(rec.get("rules") or [])):
+            return contributed, silent, f"the recorded output of {name} is not what it gives on the recorded reading"
+        (silent if out.abstained else contributed).append(name)
+    return contributed, silent, ""
+
+
 class _CnsGateBase:
     """Shared plumbing: the end, the result, and fail-closed fault handling."""
 
@@ -188,7 +218,11 @@ class ObserveCnsGate(_CnsGateBase):
 
     _expected = object  # set per end in __init__
 
-    def __init__(self, position: str = _ALPHA) -> None:
+    def __init__(self, position: str = _ALPHA, *, engine: Any = None) -> None:
+        #: Optional at OMEGA: the engine whose audit ledger records the verdict. Given, the gate re-runs the recorded
+        #: engines and passes only if one of them gave evidence (`confirmed_evidence`). Not given, it reads
+        #: `active_engines`, which lists selected engines, abstaining ones included (behaviour before this option).
+        self._engine = engine
         if position == _ALPHA:
             name, self._expected = "observe.vitals_ingress", VitalsSnapshot
         elif position == _OMEGA:
@@ -217,6 +251,18 @@ class ObserveCnsGate(_CnsGateBase):
             return cns.GateOutcome.RETRY, "partial assessment: " + faults
         if not candidate.active_engines:
             return cns.GateOutcome.RETRY, "no engine produced evidence for this verdict"
+        if self._engine is not None:
+            entry = next((e for e in reversed(self._engine.audit_ledger.entries)
+                          if candidate.audit_hash and e.get("immutable_hash") == candidate.audit_hash), None)
+            if entry is None:
+                return cns.GateOutcome.TERMINAL_BREACH, "the verdict has no entry in the engine's audit ledger"
+            contributed, silent, problem = confirmed_evidence(self._engine.cassette, entry.get("data") or {})
+            if problem:
+                return cns.GateOutcome.TERMINAL_BREACH, problem
+            if not contributed:
+                return cns.GateOutcome.RETRY, ("no engine produced evidence for this verdict (selected: "
+                                               + ", ".join(candidate.active_engines) + "; abstained or unconfirmed: "
+                                               + (", ".join(silent) or "none") + ")")
         return cns.GateOutcome.PASS, ""
 
     def _subject(self, candidate: Any) -> str:
@@ -289,13 +335,17 @@ class HandoffBindingGate(_CnsGateBase):
 
     _expected = ObservationHandoff
 
-    def __init__(self, *, max_age_s: float, clock_skew_s: float) -> None:
+    def __init__(self, *, max_age_s: float, clock_skew_s: float, cassette: Any = None) -> None:
         for name, value in (("max_age_s", max_age_s), ("clock_skew_s", clock_skew_s)):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be a finite number of seconds, zero or more (there is no default)")
         if max_age_s <= 0:
             raise ValueError("max_age_s must be more than zero")
         self.max_age_s, self.clock_skew_s = float(max_age_s), float(clock_skew_s)
+        #: Optional: the cassette OBSERVE scored with. Given, the recorded engines are re-run on the recorded reading
+        #: and the handoff passes only if one of them gave evidence; without it, an all-abstaining assessment whose
+        #: `active_engines` is non-empty is read as assessed (see `confirmed_evidence`).
+        self.cassette = cassette
         super().__init__("handoff.observe_to_perceive", _ALPHA)
 
     def _bound_content(self, candidate: ObservationHandoff) -> Any:
@@ -333,6 +383,12 @@ class HandoffBindingGate(_CnsGateBase):
             return breach, "OBSERVE's evidence is about a different patient from the vitals handed over"
         if fv.unassessable or fv.validation_faults or not fv.active_engines:
             return retry, "OBSERVE did not fully assess this reading; no assessment is not a stable one"
+        if self.cassette is not None:
+            contributed, _silent, problem = confirmed_evidence(self.cassette, data)
+            if problem:
+                return breach, problem
+            if not contributed:
+                return retry, "every engine OBSERVE selected abstained; no assessment is not a stable one"
         # 3. ... and about this reading
         if _json_round_trip(data.get("vitals")) != _json_round_trip(asdict(v)):
             return breach, "OBSERVE's evidence is about a different reading from the vitals handed over"
