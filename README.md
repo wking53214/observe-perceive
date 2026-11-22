@@ -97,7 +97,7 @@ Sibling checkout first, installed package second; tests skip when neither is pre
 ## 3. What It Does NOT Do / Non-Goals
 
 - Does **not** import α, ζ, β, δ, GSA-815, or sentinel_os on the orchestrator path.
-- Does **not** issue human grants (no identity registry, no grant lifecycle).
+- Does **not** own human identity or the authority to grant. It **provides** a signed role registry (`actor_registry.py`: grant, delegate, revoke, with every change signed by the actor making it), which the `production` profile requires the escalation desk to check at acknowledgement. Who holds each key, and proof that a key belongs to the person it names, stay with the deployer.
 - Does **not** provide KMS/HSM as a service (optional signer if you pass a key).
 - Does **not** ship a deployable SaaS. Library + demo (`demo_why.py`).
 - Does **not** claim FDA-cleared clinical detection. `fda_510k_checklist.py` is a checklist, not a submission.
@@ -115,7 +115,7 @@ From `CLAUDE_ARCHITECTURE_STATE.md` and `docs/audit/COMMERCIAL_RED_TEAM_2026-09-
 | GEMS pin | `f7d40fc` (GEMS PR #13; was `f70da70` before GEMS main's history was rewritten). The adapter uses GEMS' `GovernanceValidator`. GEMS `bb4cf40` deleted the classes the adapter used before, so the old pin `273aeea` is no longer used. That commit is now on GEMS main (INSPECTED 2026-11-19), so the re-pin is done. |
 | Key holder residual | Closure proven against external caller, file editor without the key, second process on shared ledger, restart. **Not** proven against the key holder, a callable invoked outside the orchestrator, or processes that do not share the file. |
 | Untyped orchestrator output | Commercial audit: result is an untyped dict. |
-| No actor registry / grant lifecycle | Architecture epic, missing. |
+| Actor registry / grant lifecycle | Provided (`actor_registry.py`, PR #110) and required by `production` for acknowledgements. Not provided: proof that a key belongs to the person it names, key rotation, multi-process writers. With HMAC keys the registry holds each signer's secret. |
 | sentinel_os / GSA-815 | Never imported. Diagrams that show them as chain stages are conceptual. |
 | Optional stages | CCC/fortress/Gateway/GEMS skipped if absent. A clone without extras is a shorter chain. |
 | Root guard | `root_admission.RootAdmission` makes the kernel register a root only after a CNS roster approves that document (needs the `cns` extra). The two examples (`demo_why.py`, `vertical_slice.py`) build the kernel with this guard, so they need the `cns` extra and stop at the start, naming the install command, without it. Test fixtures for other components still build the kernel with `allow_unguarded_roots=True`. Every kernel this repository builds also passes `root_admission.refuse_all_evidence` as its evidence guard, because the kernel (since the pin moved to `22764a4`) refuses to start without one; this package adds no evidence itself, so the guard accepts none, and a deployer who wants evidence passes their own. The approval proof is process-local, so it does not stop hostile code in the same process or mean anything to another process. |
