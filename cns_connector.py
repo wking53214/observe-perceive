@@ -20,6 +20,14 @@ PERCEIVE (policy request in, consensus verdict out)
   have run this gate (the verdict's applied_gates says which gates ran), and
   must carry no violations. A refused verdict is a valid result and passes.
 
+THE HANDOFF (OBSERVE result to PERCEIVE request)
+  Each gate above binds only the candidate it is handed, and a CNS chain relates none of them to the others: a chain
+  given one patient's vitals and a request about another passes every gate. `HandoffBindingGate` is the gate that
+  relates them. It takes an `ObservationHandoff` (the vitals, OBSERVE's verdict, OBSERVE's own audit entry for that
+  verdict, and the PolicyRequest) and refuses unless all four provably belong together and the reading is fresh.
+  It proves CONSISTENCY, not ORIGIN: the audit entry's hash takes no key, so an assessment fabricated whole (vitals,
+  entry and verdict made to agree) passes it. Proving that OBSERVE made the entry needs its ledger head or a signature.
+
 Neither side authorizes anything. These gates decide only whether an input or
 result is sound enough to pass along. A fault (an exception, a wrong-type
 candidate, or content that cannot be bound) is a TERMINAL_BREACH, never a pass.
@@ -32,7 +40,7 @@ from __future__ import annotations
 
 import importlib
 import math
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from enum import Enum
 from types import ModuleType
@@ -43,6 +51,8 @@ from perceive_consolidated import PolicyGates, PolicyRequest, PolicyVerdict
 
 __all__ = [
     "CnsNotInstalled",
+    "HandoffBindingGate",
+    "ObservationHandoff",
     "ObserveCnsGate",
     "PerceiveCnsGate",
     "cns_available",
@@ -256,3 +266,100 @@ class PerceiveCnsGate(_CnsGateBase):
         if self._position == _ALPHA:
             return f"perceive:alpha:{candidate.request_id}"
         return f"perceive:omega:{candidate.request_id}"
+
+
+@dataclass(frozen=True)
+class ObservationHandoff:
+    """What crosses from OBSERVE to PERCEIVE: the reading, OBSERVE's verdict on it, OBSERVE's own audit entry for that
+    verdict (from `ObserveClinicalEngine.audit_ledger`), and the PolicyRequest built from them."""
+
+    vitals: Any
+    verdict: Any
+    audit_entry: Any
+    request: Any
+
+
+#: Keys the engine adds to an audit entry's data after the fingerprint is taken.
+_AFTER_FINGERPRINT = ("decision_fingerprint", "predecessor_state_commitment", "state_commitment")
+
+
+class HandoffBindingGate(_CnsGateBase):
+    """ALPHA gate for PERCEIVE's input: the request is about this reading, this reading is the one OBSERVE assessed,
+    and the assessment is the one the request carries. `max_age_s` and `clock_skew_s` have no default."""
+
+    _expected = ObservationHandoff
+
+    def __init__(self, *, max_age_s: float, clock_skew_s: float) -> None:
+        for name, value in (("max_age_s", max_age_s), ("clock_skew_s", clock_skew_s)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be a finite number of seconds, zero or more (there is no default)")
+        if max_age_s <= 0:
+            raise ValueError("max_age_s must be more than zero")
+        self.max_age_s, self.clock_skew_s = float(max_age_s), float(clock_skew_s)
+        super().__init__("handoff.observe_to_perceive", _ALPHA)
+
+    def _bound_content(self, candidate: ObservationHandoff) -> Any:
+        return _plain({"vitals": asdict(candidate.vitals), "verdict": asdict(candidate.verdict),
+                       "audit_entry": candidate.audit_entry, "request": asdict(candidate.request)}, non_finite=True)
+
+    def _subject(self, candidate: ObservationHandoff) -> str:
+        return f"handoff:{getattr(candidate.vitals, 'patient_id', '')}"
+
+    def _judge(self, h: ObservationHandoff) -> tuple:
+        cns = self._cns
+        breach, retry = cns.GateOutcome.TERMINAL_BREACH, cns.GateOutcome.RETRY
+        from governance_chain import observation_digest
+        from observe_consolidated import ImmutableAuditLedger, decision_fingerprint
+
+        for name, value, kind in (("vitals", h.vitals, VitalsSnapshot), ("verdict", h.verdict, FusedVerdict),
+                                  ("request", h.request, PolicyRequest), ("audit_entry", h.audit_entry, dict)):
+            if not isinstance(value, kind):
+                return breach, f"the handoff's {name} is a {type(value).__name__}, not a {kind.__name__}"
+        v, fv, entry, req = h.vitals, h.verdict, h.audit_entry, h.request
+
+        # 1. the evidence is the entry this verdict names, unaltered
+        body = {k: val for k, val in entry.items() if k != "immutable_hash"}
+        if entry.get("immutable_hash") != ImmutableAuditLedger._digest(body) or entry.get("immutable_hash") != fv.audit_hash:
+            return breach, "the audit entry is not the one this verdict names, or it was altered"
+        data = entry.get("data") or {}
+        payload = {k: val for k, val in data.items() if k not in _AFTER_FINGERPRINT}
+        if not fv.decision_fingerprint or decision_fingerprint(payload) != fv.decision_fingerprint \
+                or data.get("decision_fingerprint") != fv.decision_fingerprint:
+            return breach, "the verdict's fingerprint does not recompute from OBSERVE's recorded evidence"
+        if data.get("state_commitment") != fv.state_commitment:
+            return breach, "the verdict's state commitment is not the one OBSERVE recorded"
+        # 2. the evidence is about this patient, and an abstention is never a stable assessment
+        if entry.get("patient_id") != v.patient_id:
+            return breach, "OBSERVE's evidence is about a different patient from the vitals handed over"
+        if fv.unassessable or fv.validation_faults or not fv.active_engines:
+            return retry, "OBSERVE did not fully assess this reading; no assessment is not a stable one"
+        # 3. ... and about this reading
+        if _json_round_trip(data.get("vitals")) != _json_round_trip(asdict(v)):
+            return breach, "OBSERVE's evidence is about a different reading from the vitals handed over"
+        # 4. the request is about this patient, this reading and this assessment
+        context = req.context or {}
+        if req.subject_id != v.patient_id or context.get("patient_id", v.patient_id) != v.patient_id:
+            return breach, "the request is about a different patient from the reading that justifies it"
+        if context.get("observation_digest") != observation_digest(v):
+            return breach, "the request does not commit to this reading (observation_digest)"
+        binding = context.get("observe_assessment") or {}
+        if binding.get("status") != "assessed":
+            return retry, "the request carries no assessment"
+        if binding.get("decision_fingerprint") != fv.decision_fingerprint \
+                or binding.get("state_commitment") != fv.state_commitment:
+            return breach, "the request carries a different assessment from the one OBSERVE made"
+        # 5. fresh, and not from before the reading
+        if req.timestamp is None:
+            return breach, "the request states no time, so the reading's age cannot be judged"
+        age = (req.timestamp - v.timestamp).total_seconds()
+        if age < -self.clock_skew_s:
+            return breach, f"the request is dated {-age:.0f}s before the reading that justifies it"
+        if age > self.max_age_s:
+            return retry, f"the reading is {age:.0f}s old (limit {self.max_age_s:g}s); a fresh one is needed"
+        return cns.GateOutcome.PASS, ""
+
+
+def _json_round_trip(value: Any) -> Any:
+    """What a value looks like after the engine's ledger stores it (JSON with default=str)."""
+    import json
+    return json.loads(json.dumps(value, default=str))
