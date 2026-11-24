@@ -159,12 +159,25 @@ class ScheduledJob:
 # CLINICAL POLICY: AGE-ADJUSTED PEDIATRIC NORMS
 # ============================================================================
 
+# PROVISIONAL EVIDENCE-BASED PROXIES -- NOT CLINICALLY VALIDATED. They stand in until a pediatric clinician signs off.
+# Heart rate, respiratory rate and fever were re-derived (Nov 2026) from published references; o2_low and the other
+# fever limits were reviewed and left as they were. Sources:
+#   Fleming et al., Lancet 2011;377:1011 (web appendix, tables 4-5): centiles of heart and respiratory rate in healthy
+#     children. A limit is placed so that a healthy child anywhere in the group is flagged by rate alone about 1% of
+#     the time or less (1st / 99th centile across the group's age span).
+#   Goldstein et al., Pediatr Crit Care Med 2005;6:2 (consensus): infant tachycardia >180, bradycardia <90-100.
+#   AAP, Pediatrics 2021;148:e2021052228: fever in a baby under 2 months is 38.0 C or above (the rule below uses ">",
+#     so the limit is 37.9 to catch a reading of exactly 38.0).
+#   WHO fast-breathing cutoffs (>=60 under 2 months, >=50 at 2-11 months, >=40 at 1-5 years) as a cross-check.
+# The old low heart-rate limit RAISED with age (80, 90, 95, 100), the wrong way round: heart rate falls with age, so a
+# healthy 8-year-old at 85 was flagged bradycardic. A group this wide cannot be exact ("child" spans 3 to 18 years, where
+# the 1st centile falls from 70 to 43), so these favour not crying wolf; a finer age split is the real fix.
 PEDIATRIC_NORMS = {
-    "neonatal": {"hr_high": 160, "hr_low": 80, "rr_high": 50, "o2_low": 90, "temp_high": 38.5},
-    "infant":   {"hr_high": 150, "hr_low": 90, "rr_high": 45, "o2_low": 90, "temp_high": 39.0},
-    "toddler":  {"hr_high": 140, "hr_low": 95, "rr_high": 40, "o2_low": 91, "temp_high": 39.0},
-    "child":    {"hr_high": 130, "hr_low": 100, "rr_high": 35, "o2_low": 92, "temp_high": 39.5},
-    "generic":  {"hr_high": 140, "hr_low": 95, "rr_high": 40, "o2_low": 91, "temp_high": 39.0},
+    "neonatal": {"hr_high": 180, "hr_low": 90, "rr_high": 60, "o2_low": 90, "temp_high": 37.9},
+    "infant":   {"hr_high": 175, "hr_low": 90, "rr_high": 60, "o2_low": 90, "temp_high": 39.0},
+    "toddler":  {"hr_high": 150, "hr_low": 75, "rr_high": 45, "o2_low": 91, "temp_high": 39.0},
+    "child":    {"hr_high": 130, "hr_low": 50, "rr_high": 35, "o2_low": 92, "temp_high": 39.5},
+    "generic":  {"hr_high": 160, "hr_low": 50, "rr_high": 40, "o2_low": 91, "temp_high": 39.0},
 }
 
 # FIX: explicit named threshold (was a fragile/magic 2.0 in z-score comparisons).
@@ -676,7 +689,9 @@ class RiskAdapters:
             score += 0.4
         elif vitals.oxygen_saturation < 92.0:
             score += 0.2
-        if vitals.heart_rate > 150 or vitals.heart_rate < 80:
+        # Age-aware (was a flat >150 / <80, which flagged a healthy school-age child at 78 and a healthy infant at 155).
+        hr_norms = PEDIATRIC_NORMS[get_age_group(vitals.context.get("age_months"))]
+        if vitals.heart_rate > hr_norms["hr_high"] or vitals.heart_rate < hr_norms["hr_low"]:
             score += 0.3
         initial_risk = min(score, 1.0)
         triggered.append(f"BASE_RISK: {initial_risk:.2f}")

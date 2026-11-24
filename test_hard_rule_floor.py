@@ -373,21 +373,22 @@ def test_a_setting_cannot_be_changed_after_the_cassette_is_built(name):
 
 # ---- decision D2: heart rate alone does not corroborate a low SpO2 -----------------------------------------------------
 
-HR_ONLY = (150, 86.0, 24, 37.0)        # SpO2 86 and a fast heart (toddler limit 140), breathing and temperature normal
-RR_TOO = (100, 86.0, 45, 37.0)         # SpO2 86 and fast breathing (toddler limit 40)
+HR_ONLY = (140, 86.0, 24, 37.0)        # SpO2 86 and a fast heart (child limit 130; run at age 60 months), breathing and temperature normal.
+                                       # Not a toddler: above the toddler limit (150) a heart rate also meets the behavioral engine's flat HR>150 + SpO2<88 pattern.
+RR_TOO = (100, 86.0, 50, 37.0)         # SpO2 86 and fast breathing (toddler limit 45)
 TEMP_TOO = (100, 86.0, 24, 39.1)       # SpO2 86 and fever
 
 
-def _second_reading_escalates(reading, eng):
-    return run([CALM, reading], eng, 15)[1].escalation_required
+def _second_reading_escalates(reading, eng, age=24):
+    return run([CALM, reading], eng, 15, age=age)[1].escalation_required
 
 
 def test_a_fast_heart_alone_does_not_corroborate_a_low_spo2_by_default():
     from clinical_settings import ClinicalSettings
-    assert not _second_reading_escalates(HR_ONLY, engine())
+    assert not _second_reading_escalates(HR_ONLY, engine(), age=60)
     on = ObserveClinicalEngine(cassette=PediatricCassette(settings=ClinicalSettings(
         hard_rule_confirm_window=3, heart_rate_corroborates=True)))
-    assert _second_reading_escalates(HR_ONLY, on)
+    assert _second_reading_escalates(HR_ONLY, on, age=60)
 
 
 def test_fast_breathing_or_fever_beside_a_low_spo2_still_corroborates():
@@ -395,7 +396,7 @@ def test_fast_breathing_or_fever_beside_a_low_spo2_still_corroborates():
 
 
 def test_heart_rate_plus_another_channel_corroborates():
-    assert _second_reading_escalates((150, 86.0, 45, 37.0), engine())
+    assert _second_reading_escalates((160, 86.0, 50, 37.0), engine())
 
 
 def test_an_unrecognised_finding_still_corroborates_the_direction_that_escalates():

@@ -42,8 +42,8 @@ def test_the_heuristic_defaults_are_unchanged():
 def test_a_norms_table_changes_what_the_heuristic_flags():
     norms = copy.deepcopy(PEDIATRIC_NORMS)
     norms["child"]["hr_low"] = 60                                           # a clinician's decision, not ours
-    assert any("BRADYCARDIA" in r for r in RiskAdapters.heuristic(vit(hr=70, age=100)).triggered_rules)
-    assert not any("BRADYCARDIA" in r for r in RiskAdapters.heuristic(vit(hr=70, age=100), norms=norms).triggered_rules)
+    assert not any("BRADYCARDIA" in r for r in RiskAdapters.heuristic(vit(hr=55, age=100)).triggered_rules)
+    assert any("BRADYCARDIA" in r for r in RiskAdapters.heuristic(vit(hr=55, age=100), norms=norms).triggered_rules)
 
 
 def test_the_critical_o2_and_hypothermia_lines_can_be_moved():
@@ -95,7 +95,7 @@ def test_invalid_settings_are_refused(bad):
 def test_settings_load_from_json_and_partial_norms_merge_over_the_defaults(tmp_path):
     s = ClinicalSettings.from_json(json.dumps({"max_age_months": 252, "norms": {"child": {"hr_high": 125}}}))
     assert s.max_age_months == 252 and s.norms["child"]["hr_high"] == 125
-    assert s.norms["child"]["hr_low"] == 100 and s.norms["infant"]["hr_high"] == 150
+    assert s.norms["child"]["hr_low"] == 50 and s.norms["infant"]["hr_high"] == 175
     for bad in ("[1, 2]", "{not json"):
         with pytest.raises(SettingsError):
             ClinicalSettings.from_json(bad)
@@ -157,7 +157,7 @@ def test_equal_values_are_equal_everywhere_whatever_their_spelling():
 
 def test_weakenings_name_only_the_settings_that_alert_less():
     s = ClinicalSettings.from_mapping({
-        "norms": {"child": {"hr_high": 140, "hr_low": 90, "o2_low": 90, "rr_high": 30}},
+        "norms": {"child": {"hr_high": 140, "hr_low": 40, "o2_low": 90, "rr_high": 30}},
         "hard_rule_confirm_window": 2, "hard_rule_corroboration": False, "outside_population": "assess_anyway"})
     assert s.weakenings() == sorted([
         "norms.child.hr_high", "norms.child.hr_low", "norms.child.o2_low", "hard_rule_confirm_window",

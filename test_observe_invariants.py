@@ -382,7 +382,7 @@ class T2b_PartialAssessmentOverlayIsSafe(unittest.TestCase):
                                     heart_rate=210.0, timestamp=t0))
         self.assertEqual(engine._patient_policies["bpf"].current_regime, OperationalRegime.STABLE)
         recovered = engine.evaluate(make_vitals(patient_id="bpf", oxygen_saturation=75.0,
-                                                heart_rate=150.0, respiratory_rate=45.0,
+                                                heart_rate=160.0, respiratory_rate=50.0,
                                                 timestamp=t0 + timedelta(seconds=600)))
         self.assertEqual(recovered.regime, OperationalRegime.CRITICAL)
         self.assertTrue(recovered.escalation_required)

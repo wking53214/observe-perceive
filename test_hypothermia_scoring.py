@@ -25,7 +25,7 @@ def test_hypothermia_scores_below_the_hard_rule_line_on_its_own():
 
 
 def test_hypothermia_with_one_more_finding_reaches_the_hard_rule_line():
-    out = RiskAdapters.heuristic(snap(rr=60))                        # a raised respiratory rate adds 0.15
+    out = RiskAdapters.heuristic(snap(rr=70))                        # a raised respiratory rate adds 0.15
     assert any(r.startswith("HYPOTHERMIA") for r in out.triggered_rules) and any(r.startswith("TACHYPNEA") for r in out.triggered_rules)
     assert round(out.risk_score, 2) == 0.55 and PediatricCassette().hard_rule_fired([out])
 
@@ -33,7 +33,7 @@ def test_hypothermia_with_one_more_finding_reaches_the_hard_rule_line():
 def test_what_that_means_for_a_patient_alone_never_paged_with_company_paged_at_once():
     alone, company = ObserveClinicalEngine(), ObserveClinicalEngine()
     alone_events = [alone.evaluate(snap(minute=k)) for k in range(3)]
-    company_events = [company.evaluate(snap(rr=60, minute=k)) for k in range(3)]
+    company_events = [company.evaluate(snap(rr=70, minute=k)) for k in range(3)]
     assert [v.regime.value for v in alone_events] == ["stable"] * 3 and not any(v.escalation_required for v in alone_events)
     assert [v.regime.value for v in company_events] == ["warning"] * 3
     assert [v.escalation_required for v in company_events] == [True, False, False]       # paged on the first reading only
