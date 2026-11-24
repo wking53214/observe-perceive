@@ -61,7 +61,7 @@ HYPOTHERMIA, etc.", but hypothermia alone scores 0.4, so it is **not** a hard ru
 
 ### 1.4 Other limits of the current design
 
-- One "child" norms row covers 3 to 18 years (healthy 12 year old at HR 70 is flagged bradycardia).
+- The old single "child" norms row (3 to 18 years) was split on 2026-11-23 into preschool, school and adolescent rows; the new rows are provisional proxies and still need clinical sign-off.
 - Pulse oximetry is the key input and is known to read differently across patient groups (skin pigmentation, perfusion, motion). The
   engine has no input for any of that and no per-group evaluation; validation (section 2) must stratify by whatever the hospital records.
 - Heart rate alone can corroborate a hard rule, but it usually shares the probe with SpO2 (open question, unanswered).
@@ -103,7 +103,7 @@ against the code, then a second claims check that corrected the provenance of R1
 | R01 | Norms, neonatal (< 3 mo) | HR 90 to 180, RR < 60, SpO2 >= 90, T < 38.0 | Re-derived 2026-11-23 from Fleming 2011, Goldstein 2005, AAP 2021 (provisional proxy, no clinician sign-off); see comment above `PEDIATRIC_NORMS`. SpO2 unchanged, no source | yes |
 | R02 | Norms, infant (3 to < 12 mo) | HR 90 to 175, RR < 60, SpO2 >= 90, T <= 39.0 | same; SpO2 and T unchanged | yes |
 | R03 | Norms, toddler (12 to < 36 mo) | HR 75 to 150, RR < 45, SpO2 >= 91, T <= 39.0 | same; SpO2 and T unchanged | yes |
-| R04 | Norms, child (>= 36 mo, to the population bound) | HR 50 to 130, RR < 35, SpO2 >= 92, T <= 39.5 | same; only the low HR changed (it was 100, which flagged most healthy school-age children). One row for 3 to 18 years is too wide: the 1st centile falls from 70 to 43 across it | yes |
+| R04 | Norms, preschool (3 to <6 y), school (6 to <12 y), adolescent (12 y to the population bound) | preschool HR 65 to 135, RR < 33; school HR 50 to 125, RR < 27; adolescent HR 45 to 115, RR < 26; SpO2 >= 92 and T <= 39.5 in all three | one "child" row, HR 100 to 130 (low HR 100 flagged most healthy school-age children), RR < 35 | yes. Adolescent HR high (115 vs Fleming 99th centile 108) and RR high (26 vs 23) are looser than the evidence because the faulted-channel placeholders (HR 110, RR 25) must sit inside every window |
 | R05 | Norms, generic (age unknown) | HR 50 to 160, RR < 40, SpO2 >= 91, T <= 39.0 | same; HR only | yes |
 | R06 | Age-group boundaries | 3, 12, 36 months | none | yes |
 | R07 | Supported population bound | 216 months (18 y), floor WARNING | "18 years" (a default I chose in #84, not a finding) | yes |

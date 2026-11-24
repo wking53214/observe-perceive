@@ -21,13 +21,14 @@ def vit(hr=100, o2=98.0, rr=24, t=37.0, age=24, pid="P1"):
 # ---- step 1: the engines take the settings as arguments, and the defaults are exactly what they were ---------------------
 
 def test_the_age_bounds_default_to_the_original_table():
-    assert AGE_GROUP_UPPER_MONTHS == (3, 12, 36)
-    assert [get_age_group(m) for m in (None, 0, 2.9, 3, 11, 12, 35, 36, 500)] == [
-        "generic", "neonatal", "neonatal", "infant", "infant", "toddler", "toddler", "child", "child"]
+    assert AGE_GROUP_UPPER_MONTHS == (3, 12, 36, 72, 144)
+    assert [get_age_group(m) for m in (None, 0, 2.9, 3, 11, 12, 35, 36, 71, 72, 143, 144, 500)] == [
+        "generic", "neonatal", "neonatal", "infant", "infant", "toddler", "toddler", "preschool", "preschool",
+        "school", "school", "adolescent", "adolescent"]
 
 
 def test_the_age_bounds_can_be_moved():
-    assert get_age_group(20, (3, 12, 24)) == "toddler" and get_age_group(30, (3, 12, 24)) == "child"
+    assert get_age_group(20, (3, 12, 24, 72, 144)) == "toddler" and get_age_group(30, (3, 12, 24, 72, 144)) == "preschool"
     assert get_age_group(30) == "toddler"
 
 
@@ -41,7 +42,7 @@ def test_the_heuristic_defaults_are_unchanged():
 
 def test_a_norms_table_changes_what_the_heuristic_flags():
     norms = copy.deepcopy(PEDIATRIC_NORMS)
-    norms["child"]["hr_low"] = 60                                           # a clinician's decision, not ours
+    norms["school"]["hr_low"] = 60                                           # a clinician's decision, not ours
     assert not any("BRADYCARDIA" in r for r in RiskAdapters.heuristic(vit(hr=55, age=100)).triggered_rules)
     assert any("BRADYCARDIA" in r for r in RiskAdapters.heuristic(vit(hr=55, age=100), norms=norms).triggered_rules)
 
@@ -55,11 +56,13 @@ def test_the_critical_o2_and_hypothermia_lines_can_be_moved():
 
 def test_the_bayesian_engine_reads_the_same_settings():
     norms = copy.deepcopy(PEDIATRIC_NORMS)
-    norms["child"].update(hr_high=200, hr_low=40)
+    norms["school"].update(hr_high=200, hr_low=40)
     base = RiskAdapters.bayesian(vit(hr=135, age=100))
     tuned = RiskAdapters.bayesian(vit(hr=135, age=100), norms=norms)
     assert base.risk_score != tuned.risk_score
-    assert RiskAdapters.bayesian(vit(hr=135, age=30), age_bounds=(3, 12, 24)).risk_score == base.risk_score
+    # moving the school boundary up makes an 8 year old a preschooler: judged exactly as a 5 year old is by default
+    assert RiskAdapters.bayesian(vit(hr=135, age=100), age_bounds=(3, 12, 36, 120, 144)).risk_score == \
+        RiskAdapters.bayesian(vit(hr=135, age=60)).risk_score
 
 
 # ---- step 2: the settings object -------------------------------------------------------------------------------------
@@ -82,10 +85,10 @@ def test_defaults_are_what_the_system_already_used():
     {"hard_rule_confirm_window": 1001}, {"hard_rule_corroboration": "no"},
     {"hard_rule_corroboration_margin": 2}, {"hard_rule_corroboration_margin": 0.0},
     {"norms": {"adult": {"hr_high": 100}}},                   # unknown group
-    {"norms": {"child": {"hr_hgh": 100}}},                    # unknown key
-    {"norms": {"child": {"hr_high": 105}}},                   # would make the faulted-channel placeholder (110) a finding
-    {"norms": {"child": {"o2_low": 99}}},
-    {"norms": {"child": {"hr_low": 120}}},
+    {"norms": {"school": {"hr_hgh": 100}}},                    # unknown key
+    {"norms": {"school": {"hr_high": 105}}},                   # would make the faulted-channel placeholder (110) a finding
+    {"norms": {"school": {"o2_low": 99}}},
+    {"norms": {"school": {"hr_low": 120}}},
 ])
 def test_invalid_settings_are_refused(bad):
     with pytest.raises(SettingsError):
@@ -93,9 +96,9 @@ def test_invalid_settings_are_refused(bad):
 
 
 def test_settings_load_from_json_and_partial_norms_merge_over_the_defaults(tmp_path):
-    s = ClinicalSettings.from_json(json.dumps({"max_age_months": 252, "norms": {"child": {"hr_high": 125}}}))
-    assert s.max_age_months == 252 and s.norms["child"]["hr_high"] == 125
-    assert s.norms["child"]["hr_low"] == 50 and s.norms["infant"]["hr_high"] == 175
+    s = ClinicalSettings.from_json(json.dumps({"max_age_months": 252, "norms": {"school": {"hr_high": 120}}}))
+    assert s.max_age_months == 252 and s.norms["school"]["hr_high"] == 120
+    assert s.norms["school"]["hr_low"] == 50 and s.norms["infant"]["hr_high"] == 175
     for bad in ("[1, 2]", "{not json"):
         with pytest.raises(SettingsError):
             ClinicalSettings.from_json(bad)
@@ -119,11 +122,11 @@ def test_settings_cannot_be_changed_after_construction():
     with pytest.raises(Exception):
         s.critical_o2_below = 70.0
     with pytest.raises(TypeError):
-        s.norms["child"]["hr_high"] = 999
+        s.norms["school"]["hr_high"] = 999
     with pytest.raises(TypeError):
-        s.norms["child"] = {}
-    s.as_dict()["norms"]["child"]["hr_high"] = 999            # a copy, not the live table
-    assert s.norms["child"]["hr_high"] == 130
+        s.norms["school"] = {}
+    s.as_dict()["norms"]["school"]["hr_high"] = 999            # a copy, not the live table
+    assert s.norms["school"]["hr_high"] == 125
 
 
 @pytest.mark.parametrize("bad", [
@@ -145,24 +148,24 @@ def test_every_value_participates_in_the_digest():
                    {"hard_rule_confirm_window": 4}, {"outside_population": "assess_anyway"},
                    {"hard_rule_corroboration": False}, {"hard_rule_corroboration_margin": 0.2},
                    {"probe_off_spo2_at_or_below": 1.0},
-                   {"norms": {"generic": {"temp_high": 38.9}}}, {"age_group_upper_months": (4, 12, 36)}):
+                   {"norms": {"generic": {"temp_high": 38.9}}}, {"age_group_upper_months": (4, 12, 36, 72, 144)}):
         assert ClinicalSettings.from_mapping(change).digest() != base, change
 
 
 def test_equal_values_are_equal_everywhere_whatever_their_spelling():
-    a = ClinicalSettings.from_mapping({"age_group_upper_months": [3.0, 12.0, 36.0], "max_age_months": 216,
+    a = ClinicalSettings.from_mapping({"age_group_upper_months": [3.0, 12.0, 36.0, 72.0, 144.0], "max_age_months": 216,
                                        "critical_o2_below": 88.0})
     assert a.digest() == ClinicalSettings().digest() and a.non_default() == {}
 
 
 def test_weakenings_name_only_the_settings_that_alert_less():
     s = ClinicalSettings.from_mapping({
-        "norms": {"child": {"hr_high": 140, "hr_low": 40, "o2_low": 90, "rr_high": 30}},
+        "norms": {"school": {"hr_high": 140, "hr_low": 40, "o2_low": 90, "rr_high": 26}},
         "hard_rule_confirm_window": 2, "hard_rule_corroboration": False, "outside_population": "assess_anyway"})
     assert s.weakenings() == sorted([
-        "norms.child.hr_high", "norms.child.hr_low", "norms.child.o2_low", "hard_rule_confirm_window",
-        "hard_rule_corroboration", "outside_population"])                       # rr_high 30 < 35 alerts MORE
-    assert "norms.child.rr_high" in s.non_default()
+        "norms.school.hr_high", "norms.school.hr_low", "norms.school.o2_low", "hard_rule_confirm_window",
+        "hard_rule_corroboration", "outside_population"])                       # rr_high 26 < 27 alerts MORE
+    assert "norms.school.rr_high" in s.non_default()
 
 
 @pytest.mark.parametrize("change,weaker", [
@@ -173,7 +176,7 @@ def test_weakenings_name_only_the_settings_that_alert_less():
     ({"max_age_months": 300}, True),                  # fewer patients get the finding
     ({"max_age_months": None}, True),
     ({"max_age_months": 100}, False),
-    ({"age_group_upper_months": (4, 12, 36)}, True),  # direction cannot be shown to be safe, so it is listed
+    ({"age_group_upper_months": (4, 12, 36, 72, 144)}, True),  # direction cannot be shown to be safe, so it is listed
     ({"hard_rule_corroboration_margin": 0.3}, True),
     ({"hard_rule_corroboration_margin": 0.001}, False),
     ({"require_age": True}, False),
@@ -256,11 +259,11 @@ def test_hard_rule_values_come_from_the_settings_or_the_arguments_never_both():
 def test_a_tuned_norm_changes_the_finding_and_is_named_in_the_identity():
     child = dict(age=60, hr=128)
     base = ObserveClinicalEngine().evaluate(snap(**child))
-    tuned = engine(norms={"child": {"hr_high": 125}}).evaluate(snap(**child))
+    tuned = engine(norms={"preschool": {"hr_high": 125}}).evaluate(snap(**child))
     assert not any("TACHYCARDIA" in r for r in base.triggered_rules)
     assert any("TACHYCARDIA: 128 > 125" in r for r in tuned.triggered_rules)         # 125, not 125.0
-    c = PediatricCassette(settings=ClinicalSettings.from_mapping({"norms": {"child": {"hr_high": 125}}}))
-    assert c.identity_extras["setting.norms.child.hr_high"] == "125"
+    c = PediatricCassette(settings=ClinicalSettings.from_mapping({"norms": {"preschool": {"hr_high": 125}}}))
+    assert c.identity_extras["setting.norms.preschool.hr_high"] == "125"
     assert len(c.identity_extras["settings_digest"]) == 64
     assert "settings_weaker" not in c.identity_extras                               # a lower hr_high alerts more
     assert base.decision_fingerprint != tuned.decision_fingerprint
@@ -277,25 +280,34 @@ def test_a_tuned_critical_o2_line_moves_the_hard_rule_and_is_marked_weaker():
 
 
 def test_every_age_group_boundary_is_adjustable():
-    assert get_age_group(4, (6, 12, 36)) == "neonatal" and get_age_group(4) == "infant"
-    assert get_age_group(14, (3, 18, 36)) == "infant" and get_age_group(14) == "toddler"
-    assert get_age_group(30, (3, 12, 48)) == "toddler" and get_age_group(40, (3, 12, 48)) == "toddler"
-    assert get_age_group(40) == "child"
+    assert get_age_group(4, (6, 12, 36, 72, 144)) == "neonatal" and get_age_group(4) == "infant"
+    assert get_age_group(14, (3, 18, 36, 72, 144)) == "infant" and get_age_group(14) == "toddler"
+    assert get_age_group(30, (3, 12, 48, 72, 144)) == "toddler" and get_age_group(40, (3, 12, 48, 72, 144)) == "toddler"
+    assert get_age_group(40) == "preschool"
+    assert get_age_group(80, (3, 12, 36, 96, 144)) == "preschool" and get_age_group(80) == "school"
+    assert get_age_group(130, (3, 12, 36, 72, 156)) == "school" and get_age_group(130) == "school" and get_age_group(150, (3, 12, 36, 72, 156)) == "school" and get_age_group(150) == "adolescent"
 
 
 def test_a_norm_given_as_a_float_is_the_same_value_everywhere():
-    out = engine(norms={"child": {"hr_high": 125.0}}).evaluate(snap(age=60, hr=128))
+    out = engine(norms={"preschool": {"hr_high": 125.0}}).evaluate(snap(age=60, hr=128))
     assert any(r == "TACHYCARDIA: 128 > 125" for r in out.triggered_rules)          # 125, not 125.0
-    same = ClinicalSettings.from_mapping({"norms": {"child": {"hr_high": 125.0}}})
-    assert same.digest() == ClinicalSettings.from_mapping({"norms": {"child": {"hr_high": 125}}}).digest()
-    assert type(same.norms["child"]["hr_high"]) is int
+    same = ClinicalSettings.from_mapping({"norms": {"preschool": {"hr_high": 125.0}}})
+    assert same.digest() == ClinicalSettings.from_mapping({"norms": {"preschool": {"hr_high": 125}}}).digest()
+    assert type(same.norms["preschool"]["hr_high"]) is int
 
 
 def test_age_group_boundaries_are_adjustable_through_the_cassette():
-    base = RiskAdapters.heuristic(snap(hr=135, age=30)).triggered_rules
-    out = engine(age_group_upper_months=(3, 12, 24)).evaluate(snap(hr=135, age=30))
-    assert any("TACHYCARDIA: 135 > 130" in r for r in out.triggered_rules)          # now judged on the 'child' row
-    assert not any("TACHYCARDIA" in r for r in base)                                # toddler row allows up to 140
+    base = RiskAdapters.heuristic(snap(hr=140, age=30)).triggered_rules
+    out = engine(age_group_upper_months=(3, 12, 24, 72, 144)).evaluate(snap(hr=140, age=30))
+    assert any("TACHYCARDIA: 140 > 135" in r for r in out.triggered_rules)          # now judged on the 'preschool' row
+    assert not any("TACHYCARDIA" in r for r in base)                                # toddler row allows up to 150
+
+
+def test_the_retired_child_group_gets_a_helpful_error():
+    with pytest.raises(SettingsError, match="split into preschool, school and adolescent"):
+        ClinicalSettings.from_mapping({"norms": {"child": {"hr_high": 125}}})
+    with pytest.raises(SettingsError, match="5 increasing"):
+        ClinicalSettings(age_group_upper_months=(3, 12, 36))
 
 
 def test_the_settings_a_cassette_holds_cannot_be_reassigned():

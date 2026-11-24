@@ -22,11 +22,11 @@ hide sepsis). These are pinned, so any change in the list fails the build.
 **Why it matters:** these are the system's admitted blind spots. **Decision needed:** which of the seven matter on your unit. Each needs a
 rule, more history in the engine, or a written "this is a known limit".
 
-## 3. One "child" row covers ages 3 to 18 (C2)
+## 3. One "child" row covered ages 3 to 18 (C2): split 2026-11-23, needs sign-off
 
-A healthy 12 year old with a heart rate of 70 is reported as too slow, because the single child row was written for a young child.
-**Why it matters:** false alarms teach staff to ignore alerts. **Decision needed:** the age bands and normal ranges you want (the age
-boundaries are already a setting; adding a new row needs your numbers).
+A healthy 12 year old with a heart rate of 70 used to be reported as too slow, because the single child row was written for a young child. It is now three rows (preschool, school, adolescent) with provisional limits from published references.
+**Why it matters:** false alarms teach staff to ignore alerts. **Decision needed:** confirm or change the new age bands and normal ranges (the age
+boundaries are a setting; adding a new row needs your numbers).
 
 ## 4. Low body temperature alarms only with company (C18)
 
