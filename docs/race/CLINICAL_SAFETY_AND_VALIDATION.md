@@ -100,11 +100,11 @@ against the code, then a second claims check that corrected the provenance of R1
 
 | ID | Rule | Value | Provenance stated | Adjustable |
 |---|---|---|---|---|
-| R01 | Norms, neonatal (< 3 mo) | HR 80 to 160, RR < 50, SpO2 >= 90, T <= 38.5 | "CLINICAL POLICY: AGE-ADJUSTED PEDIATRIC NORMS"; no source | yes |
-| R02 | Norms, infant (3 to < 12 mo) | HR 90 to 150, RR < 45, SpO2 >= 90, T <= 39.0 | same | yes |
-| R03 | Norms, toddler (12 to < 36 mo) | HR 95 to 140, RR < 40, SpO2 >= 91, T <= 39.0 | same | yes |
-| R04 | Norms, child (>= 36 mo, to the population bound) | HR 100 to 130, RR < 35, SpO2 >= 92, T <= 39.5 | same | yes |
-| R05 | Norms, generic (age unknown) | HR 95 to 140, RR < 40, SpO2 >= 91, T <= 39.0 | same | yes |
+| R01 | Norms, neonatal (< 3 mo) | HR 90 to 180, RR < 60, SpO2 >= 90, T < 38.0 | Re-derived 2026-11-23 from Fleming 2011, Goldstein 2005, AAP 2021 (provisional proxy, no clinician sign-off); see comment above `PEDIATRIC_NORMS`. SpO2 unchanged, no source | yes |
+| R02 | Norms, infant (3 to < 12 mo) | HR 90 to 175, RR < 60, SpO2 >= 90, T <= 39.0 | same; SpO2 and T unchanged | yes |
+| R03 | Norms, toddler (12 to < 36 mo) | HR 75 to 150, RR < 45, SpO2 >= 91, T <= 39.0 | same; SpO2 and T unchanged | yes |
+| R04 | Norms, child (>= 36 mo, to the population bound) | HR 50 to 130, RR < 35, SpO2 >= 92, T <= 39.5 | same; only the low HR changed (it was 100, which flagged most healthy school-age children). One row for 3 to 18 years is too wide: the 1st centile falls from 70 to 43 across it | yes |
+| R05 | Norms, generic (age unknown) | HR 50 to 160, RR < 40, SpO2 >= 91, T <= 39.0 | same; HR only | yes |
 | R06 | Age-group boundaries | 3, 12, 36 months | none | yes |
 | R07 | Supported population bound | 216 months (18 y), floor WARNING | "18 years" (a default I chose in #84, not a finding) | yes |
 | R08 | SpO2 hard rule (CRITICAL_O2) | SpO2 < 88, +0.5 | none | yes |

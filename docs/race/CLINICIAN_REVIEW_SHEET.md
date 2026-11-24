@@ -15,21 +15,23 @@ Where the engine reports **stable and never pages**, that is the question: is th
 
 ## A. What the engine does today, and your call
 
+> **Changed 2026-11-23 (heart rate, respiratory rate and newborn fever limits re-derived from published references; see the comment above `PEDIATRIC_NORMS`).** Three rows moved, all from caution to stable. **S10** is the fix: a healthy 12-year-old at HR 70 was being flagged because the low heart-rate limit was set to 100 for every child. **S1 and S5 are a loss of sensitivity to look at**: both were caught before only because the old, very narrow heart-rate window made the Bayesian engine swing hard. S5 (a 5-year-old at HR 45) is still flagged as bradycardic by the heuristic; it simply no longer lifts the regime. The "child" group spans 3 to 18 years, which is too wide for one pair of limits; splitting it is the proper fix.
+
 Mark one: **F** fine as it is, **W** should page at WARNING, **C** should page at CRITICAL, **X** something else (say what).
 If you mark W, C or X, give the number or rule you want in the last column; the settings that exist today are listed in section B.
 
 | # | Patient and reading (age; HR, RR, T, SpO2) | Regime on readings 1, 2, 3 | Paged | Your call (F / W / C / X) | Threshold or rule you want |
 |---|---|---|---|---|---|
-| S1 | infant 6 months; HR 190, RR 55, T 39.8, SpO2 97 | stable, caution, caution | never | | |
+| S1 | infant 6 months; HR 190, RR 55, T 39.8, SpO2 97 | stable, stable, stable | never | | |
 | S2 | toddler 24 months; HR 160, RR 42, T 38.9, SpO2 95 | stable, stable, stable | never | | |
 | S3 | child 5 years; HR 140, RR 30, T 38.5, SpO2 91 | stable, stable, stable | never | | |
 | S4 | child 5 years; HR 200, RR 22, T 37.0, SpO2 98 | stable, stable, stable | never | | |
-| S5 | child 5 years; HR 45, RR 18, T 37.0, SpO2 98 | stable, caution, caution | never | | |
+| S5 | child 5 years; HR 45, RR 18, T 37.0, SpO2 98 | stable, stable, stable | never | | |
 | S6 | infant 6 months; HR 130, RR 35, T 37.0, SpO2 89 | stable, stable, stable | never | | |
 | S7 | neonate 1 month; HR 140, RR 40, T 34.5, SpO2 97 | stable, stable, stable | never | | |
 | S8 | neonate 1 month; HR 140, RR 40, T 38.8, SpO2 97 | stable, stable, stable | never | | |
 | S9 | toddler 24 months; HR 120, RR 70, T 37.0, SpO2 96 | stable, stable, stable | never | | |
-| S10 | child 12 years; HR 70, RR 18, T 37.0, SpO2 98 (a healthy adolescent) | stable, caution, caution | never | | |
+| S10 | child 12 years; HR 70, RR 18, T 37.0, SpO2 98 (a healthy adolescent) | stable, stable, stable | never | | |
 | S11 | adult 40 years; HR 70, RR 14, T 37.0, SpO2 98 (out of scope) | warning, warning, warning | reading 1 | | |
 | S12 | child 5 years; HR 100, RR 24, T 37.0, SpO2 86 | warning, warning, warning | reading 1 | | |
 | | *your own cases* | | | | |
@@ -62,7 +64,7 @@ write in the last column, behind a setting, and the case is pinned in `test_sing
 
 | Rule | Where it lives | Today | Accept / change to |
 |---|---|---|---|
-| The norms table, five rows | `PEDIATRIC_NORMS` | neonatal HR 80 to 160, RR < 50, SpO2 >= 90, T <= 38.5; infant HR 90 to 150, RR < 45, SpO2 >= 90, T <= 39.0; toddler HR 95 to 140, RR < 40, SpO2 >= 91, T <= 39.0; child HR 100 to 130, RR < 35, SpO2 >= 92, T <= 39.5 | |
+| The norms table, five rows | `PEDIATRIC_NORMS` | neonatal HR 90 to 180, RR < 60, SpO2 >= 90, T < 38.0; infant HR 90 to 175, RR < 60, SpO2 >= 90, T <= 39.0; toddler HR 75 to 150, RR < 45, SpO2 >= 91, T <= 39.0; child HR 50 to 130, RR < 35, SpO2 >= 92, T <= 39.5 (heart rate, respiratory rate and the newborn fever line re-derived 2026-11-23 as provisional proxies, no clinician sign-off; see the comment above `PEDIATRIC_NORMS`) | |
 | Age boundaries | `age_group_upper_months` | 3, 12, 36 months | |
 | SpO2 hard line; hypothermia line | `critical_o2_below`, `hypothermia_below` | 88; 35.0 (hypothermia alone scores below a hard rule, so it does not page by itself: S7) | |
 | Named syndromes (septic shock, respiratory distress, hypovolemic shock) | `RiskAdapters.behavioral_vaccine` | septic shock: SpO2 < 92 and HR > 140 and RR > 35 and T > 38.5; respiratory distress: SpO2 < 90 and RR > 45; hypovolemic: HR > 150 and SpO2 < 88. **Marked "pending pediatrician sign-off" in the code** | |

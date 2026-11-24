@@ -18,16 +18,16 @@ T0 = datetime(2026, 11, 4, 8, 0, tzinfo=timezone.utc)
 
 # id: (age_months, hr, spo2, rr, temp, regimes over three readings, reading on which the first page happens or None)
 CASES = {
-    "S1 infant 6 mo, HR 190, RR 55, T 39.8, SpO2 97": (6, 190, 97, 55, 39.8, ["stable", "caution", "caution"], None),
+    "S1 infant 6 mo, HR 190, RR 55, T 39.8, SpO2 97": (6, 190, 97, 55, 39.8, ["stable", "stable", "stable"], None),
     "S2 toddler 24 mo, HR 160, RR 42, T 38.9, SpO2 95": (24, 160, 95, 42, 38.9, ["stable", "stable", "stable"], None),
     "S3 child 5 y, HR 140, RR 30, T 38.5, SpO2 91": (60, 140, 91, 30, 38.5, ["stable", "stable", "stable"], None),
     "S4 child 5 y, HR 200, other channels normal": (60, 200, 98, 22, 37.0, ["stable", "stable", "stable"], None),
-    "S5 child 5 y, HR 45, other channels normal": (60, 45, 98, 18, 37.0, ["stable", "caution", "caution"], None),
+    "S5 child 5 y, HR 45, other channels normal": (60, 45, 98, 18, 37.0, ["stable", "stable", "stable"], None),
     "S6 infant 6 mo, SpO2 89, other channels normal": (6, 130, 89, 35, 37.0, ["stable", "stable", "stable"], None),
     "S7 neonate 1 mo, T 34.5, other channels normal": (1, 140, 97, 40, 34.5, ["stable", "stable", "stable"], None),
     "S8 neonate 1 mo, T 38.8, other channels normal": (1, 140, 97, 40, 38.8, ["stable", "stable", "stable"], None),
     "S9 toddler 24 mo, RR 70, other channels normal": (24, 120, 96, 70, 37.0, ["stable", "stable", "stable"], None),
-    "S10 child 12 y, HR 70, other channels normal (a healthy adolescent)": (144, 70, 98, 18, 37.0, ["stable", "caution", "caution"], None),
+    "S10 child 12 y, HR 70, other channels normal (a healthy adolescent)": (144, 70, 98, 18, 37.0, ["stable", "stable", "stable"], None),
     "S11 adult 40 y, HR 70, other channels normal (out of scope)": (480, 70, 98, 14, 37.0, ["warning", "warning", "warning"], 1),
     "S12 child 5 y, SpO2 86, other channels normal": (60, 100, 86, 24, 37.0, ["warning", "warning", "warning"], 1),
 }

@@ -264,8 +264,8 @@ class TestValidChannelEmergencyDuringAFault(unittest.TestCase):
     def test_a_bypass_that_fires_during_a_fault_leaves_the_next_real_crisis_pageable(self):
         engine = ObserveClinicalEngine()
         engine.evaluate(make_vitals(patient_id="next", **_HARD_RULE_ON_VALID))
-        crisis = engine.evaluate(make_vitals(patient_id="next", oxygen_saturation=75.0, heart_rate=150.0,
-                                             respiratory_rate=45.0, timestamp=T0 + timedelta(seconds=600)))
+        crisis = engine.evaluate(make_vitals(patient_id="next", oxygen_saturation=75.0, heart_rate=160.0,
+                                             respiratory_rate=50.0, timestamp=T0 + timedelta(seconds=600)))
         self.assertEqual(crisis.regime, OperationalRegime.CRITICAL)
         self.assertTrue(crisis.escalation_required)
 
