@@ -106,9 +106,9 @@ def test_a_repeat_is_an_event_within_an_hour_of_the_same_patients_last():
 
 
 def test_age_groups_follow_the_settings_boundaries_not_the_defaults():
-    wider = ClinicalSettings(age_group_upper_months=(3, 12, 120))             # a 5 year old is a toddler under these bounds
+    wider = ClinicalSettings(age_group_upper_months=(3, 12, 120, 130, 140))             # a 5 year old is a toddler under these bounds
     base, moved = replay([V("A", 0, *HYPOXIC_CHILD)]), replay([V("A", 0, *HYPOXIC_CHILD)], settings=wider)
-    assert base.events_by_age_group == {"child": 1} and moved.events_by_age_group == {"toddler": 1}
+    assert base.events_by_age_group == {"preschool": 1} and moved.events_by_age_group == {"toddler": 1}
 
 
 def test_the_repeat_window_includes_exactly_one_hour_and_no_more():
@@ -128,7 +128,7 @@ def test_first_reading_events_and_age_groups_are_counted():
     readings = [V("A", 0, *ADULT), V("B", 0, *CRITICAL_TODDLER), V("C", 0, *CRITICAL_TODDLER[:4], age=None)]
     report = replay(readings)
     assert report.escalation_events == 3 and report.events_on_first_reading == 3
-    assert report.events_by_age_group == {"child": 1, "generic": 1, "toddler": 1}
+    assert report.events_by_age_group == {"adolescent": 1, "generic": 1, "toddler": 1}
     assert report.events_by_regime["warning"] == 1
     assert "OUTSIDE_SUPPORTED_POPULATION" in report.events_by_rule and not any(":" in name for name in report.events_by_rule)   # names, not numbers
 

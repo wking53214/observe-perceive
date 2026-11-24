@@ -170,13 +170,19 @@ class ScheduledJob:
 #     so the limit is 37.9 to catch a reading of exactly 38.0).
 #   WHO fast-breathing cutoffs (>=60 under 2 months, >=50 at 2-11 months, >=40 at 1-5 years) as a cross-check.
 # The old low heart-rate limit RAISED with age (80, 90, 95, 100), the wrong way round: heart rate falls with age, so a
-# healthy 8-year-old at 85 was flagged bradycardic. A group this wide cannot be exact ("child" spans 3 to 18 years, where
-# the 1st centile falls from 70 to 43), so these favour not crying wolf; a finer age split is the real fix.
+# healthy 8-year-old at 85 was flagged bradycardic. The old single "child" row (3 to 18 years, where the 1st centile falls
+# from 70 to 43) was split on 2026-11-23 into preschool (3 to <6 y), school (6 to <12 y) and adolescent (12 y and up), each
+# placed by the same 1%-or-less rule over its own span. Two limits are held up by the faulted-channel placeholders (HR 110, RR 25
+# must sit inside every window, see clinical_settings): adolescent hr_high is 115 (Fleming 99th: 108; Goldstein: >110) and
+# adolescent rr_high is 26 (Fleming 99th: 23; Goldstein: >14). Both are LESS sensitive than the evidence; moving them needs the
+# placeholders moved too.
 PEDIATRIC_NORMS = {
     "neonatal": {"hr_high": 180, "hr_low": 90, "rr_high": 60, "o2_low": 90, "temp_high": 37.9},
     "infant":   {"hr_high": 175, "hr_low": 90, "rr_high": 60, "o2_low": 90, "temp_high": 39.0},
     "toddler":  {"hr_high": 150, "hr_low": 75, "rr_high": 45, "o2_low": 91, "temp_high": 39.0},
-    "child":    {"hr_high": 130, "hr_low": 50, "rr_high": 35, "o2_low": 92, "temp_high": 39.5},
+    "preschool": {"hr_high": 135, "hr_low": 65, "rr_high": 33, "o2_low": 92, "temp_high": 39.5},   # 3 to <6 years
+    "school":   {"hr_high": 125, "hr_low": 50, "rr_high": 27, "o2_low": 92, "temp_high": 39.5},    # 6 to <12 years
+    "adolescent": {"hr_high": 115, "hr_low": 45, "rr_high": 26, "o2_low": 92, "temp_high": 39.5},  # 12 years and up
     "generic":  {"hr_high": 160, "hr_low": 50, "rr_high": 40, "o2_low": 91, "temp_high": 39.0},
 }
 
@@ -411,23 +417,24 @@ def decision_fingerprint(data: Dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()
 
 
-#: Upper bounds, in months, of the neonatal, infant and toddler groups; at or beyond the last is "child".
-AGE_GROUP_UPPER_MONTHS = (3, 12, 36)
+#: The age groups, youngest first. (Until 2026-11-23 the last three were one group, "child", 3 to 18 years.)
+AGE_GROUP_NAMES = ("neonatal", "infant", "toddler", "preschool", "school", "adolescent")
+
+#: Upper bounds, in months, of every group but the last (3 months, 1 year, 3 years, 6 years, 12 years); at or beyond the
+#: last bound is "adolescent" (12 years up to the supported population's upper limit).
+AGE_GROUP_UPPER_MONTHS = (3, 12, 36, 72, 144)
 
 
-def get_age_group(age_months: Optional[int], bounds: Tuple[float, float, float] = AGE_GROUP_UPPER_MONTHS) -> str:
+def get_age_group(age_months: Optional[int], bounds: Tuple[float, ...] = AGE_GROUP_UPPER_MONTHS) -> str:
     """Map age in months to clinical age group. Returns 'generic' if age unknown.
 
-    `bounds` is the clinician-adjustable setting (see clinical_settings); the default is the original table."""
+    `bounds` is the clinician-adjustable setting (see clinical_settings); the default is the table above."""
     if age_months is None:
         return "generic"
-    if age_months < bounds[0]:
-        return "neonatal"
-    if age_months < bounds[1]:
-        return "infant"
-    if age_months < bounds[2]:
-        return "toddler"
-    return "child"
+    for name, upper in zip(AGE_GROUP_NAMES, bounds):
+        if age_months < upper:
+            return name
+    return AGE_GROUP_NAMES[-1]
 
 
 def regime_distribution(risk_score: float, critical_floor: float = REGIME_CRITICAL_FLOOR_DEFAULT) -> Dict[str, float]:
@@ -461,7 +468,7 @@ class RiskAdapters:
 
     @staticmethod
     def heuristic(vitals: VitalsSnapshot, norms: Optional[Mapping[str, Mapping[str, float]]] = None,
-                  age_bounds: Tuple[float, float, float] = AGE_GROUP_UPPER_MONTHS,
+                  age_bounds: Tuple[float, ...] = AGE_GROUP_UPPER_MONTHS,
                   critical_o2_below: float = 88.0, hypothermia_below: float = 35.0) -> RiskOutput:
         """FIX: confidence = data-completeness, not history_quality formula. Age-adjusted norms.
 
@@ -518,7 +525,7 @@ class RiskAdapters:
 
     @staticmethod
     def bayesian(vitals: VitalsSnapshot, norms: Optional[Mapping[str, Mapping[str, float]]] = None,
-                 age_bounds: Tuple[float, float, float] = AGE_GROUP_UPPER_MONTHS) -> RiskOutput:
+                 age_bounds: Tuple[float, ...] = AGE_GROUP_UPPER_MONTHS) -> RiskOutput:
         """FIX: age-group lookup (no hardcoded toddler norms), continuous sigmoid likelihood.
 
         `norms` and `age_bounds` are the clinician-adjustable settings; the defaults are the original tables."""

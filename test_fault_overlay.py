@@ -78,7 +78,7 @@ class _BrokenMask(PediatricCassette):
 class TestThePediatricMask(unittest.TestCase):
     """The cassette's answer: which value is inert, and which history goes with it."""
 
-    AGES = {"neonatal": 1, "infant": 6, "toddler": 24, "child": 72, "generic": None}
+    AGES = {"neonatal": 1, "infant": 6, "toddler": 24, "preschool": 48, "school": 96, "adolescent": 160, "generic": None}
 
     def _neutral(self, age_months, **ctx):
         context = dict(ctx)

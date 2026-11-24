@@ -542,13 +542,13 @@ class I3_ParameterSetVersionIsBoundIntoProvenance(unittest.TestCase):
         # a runtime mutation shifted the effective config while the version stamp
         # stayed byte-identical. It must be a deep copy, and drift must be visible.
         self.assertIsNot(PARAMETER_SET["pediatric_norms"], PEDIATRIC_NORMS)
-        original = PEDIATRIC_NORMS["child"]["hr_high"]
+        original = PEDIATRIC_NORMS["school"]["hr_high"]
         try:
-            PEDIATRIC_NORMS["child"]["hr_high"] = original + 99
-            self.assertNotEqual(PARAMETER_SET["pediatric_norms"]["child"]["hr_high"],
-                                PEDIATRIC_NORMS["child"]["hr_high"])
+            PEDIATRIC_NORMS["school"]["hr_high"] = original + 99
+            self.assertNotEqual(PARAMETER_SET["pediatric_norms"]["school"]["hr_high"],
+                                PEDIATRIC_NORMS["school"]["hr_high"])
         finally:
-            PEDIATRIC_NORMS["child"]["hr_high"] = original
+            PEDIATRIC_NORMS["school"]["hr_high"] = original
 
     def test_manifest_tracks_the_fault_overlay_constants(self):
         self.assertEqual(PARAMETER_SET["regime_risk_floor"], REGIME_RISK_FLOOR)

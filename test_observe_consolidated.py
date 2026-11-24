@@ -80,8 +80,13 @@ class TestAgeGroup(unittest.TestCase):
     def test_toddler(self):
         self.assertEqual(get_age_group(24), "toddler")
 
-    def test_child(self):
-        self.assertEqual(get_age_group(96), "child")
+    def test_preschool_school_and_adolescent(self):
+        self.assertEqual(get_age_group(36), "preschool")
+        self.assertEqual(get_age_group(71), "preschool")
+        self.assertEqual(get_age_group(72), "school")
+        self.assertEqual(get_age_group(143), "school")
+        self.assertEqual(get_age_group(144), "adolescent")
+        self.assertEqual(get_age_group(216), "adolescent")
 
     def test_missing_age_returns_generic(self):
         self.assertEqual(get_age_group(None), "generic")
@@ -114,7 +119,7 @@ class TestHeuristicAdapter(unittest.TestCase):
         self.assertEqual(out.confidence, 0.70)
 
     def test_age_adjusted_thresholds_differ(self):
-        # HR=145 is normal for neonatal (hr_high=160) but tachycardic for child (hr_high=130)
+        # HR=145 is normal for neonatal (hr_high=160) but tachycardic for school age (hr_high=125)
         neonatal = RiskAdapters.heuristic(make_vitals(heart_rate=145, context={"age_months": 1}))
         child = RiskAdapters.heuristic(make_vitals(heart_rate=145, context={"age_months": 96}))
         self.assertFalse(any("TACHYCARDIA" in r for r in neonatal.triggered_rules))

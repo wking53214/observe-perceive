@@ -15,7 +15,7 @@ Where the engine reports **stable and never pages**, that is the question: is th
 
 ## A. What the engine does today, and your call
 
-> **Changed 2026-11-23 (heart rate, respiratory rate and newborn fever limits re-derived from published references; see the comment above `PEDIATRIC_NORMS`).** Three rows moved, all from caution to stable. **S10** is the fix: a healthy 12-year-old at HR 70 was being flagged because the low heart-rate limit was set to 100 for every child. **S1 and S5 are a loss of sensitivity to look at**: both were caught before only because the old, very narrow heart-rate window made the Bayesian engine swing hard. S5 (a 5-year-old at HR 45) is still flagged as bradycardic by the heuristic; it simply no longer lifts the regime. The "child" group spans 3 to 18 years, which is too wide for one pair of limits; splitting it is the proper fix.
+> **Changed 2026-11-23 (heart rate, respiratory rate and newborn fever limits re-derived from published references; see the comment above `PEDIATRIC_NORMS`).** Three rows moved, all from caution to stable. **S10** is the fix: a healthy 12-year-old at HR 70 was being flagged because the low heart-rate limit was set to 100 for every child. **S1 and S5 are a loss of sensitivity to look at**: both were caught before only because the old, very narrow heart-rate window made the Bayesian engine swing hard. S5 (a 5-year-old at HR 45) is still flagged as bradycardic by the heuristic; it simply no longer lifts the regime. The old single "child" group (3 to 18 years) was too wide for one pair of limits, so it was split into preschool (3 to under 6 years), school (6 to under 12) and adolescent (12 up); no review-sheet row moved because of the split.
 
 Mark one: **F** fine as it is, **W** should page at WARNING, **C** should page at CRITICAL, **X** something else (say what).
 If you mark W, C or X, give the number or rule you want in the last column; the settings that exist today are listed in section B.
@@ -38,7 +38,7 @@ If you mark W, C or X, give the number or rule you want in the last column; the 
 
 What these rows show about the design, in one paragraph: findings add small amounts to a score, the engines are averaged by
 confidence, and so a single abnormal channel (S4 to S9) does not reach WARNING unless it is SpO2 below 88 or a named syndrome. S10
-is the opposite problem: one "child" row of norms covers ages 3 to 18, so a healthy adolescent at HR 70 is reported at CAUTION. S11 is
+is the opposite problem: one "child" row of norms used to cover ages 3 to 18, so a healthy adolescent at HR 70 was reported at CAUTION; the adolescent row (HR 45 to 115) now treats it as stable. S11 is
 by design (the system is pediatric; adults are reported at WARNING with a finding, which is an event on the record; a person looks only if the notification setting reaches WARNING). S12 pages at once because
 the default confirmation window is 1.
 
@@ -49,8 +49,8 @@ All of these are `ClinicalSettings` (a JSON file or mapping; see `CLINICIAN_SETT
 
 | You want | Setting that exists today |
 |---|---|
-| A different norm for an age group (heart rate, respiratory rate, SpO2 floor, fever line) | `norms.<group>.hr_high / hr_low / rr_high / o2_low / temp_high` for neonatal, infant, toddler, child, generic |
-| Different age groups (for example a row for 6 to 12 years, or for adolescents) | `age_group_upper_months` moves the three boundaries (3, 12, 36). **A new row cannot be added by a setting**; that needs a code change and your numbers |
+| A different norm for an age group (heart rate, respiratory rate, SpO2 floor, fever line) | `norms.<group>.hr_high / hr_low / rr_high / o2_low / temp_high` for neonatal, infant, toddler, preschool, school, adolescent, generic (the old `child` key was removed 2026-11-23 and is refused with a message saying so) |
+| Different age groups | `age_group_upper_months` moves the five boundaries (3, 12, 36, 72, 144 months). **A new row cannot be added by a setting**; that needs a code change and your numbers |
 | A different SpO2 line for the hard rule, or a different hypothermia line | `critical_o2_below` (88), `hypothermia_below` (35) |
 | A hard rule to wait for a repeat, or to be corroborated by RR or temperature | `hard_rule_confirm_window` (1 today), `hard_rule_corroboration`, `hard_rule_corroboration_margin`, `heart_rate_corroborates` |
 | A different upper age for the supported population | `max_age_months` (216), `outside_population` |
@@ -64,8 +64,8 @@ write in the last column, behind a setting, and the case is pinned in `test_sing
 
 | Rule | Where it lives | Today | Accept / change to |
 |---|---|---|---|
-| The norms table, five rows | `PEDIATRIC_NORMS` | neonatal HR 90 to 180, RR < 60, SpO2 >= 90, T < 38.0; infant HR 90 to 175, RR < 60, SpO2 >= 90, T <= 39.0; toddler HR 75 to 150, RR < 45, SpO2 >= 91, T <= 39.0; child HR 50 to 130, RR < 35, SpO2 >= 92, T <= 39.5 (heart rate, respiratory rate and the newborn fever line re-derived 2026-11-23 as provisional proxies, no clinician sign-off; see the comment above `PEDIATRIC_NORMS`) | |
-| Age boundaries | `age_group_upper_months` | 3, 12, 36 months | |
+| The norms table, seven rows | `PEDIATRIC_NORMS` | neonatal HR 90 to 180, RR < 60, SpO2 >= 90, T < 38.0; infant HR 90 to 175, RR < 60, SpO2 >= 90, T <= 39.0; toddler HR 75 to 150, RR < 45, SpO2 >= 91, T <= 39.0; preschool (3 to <6 y) HR 65 to 135, RR < 33, SpO2 >= 92, T <= 39.5; school (6 to <12 y) HR 50 to 125, RR < 27, SpO2 >= 92, T <= 39.5; adolescent (12 y up) HR 45 to 115, RR < 26, SpO2 >= 92, T <= 39.5 (heart rate, respiratory rate and the newborn fever line re-derived 2026-11-23 as provisional proxies, no clinician sign-off; see the comment above `PEDIATRIC_NORMS`) | |
+| Age boundaries | `age_group_upper_months` | 3, 12, 36, 72, 144 months | |
 | SpO2 hard line; hypothermia line | `critical_o2_below`, `hypothermia_below` | 88; 35.0 (hypothermia alone scores below a hard rule, so it does not page by itself: S7) | |
 | Named syndromes (septic shock, respiratory distress, hypovolemic shock) | `RiskAdapters.behavioral_vaccine` | septic shock: SpO2 < 92 and HR > 140 and RR > 35 and T > 38.5; respiratory distress: SpO2 < 90 and RR > 45; hypovolemic: HR > 150 and SpO2 < 88. **Marked "pending pediatrician sign-off" in the code** | |
 | How soon a single hard-rule reading holds WARNING | `hard_rule_confirm_window` | at once (1) | |

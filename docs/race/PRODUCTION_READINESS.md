@@ -46,7 +46,7 @@ Nothing is above 2 and most clinical rows are 0 or 1. A reader should not averag
 5. Log redaction and a pseudonym in log lines (C12); pseudonym length and collision check; HMAC construction. **Partly done (PR 18):** log lines carry a keyed tag; the 48-bit export pseudonym is unchanged.
 6. Fixtures for the nine probe rows and the three missed scenarios, marked as what they are. **In place:** `test_single_channel_behaviour.py` and `test_detection_record.py` (INSPECTED, not re-run).
 
-**Phase 2: clinical.** The validation plan (`CLINICAL_SAFETY_AND_VALIDATION.md` section 2): event definitions, de-identified replay, silent mode, sign-off per register row. Age bands 3 to 18 as an output of this phase, not a guess before it.
+**Phase 2: clinical.** The validation plan (`CLINICAL_SAFETY_AND_VALIDATION.md` section 2): event definitions, de-identified replay, silent mode, sign-off per register row. Age bands 3 to 18: provisional preschool, school and adolescent rows exist (2026-11-23); sign-off is an output of this phase.
 
 **Phase 3: operate.** Pilot on one unit with a named responder group; measure burden and acknowledgement; adjust settings through change control; runbooks and training; a regulatory determination before any claim of clinical use.
 

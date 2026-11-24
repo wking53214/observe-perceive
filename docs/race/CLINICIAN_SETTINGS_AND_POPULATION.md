@@ -18,7 +18,7 @@ changed later without touching code.
 Write only the values you want to change, as a JSON file, a mapping or a `ClinicalSettings`, and give it to the system:
 
 ```json
-{ "max_age_months": 252, "critical_o2_below": 90, "norms": { "child": { "hr_high": 125 } } }
+{ "max_age_months": 252, "critical_o2_below": 90, "norms": { "school": { "hr_high": 120 } } }
 ```
 
 ```python
@@ -44,8 +44,8 @@ system = build_single_hospital_system(alert_human=page_charge_nurse, settings="u
 | `max_age_months` | 216 (18 y) | Upper bound of the supported pediatric population. `null` removes it. **New default.** | higher, or `null` |
 | `outside_population` | `alert` | `alert`: an older patient is still assessed on every channel, never scored lower, but reported at WARNING at least with a named finding. `assess_anyway`: no finding. **New default behaviour.** | `assess_anyway` |
 | `require_age` | false | true: a reading with no usable age is a finding instead of "generic norms". Independent of `outside_population` | n/a |
-| `age_group_upper_months` | 3, 12, 36 | Ends of the neonatal, infant and toddler groups | any change is listed: which way it goes depends on the child |
-| `norms.<group>.hr_high / hr_low / rr_high / o2_low / temp_high` | pediatric table | Per-age-group reference values; name only the ones you change. Groups: neonatal, infant, toddler, child, generic | hr_high, rr_high, temp_high higher; hr_low, o2_low lower |
+| `age_group_upper_months` | 3, 12, 36, 72, 144 | Ends of the neonatal, infant, toddler, preschool and school groups (adolescent runs from the last bound up) | any change is listed: which way it goes depends on the child |
+| `norms.<group>.hr_high / hr_low / rr_high / o2_low / temp_high` | pediatric table | Per-age-group reference values; name only the ones you change. Groups: neonatal, infant, toddler, preschool, school, adolescent, generic | hr_high, rr_high, temp_high higher; hr_low, o2_low lower |
 | `critical_o2_below` | 88 | SpO2 below this is the hard rule | lower |
 | `hypothermia_below` | 35.0 | Temperature below this is hypothermia | lower |
 | `hard_rule_confirm_window` | **1** (was 3; decision D1) | A hard rule that fires again within this many of the patient's readings holds WARNING. 1 holds WARNING on a lone hard-rule reading at once, the strongest setting | any value above 1 |
@@ -88,8 +88,8 @@ person at WARNING with the finding, rather than reassured or falsely alarmed by 
 
 - **The child norms still false-flag older children.** A healthy 12 year old at heart rate 70 is still `BRADYCARDIA: 70 <
   100`, because one "child" row (heart rate 100 to 130) covers 3 to 18 years. The floor does not touch this; the clinician
-  can now change it (`norms.child.hr_low`, or move `age_group_upper_months`). **PROPOSED, not done:** add school-age and
-  adolescent rows. That is clinical content and needs sign-off, so no number was invented here.
+  can change it (`norms.school.hr_low`, or move `age_group_upper_months`). **Done 2026-11-23:** the "child" row was split into
+  preschool, school and adolescent rows, with provisional limits from published references (see the comment above `PEDIATRIC_NORMS`); still needs clinical sign-off.
 - **Not yet settings (still constants in source):** the syndrome thresholds (septic shock, respiratory distress,
   hypovolemic shock), the engine-selection gate (`engine_gate` is a choice of two, not values), fusion weights and
   risk-to-regime bands, dwell count and lock seconds, the physical-plausibility bounds on vitals, and the heuristic's own

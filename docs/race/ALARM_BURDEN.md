@@ -55,7 +55,7 @@ The twelve review-sheet cases, three identical readings each, one patient per ca
 12 patients, 36 readings, 12 patient-days, 0 unassessable readings
 escalation events: 2 (16.67 per 100 patient-days)
   that would reach a person: 0 (0.0 per 100 patient-days) {}
-  by regime {'warning': 2}; by kind {'new_escalation': 2}; by age group {'child': 2}
+  by regime {'warning': 2}; by kind {'new_escalation': 2}; by age group {'preschool': 2}
   on a patient's first reading: 2; repeats within 1 hour: 0
   most frequent triggered rules in events: {'BASE_RISK': 2, 'OUTSIDE_SUPPORTED_POPULATION': 1, 'BRADYCARDIA': 1, 'CLINICAL_SAFETY_BYPASS': 1, 'CRITICAL_O2': 1}
 ```

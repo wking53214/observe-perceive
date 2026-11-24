@@ -104,7 +104,7 @@ class ClinicalSettings:
     outside_population: str = "alert"            # "alert" | "assess_anyway"
     require_age: bool = False                    # True: a reading with no age is a finding, not "generic norms"
     # --- age groups and norms ---
-    age_group_upper_months: Tuple[float, float, float] = AGE_GROUP_UPPER_MONTHS
+    age_group_upper_months: Tuple[float, ...] = AGE_GROUP_UPPER_MONTHS
     norms: Dict[str, Dict[str, float]] = field(default_factory=_default_norms)
     # --- heuristic hard-rule triggers ---
     critical_o2_below: float = 88.0
@@ -150,15 +150,18 @@ class ClinicalSettings:
         if not isinstance(self.require_age, bool):
             raise SettingsError("require_age must be true or false")
         b = [_num(x, "age_group_upper_months") for x in self.age_group_upper_months]
-        if len(b) != 3 or b[0] <= 0 or not b[0] < b[1] < b[2]:
-            raise SettingsError("age_group_upper_months must be three increasing positive numbers")
+        if len(b) != len(AGE_GROUP_UPPER_MONTHS) or b[0] <= 0 or any(not x < y for x, y in zip(b, b[1:])):
+            raise SettingsError(f"age_group_upper_months must be {len(AGE_GROUP_UPPER_MONTHS)} increasing positive numbers "
+                                "(the groups are neonatal, infant, toddler, preschool, school, adolescent; before 2026-11-23 "
+                                "there were three numbers and one 'child' group)")
         missing = sorted(set(PEDIATRIC_NORMS) - set(self.norms))
         if missing:
             raise SettingsError(f"norms must give every age group; missing {missing} "
                                 "(from_mapping fills the groups you do not name)")
         for group, row in self.norms.items():
             if group not in PEDIATRIC_NORMS:
-                raise SettingsError(f"unknown age group {group!r} in norms; known: {sorted(PEDIATRIC_NORMS)}")
+                hint = " ('child' was split into preschool, school and adolescent on 2026-11-23)" if group == "child" else ""
+                raise SettingsError(f"unknown age group {group!r} in norms; known: {sorted(PEDIATRIC_NORMS)}{hint}")
             if not isinstance(row, Mapping) or set(row) != set(_NORM_KEYS):
                 raise SettingsError(f"norms[{group!r}] needs exactly {list(_NORM_KEYS)}")
             v = {k: _num(row[k], f"norms[{group!r}][{k!r}]") for k in _NORM_KEYS}
@@ -208,7 +211,9 @@ class ClinicalSettings:
                 raise SettingsError("norms must be a mapping of age group to a mapping of the values to change")
             for group, row in dict(given).items():
                 if group not in merged:
-                    raise SettingsError(f"unknown age group {group!r} in norms; known: {sorted(merged)}")
+                    raise SettingsError(f"unknown age group {group!r} in norms; known: {sorted(merged)}"
+                                        + (" ('child' was split into preschool, school and adolescent on 2026-11-23)"
+                                           if group == "child" else ""))
                 bad = sorted(set(row) - set(_NORM_KEYS))
                 if bad:
                     raise SettingsError(f"unknown norm key(s) {bad} for {group!r}; known: {list(_NORM_KEYS)}")
