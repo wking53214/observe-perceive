@@ -103,6 +103,7 @@ Sibling checkout first, installed package second; tests skip when neither is pre
 - Does **not** provide KMS/HSM as a service (optional signer if you pass a key).
 - Does **not** ship a deployable SaaS. Library + demo (`demo_why.py`).
 - Does **not** claim FDA-cleared clinical detection. `fda_510k_checklist.py` is a checklist, not a submission.
+- Does **not** establish HIPAA, FDA, SOX or GDPR compliance. `compliance_exporters.py` reformats ledger entries into layouts modelled on those regimes; its timestamp reduction (date and hour kept) is **not** HIPAA Safe Harbor, and `overall_compliant` means only that both audit chains verify. No privacy, regulatory or legal review has happened, and the pediatric thresholds are provisional, not clinically validated.
 - Does **not** perform post-execution agent routing.
 
 ## 4. Brutally Honest Current Status & Gaps

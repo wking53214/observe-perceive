@@ -5,7 +5,11 @@ FDA 510(k) Pre-Submission Readiness Checklist
 This checklist maps the unified OBSERVE + PERCEIVE system to FDA expectations for
 pediatric clinical decision-support software (510(k) substantial equivalence pathway).
 
-Use this before FDA meetings or regulatory filings. Each item maps to:
+NOT A STATEMENT OF READINESS. A ready mark below means only that evidence exists in this repository
+and a test runs; the software has no clinical validation study, no quality-management system and no
+regulatory review, and the pediatric thresholds are provisional proxies. Treat it as a gap list.
+
+Use this to prepare for FDA meetings or regulatory filings, not as evidence in them. Each item maps to:
   - Regulatory requirement (from FDA guidance)
   - System implementation
   - Evidence location (in this codebase)
