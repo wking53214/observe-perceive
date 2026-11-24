@@ -2,12 +2,16 @@
 Compliance Exporters
 ====================
 
-Export the OBSERVE and PERCEIVE audit trails into regulator-ready formats:
+Render the OBSERVE and PERCEIVE audit trails in layouts modelled on four regimes:
 
-    HIPAA  -> de-identified clinical event log (no PII, date+hour only)
-    FDA    -> 510(k)-style validation report (deterministic, traceable decisions)
+    HIPAA  -> pseudonymized clinical event log (date+hour kept; see the caveat on deidentify_timestamp)
+    FDA    -> 510(k)-style decision-traceability report (deterministic, traceable decisions)
     SOX    -> governance decision log (who/what/when/result, tamper-evident)
     GDPR   -> data-processing transparency record
+
+NONE OF THESE ESTABLISHES COMPLIANCE, CLEARANCE OR VALIDATION. They reformat decisions already in the
+ledger. Nothing here has been reviewed by a privacy officer, a regulatory affairs professional or a
+lawyer; the FDA layout is not a submission and the software has not been clinically validated.
 
 All exporters operate on the in-memory audit ledgers and never mutate them.
 A combined compliance summary stitches both chains into one attestation.
@@ -32,8 +36,13 @@ from typing import Dict, List, Any, Optional
 
 def deidentify_timestamp(iso_ts: str) -> str:
     """
-    HIPAA Safe Harbor: reduce timestamp precision to date + hour only.
-    Strips minutes/seconds (which can act as quasi-identifiers in low-volume units).
+    Reduce timestamp precision to date + hour only, which strips minutes/seconds (they can act as
+    quasi-identifiers in low-volume units).
+
+    THIS IS NOT HIPAA SAFE HARBOR. Safe Harbor (45 CFR 164.514(b)(2)) removes every date element
+    more specific than the year; this keeps the full date and the hour. An export built on it has not
+    been de-identified in the HIPAA sense and must not be described that way without an expert
+    determination or a Safe Harbor-conformant change.
     """
     try:
         dt = datetime.fromisoformat(iso_ts)
@@ -80,7 +89,9 @@ def pseudonymize_patient_id(patient_id: str, salt: Optional[str] = None) -> str:
 # ============================================================================
 
 class HIPAAExporter:
-    """De-identified clinical event log from the OBSERVE audit ledger."""
+    """Pseudonymized clinical event log from the OBSERVE audit ledger.
+
+    Not HIPAA de-identified (see deidentify_timestamp) and not a statement of HIPAA compliance."""
 
     @staticmethod
     def export_csv(observe_entries: List[Dict[str, Any]], salt: Optional[str] = None) -> str:
@@ -118,7 +129,9 @@ class HIPAAExporter:
 # ============================================================================
 
 class FDAExporter:
-    """510(k)-style validation report emphasizing determinism + traceability."""
+    """510(k)-style layout of a decision-traceability report (determinism + traceability).
+
+    Not a 510(k) submission, not a validation report, and not evidence of FDA readiness."""
 
     @staticmethod
     def export_report(
@@ -139,19 +152,22 @@ class FDAExporter:
                 engine_usage[eng] = engine_usage.get(eng, 0) + 1
 
         lines = [
-            "FDA 510(k) SOFTWARE VALIDATION REPORT",
+            "DECISION-TRACEABILITY REPORT (510(k)-style layout)",
             "=" * 50,
+            "NOTICE: not an FDA submission and not a validation. The software has not been",
+            "clinically validated, cleared or reviewed by a regulatory professional.",
+            "",
             "Software: OBSERVE Clinical AI",
             f"Version: {software_version}",
             f"Report generated: {datetime.now(timezone.utc).isoformat()}",
             "",
-            "DEVICE DESCRIPTION",
+            "SYSTEM DESCRIPTION",
             "-" * 50,
             "Pediatric physiological early-warning system. Multi-engine risk",
             "assessment with deterministic fusion and cryptographically chained",
             "audit trail. Decisions are reproducible from recorded inputs.",
             "",
-            "VALIDATION SUMMARY",
+            "RECORD SUMMARY",
             "-" * 50,
             f"Total assessments recorded: {total}",
             f"Escalations triggered: {escalations}",
@@ -299,7 +315,10 @@ class ComplianceSummary:
                 "total_decisions": len(perceive_entries),
                 "chain_valid": perceive_chain_valid,
             },
+            # Despite its name this means only that both audit chains verify. It is not a compliance finding.
             "overall_compliant": observe_chain_valid and perceive_chain_valid,
+            "notice": "overall_compliant means only that both audit chains verify. These exports do not "
+                      "establish HIPAA, FDA, SOX or GDPR compliance.",
             "frameworks_supported": ["HIPAA", "FDA 510(k)", "SOX", "GDPR"],
         }
 
